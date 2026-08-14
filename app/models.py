@@ -6,41 +6,120 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+class Tenant(db.Model):
+    __tablename__ = "tenants"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(220), nullable=False)
+    slug = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    settings = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class User(db.Model):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(180), nullable=False)
+    email = db.Column(db.String(320), nullable=False)
+    normalized_email = db.Column(db.String(320), nullable=False)
+    password_hash = db.Column(db.String(500), nullable=False)
+    role = db.Column(db.String(40), nullable=False, default="ADMIN", index=True)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    last_login_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    tenant = db.relationship("Tenant")
+    __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_email", name="uq_users_tenant_email"),)
+
+
 class Company(db.Model):
     __tablename__ = "companies"
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(220), unique=True, nullable=False, index=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name = db.Column(db.String(220), nullable=False, index=True)
+    canonical_name = db.Column(db.String(220), nullable=False)
+    normalized_name = db.Column(db.String(220), nullable=False, index=True)
     sector = db.Column(db.String(120))
     origin_country = db.Column(db.String(80))
     website = db.Column(db.String(500))
+    domain = db.Column(db.String(255), index=True)
+    city = db.Column(db.String(120))
+    department = db.Column(db.String(120))
+    country = db.Column(db.String(80), nullable=False, default="Paraguay", index=True)
+    description = db.Column(db.Text)
     address = db.Column(db.Text)
     phone = db.Column(db.String(120))
+    phone_business = db.Column(db.String(120))
     whatsapp = db.Column(db.String(120))
     email = db.Column(db.String(240))
+    email_business = db.Column(db.String(240))
     linkedin_url = db.Column(db.String(700))
+    registration_id = db.Column(db.String(120), index=True)
+    identity_confidence = db.Column(db.Integer, nullable=False, default=50)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    deleted_at = db.Column(db.DateTime(timezone=True))
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     projects = db.relationship("Project", back_populates="company", cascade="all, delete-orphan")
+    aliases = db.relationship("CompanyAlias", back_populates="company", cascade="all, delete-orphan")
+    tenant = db.relationship("Tenant")
+    __table_args__ = (db.CheckConstraint("identity_confidence BETWEEN 0 AND 100", name="ck_company_identity_confidence"),)
+
+
+class CompanyAlias(db.Model):
+    __tablename__ = "company_aliases"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    alias = db.Column(db.String(220), nullable=False)
+    normalized_alias = db.Column(db.String(220), nullable=False, index=True)
+    confidence = db.Column(db.Integer, nullable=False, default=100)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    company = db.relationship("Company", back_populates="aliases")
+    __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_alias", "company_id", name="uq_company_alias"),)
 
 
 class Project(db.Model):
     __tablename__ = "projects"
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     name = db.Column(db.String(300), nullable=False)
+    normalized_name = db.Column(db.String(300), nullable=False, index=True)
+    project_type = db.Column(db.String(100), index=True)
     city = db.Column(db.String(120), nullable=False)
     department = db.Column(db.String(120), nullable=False)
+    country = db.Column(db.String(80), nullable=False, default="Paraguay", index=True)
     stage = db.Column(db.String(120))
     investment = db.Column(db.String(120))
+    investment_amount = db.Column(db.Numeric(18, 2))
+    investment_currency = db.Column(db.String(3), default="USD")
+    area_m2 = db.Column(db.Numeric(14, 2))
+    description = db.Column(db.Text)
+    announced_at = db.Column(db.DateTime(timezone=True))
+    started_at = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    identity_key = db.Column(db.String(64), index=True)
+    deleted_at = db.Column(db.DateTime(timezone=True))
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     company = db.relationship("Company", back_populates="projects")
     opportunities = db.relationship("Opportunity", back_populates="project", cascade="all, delete-orphan")
+    signals = db.relationship("Signal", back_populates="project")
+    evidences = db.relationship("Evidence", back_populates="project")
+    tenant = db.relationship("Tenant")
+    __table_args__ = (
+        db.CheckConstraint("investment_amount IS NULL OR investment_amount >= 0", name="ck_project_investment_amount"),
+        db.CheckConstraint("area_m2 IS NULL OR area_m2 >= 0", name="ck_project_area_m2"),
+    )
 
 
 class Opportunity(db.Model):
     __tablename__ = "opportunities"
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     event_type = db.Column(db.String(80), nullable=False, index=True)
     score = db.Column(db.Integer, nullable=False, index=True)
@@ -55,6 +134,13 @@ class Opportunity(db.Model):
     owner_name = db.Column(db.String(160), nullable=False, default="Equipo comercial", index=True)
     estimated_value = db.Column(db.Float, nullable=False, default=0)
     probability = db.Column(db.Integer, nullable=False, default=20)
+    buying_stage = db.Column(db.String(40), nullable=False, default="UNKNOWN", index=True)
+    icp_fit_score = db.Column(db.Integer, nullable=False, default=0)
+    intent_score = db.Column(db.Integer, nullable=False, default=0)
+    data_confidence = db.Column(db.Integer, nullable=False, default=0)
+    potential_deal_value = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    expected_revenue = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    score_version = db.Column(db.String(60), nullable=False, default="legacy-v1")
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     project = db.relationship("Project", back_populates="opportunities")
@@ -62,6 +148,17 @@ class Opportunity(db.Model):
     tasks = db.relationship("SalesTask", back_populates="opportunity", cascade="all, delete-orphan")
     visits = db.relationship("VisitRecord", back_populates="opportunity", cascade="all, delete-orphan")
     proposals = db.relationship("Proposal", back_populates="opportunity", cascade="all, delete-orphan")
+    scores = db.relationship("OpportunityScore", back_populates="opportunity", cascade="all, delete-orphan")
+    evidence_links = db.relationship("OpportunityEvidence", back_populates="opportunity", cascade="all, delete-orphan")
+    product_matches = db.relationship("ProductMatch", back_populates="opportunity", cascade="all, delete-orphan")
+    tenant = db.relationship("Tenant")
+    __table_args__ = (
+        db.CheckConstraint("score BETWEEN 0 AND 100", name="ck_opportunity_score"),
+        db.CheckConstraint("probability BETWEEN 0 AND 100", name="ck_opportunity_probability"),
+        db.CheckConstraint("icp_fit_score BETWEEN 0 AND 100", name="ck_opportunity_icp_fit"),
+        db.CheckConstraint("intent_score BETWEEN 0 AND 100", name="ck_opportunity_intent"),
+        db.CheckConstraint("data_confidence BETWEEN 0 AND 100", name="ck_opportunity_data_confidence"),
+    )
 
     def to_dict(self):
         sector = self.project.company.sector or "No informado"
@@ -86,6 +183,10 @@ class Opportunity(db.Model):
             "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
             "owner": self.owner_name, "estimatedValue": self.estimated_value,
             "probability": self.probability,
+            "buyingStage": self.buying_stage, "icpFit": self.icp_fit_score,
+            "intent": self.intent_score, "dataConfidence": self.data_confidence,
+            "potentialDealValue": float(self.potential_deal_value or 0),
+            "expectedRevenue": float(self.expected_revenue or 0), "scoreVersion": self.score_version,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }
 
@@ -98,6 +199,182 @@ class TimelineEvent(db.Model):
     description = db.Column(db.Text, nullable=False)
     occurred_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     opportunity = db.relationship("Opportunity", back_populates="timeline")
+
+
+class Source(db.Model):
+    __tablename__ = "sources"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(220), nullable=False)
+    source_type = db.Column(db.String(50), nullable=False, default="PUBLIC_WEB", index=True)
+    base_url = db.Column(db.String(1200))
+    domain = db.Column(db.String(255), index=True)
+    reliability = db.Column(db.Integer, nullable=False, default=50)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    documents = db.relationship("SourceDocument", back_populates="source", cascade="all, delete-orphan")
+    __table_args__ = (
+        db.UniqueConstraint("tenant_id", "name", "domain", name="uq_source_identity"),
+        db.CheckConstraint("reliability BETWEEN 0 AND 100", name="ck_source_reliability"),
+    )
+
+
+class SourceDocument(db.Model):
+    __tablename__ = "source_documents"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = db.Column(db.Integer, db.ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    url = db.Column(db.String(1600), nullable=False)
+    canonical_url = db.Column(db.String(1600), nullable=False)
+    url_hash = db.Column(db.String(64), nullable=False)
+    content_hash = db.Column(db.String(64), index=True)
+    title = db.Column(db.String(700))
+    excerpt = db.Column(db.Text)
+    published_at = db.Column(db.DateTime(timezone=True), index=True)
+    fetched_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    language = db.Column(db.String(10))
+    confidence = db.Column(db.Integer, nullable=False, default=50)
+    document_metadata = db.Column(db.JSON, nullable=False, default=dict)
+    source = db.relationship("Source", back_populates="documents")
+    __table_args__ = (db.UniqueConstraint("tenant_id", "url_hash", name="uq_source_document_url"),)
+
+
+class Signal(db.Model):
+    __tablename__ = "signals"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="SET NULL"), index=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="SET NULL"), index=True)
+    source_document_id = db.Column(db.Integer, db.ForeignKey("source_documents.id", ondelete="SET NULL"), index=True)
+    signal_type = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(700), nullable=False)
+    summary = db.Column(db.Text, nullable=False)
+    city = db.Column(db.String(120))
+    department = db.Column(db.String(120))
+    country = db.Column(db.String(80), nullable=False, default="Paraguay", index=True)
+    confidence = db.Column(db.Integer, nullable=False, default=50, index=True)
+    freshness = db.Column(db.Integer, nullable=False, default=100)
+    relevance = db.Column(db.Integer, nullable=False, default=50)
+    fingerprint = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(40), nullable=False, default="DETECTED", index=True)
+    detected_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    company = db.relationship("Company")
+    project = db.relationship("Project", back_populates="signals")
+    source_document = db.relationship("SourceDocument")
+    evidences = db.relationship("Evidence", back_populates="signal")
+    __table_args__ = (
+        db.UniqueConstraint("tenant_id", "fingerprint", name="uq_signal_fingerprint"),
+        db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_signal_confidence"),
+        db.CheckConstraint("freshness BETWEEN 0 AND 100", name="ck_signal_freshness"),
+        db.CheckConstraint("relevance BETWEEN 0 AND 100", name="ck_signal_relevance"),
+    )
+
+
+class Evidence(db.Model):
+    __tablename__ = "evidences"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="SET NULL"), index=True)
+    signal_id = db.Column(db.Integer, db.ForeignKey("signals.id", ondelete="SET NULL"), index=True)
+    source_document_id = db.Column(db.Integer, db.ForeignKey("source_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    evidence_type = db.Column(db.String(50), nullable=False, default="SOURCE_CLAIM", index=True)
+    classification = db.Column(db.String(20), nullable=False, default="FACT", index=True)
+    claim = db.Column(db.Text, nullable=False)
+    excerpt = db.Column(db.Text)
+    confidence = db.Column(db.Integer, nullable=False, default=50)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    project = db.relationship("Project", back_populates="evidences")
+    signal = db.relationship("Signal", back_populates="evidences")
+    source_document = db.relationship("SourceDocument")
+    opportunity_links = db.relationship("OpportunityEvidence", back_populates="evidence", cascade="all, delete-orphan")
+    __table_args__ = (
+        db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_evidence_confidence"),
+        db.CheckConstraint("classification IN ('FACT','INFERENCE','PREDICTION')", name="ck_evidence_classification"),
+    )
+
+
+class OpportunityEvidence(db.Model):
+    __tablename__ = "opportunity_evidences"
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), primary_key=True)
+    evidence_id = db.Column(db.Integer, db.ForeignKey("evidences.id", ondelete="CASCADE"), primary_key=True)
+    relevance = db.Column(db.Integer, nullable=False, default=100)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    opportunity = db.relationship("Opportunity", back_populates="evidence_links")
+    evidence = db.relationship("Evidence", back_populates="opportunity_links")
+
+
+class OpportunityScore(db.Model):
+    __tablename__ = "opportunity_scores"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    total_score = db.Column(db.Integer, nullable=False, index=True)
+    model_version = db.Column(db.String(60), nullable=False, index=True)
+    is_current = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    calculated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    opportunity = db.relationship("Opportunity", back_populates="scores")
+    factors = db.relationship("ScoreFactor", back_populates="score", cascade="all, delete-orphan")
+    __table_args__ = (db.CheckConstraint("total_score BETWEEN 0 AND 100", name="ck_opportunity_score_total"),)
+
+
+class ScoreFactor(db.Model):
+    __tablename__ = "score_factors"
+    id = db.Column(db.Integer, primary_key=True)
+    score_id = db.Column(db.Integer, db.ForeignKey("opportunity_scores.id", ondelete="CASCADE"), nullable=False, index=True)
+    factor_code = db.Column(db.String(60), nullable=False, index=True)
+    raw_value = db.Column(db.Numeric(8, 3), nullable=False)
+    weight = db.Column(db.Numeric(8, 5), nullable=False)
+    points = db.Column(db.Numeric(8, 3), nullable=False)
+    explanation = db.Column(db.Text, nullable=False)
+    score = db.relationship("OpportunityScore", back_populates="factors")
+    __table_args__ = (db.UniqueConstraint("score_id", "factor_code", name="uq_score_factor"),)
+
+
+class Product(db.Model):
+    __tablename__ = "products"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(220), nullable=False)
+    normalized_name = db.Column(db.String(220), nullable=False, index=True)
+    category = db.Column(db.String(120), index=True)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_name", name="uq_product_name"),)
+
+
+class ProductMatch(db.Model):
+    __tablename__ = "product_matches"
+    id = db.Column(db.Integer, primary_key=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    evidence_id = db.Column(db.Integer, db.ForeignKey("evidences.id", ondelete="SET NULL"), index=True)
+    fit_score = db.Column(db.Integer, nullable=False)
+    confidence = db.Column(db.Integer, nullable=False, default=50)
+    rationale = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    opportunity = db.relationship("Opportunity", back_populates="product_matches")
+    product = db.relationship("Product")
+    evidence = db.relationship("Evidence")
+    __table_args__ = (
+        db.UniqueConstraint("opportunity_id", "product_id", name="uq_opportunity_product"),
+        db.CheckConstraint("fit_score BETWEEN 0 AND 100", name="ck_product_match_fit"),
+        db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_product_match_confidence"),
+    )
+
+
+class AuditLog(db.Model):
+    __tablename__ = "audit_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    action = db.Column(db.String(100), nullable=False, index=True)
+    entity_type = db.Column(db.String(80), nullable=False, index=True)
+    entity_id = db.Column(db.String(80))
+    details = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
 
 class SalesTask(db.Model):
@@ -150,7 +427,8 @@ class Proposal(db.Model):
 class ProspectSignal(db.Model):
     __tablename__ = "prospect_signals"
     id = db.Column(db.Integer, primary_key=True)
-    fingerprint = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    fingerprint = db.Column(db.String(64), nullable=False, index=True)
     company_name = db.Column(db.String(220), nullable=False, index=True)
     title = db.Column(db.String(500), nullable=False)
     summary = db.Column(db.Text, nullable=False)
@@ -171,6 +449,7 @@ class ProspectSignal(db.Model):
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     opportunity = db.relationship("Opportunity")
+    __table_args__ = (db.UniqueConstraint("tenant_id", "fingerprint", name="uq_prospect_signal_tenant_fingerprint"),)
 
     def to_dict(self):
         return {
@@ -187,6 +466,7 @@ class ProspectSignal(db.Model):
 class CollectorRun(db.Model):
     __tablename__ = "collector_runs"
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     started_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
     finished_at = db.Column(db.DateTime(timezone=True))
     status = db.Column(db.String(30), nullable=False, default="RUNNING", index=True)
@@ -207,6 +487,7 @@ class CollectorRun(db.Model):
 class WebsiteAnalysis(db.Model):
     __tablename__ = "website_analyses"
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     url = db.Column(db.String(1200), nullable=False)
     company_name = db.Column(db.String(240), nullable=False, default="Empresa por validar")
     sector = db.Column(db.String(160), nullable=False, default="Por validar")
