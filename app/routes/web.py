@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template
 from sqlalchemy.exc import SQLAlchemyError
-from ..models import CollectorRun, Opportunity, ProspectSignal
+from ..models import CollectorRun, Opportunity, ProspectSignal, WebsiteAnalysis
 
 web_bp = Blueprint("web", __name__)
 
@@ -24,5 +24,9 @@ def index():
         prospect_total = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").count()
     except SQLAlchemyError:
         prospect_signals, last_collector_run, prospect_total = [], None, 0
+    try:
+        website_analyses = WebsiteAnalysis.query.order_by(WebsiteAnalysis.created_at.desc()).limit(12).all()
+    except SQLAlchemyError:
+        website_analyses = []
     demo_mode = not leads
-    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total)
+    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses)
