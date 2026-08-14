@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from .extensions import db
 
 
@@ -13,6 +13,11 @@ class Company(db.Model):
     sector = db.Column(db.String(120))
     origin_country = db.Column(db.String(80))
     website = db.Column(db.String(500))
+    address = db.Column(db.Text)
+    phone = db.Column(db.String(120))
+    whatsapp = db.Column(db.String(120))
+    email = db.Column(db.String(240))
+    linkedin_url = db.Column(db.String(700))
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     projects = db.relationship("Project", back_populates="company", cascade="all, delete-orphan")
@@ -45,19 +50,34 @@ class Opportunity(db.Model):
     evidence = db.Column(db.Text, nullable=False)
     source_name = db.Column(db.String(220))
     source_url = db.Column(db.String(1000))
+    contact_verified = db.Column(db.Boolean, nullable=False, default=False)
+    next_action_at = db.Column(db.DateTime(timezone=True), default=lambda: utcnow() + timedelta(days=2), index=True)
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     project = db.relationship("Project", back_populates="opportunities")
     timeline = db.relationship("TimelineEvent", back_populates="opportunity", cascade="all, delete-orphan")
 
     def to_dict(self):
+        sector = self.project.company.sector or "No informado"
+        pains = {
+            "Frigorífico y cadena de frío": ["Pérdida térmica", "Higiene y condensación", "Paradas por mantenimiento"],
+            "Logística y distribución": ["Demora en carga y descarga", "Seguridad de los muelles", "Alto flujo de vehículos"],
+            "Industria y manufactura": ["Continuidad operativa", "Seguridad de accesos", "Desgaste de equipos"],
+            "Alimentos y bebidas": ["Higiene operacional", "Separación de ambientes", "Velocidad de circulación"],
+            "Agronegocio": ["Polvo y clima", "Grandes vanos", "Protección de equipos"],
+        }.get(sector, ["Seguridad de accesos", "Continuidad operativa", "Mantenimiento preventivo"])
         return {
-            "id": self.id, "company": self.project.company.name, "sector": self.project.company.sector or "No informado",
+            "id": self.id, "company": self.project.company.name, "sector": sector,
             "origin": self.project.company.origin_country or "No informado", "project": self.project.name,
             "city": self.project.city, "department": self.project.department, "stage": self.project.stage or "No informado",
             "investment": self.project.investment or "No divulgado", "event": self.event_type, "score": self.score,
             "level": self.level, "status": self.status, "products": self.products or [], "evidence": self.evidence,
             "sourceName": self.source_name, "sourceUrl": self.source_url,
+            "website": self.project.company.website, "address": self.project.company.address,
+            "phone": self.project.company.phone, "whatsapp": self.project.company.whatsapp,
+            "email": self.project.company.email, "linkedin": self.project.company.linkedin_url,
+            "painPoints": pains, "contactVerified": self.contact_verified,
+            "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }
 
