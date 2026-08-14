@@ -14,9 +14,25 @@ function escapeHtml(value = "") {
   })[character]);
 }
 
+function priorityLabel(priority) {
+  return { HOT: "URGENTE", HIGH: "ALTA", MEDIUM: "MEDIA" }[priority] || priority || "MEDIA";
+}
+
+function eventLabel(eventType) {
+  return {
+    NEW_FACTORY: "NUEVA FÁBRICA",
+    NEW_LOGISTICS_CENTER: "NUEVO CENTRO LOGÍSTICO",
+    EXPANSION: "EXPANSIÓN",
+    INVESTMENT: "INVERSIÓN",
+    BUYING_INTENT: "INTENCIÓN DE COMPRA",
+    NEW_COMPANY: "NUEVA EMPRESA",
+    NEW_WAREHOUSE: "NUEVO DEPÓSITO",
+  }[eventType] || eventType || "NO INFORMADO";
+}
+
 function tag(priority, score) {
   const safePriority = escapeHtml(priority || "MEDIUM");
-  return `<span class="level ${safePriority.toLowerCase()}">${safePriority} · ${Number(score) || 0}</span>`;
+  return `<span class="level ${safePriority.toLowerCase()}">${escapeHtml(priorityLabel(priority))} · ${Number(score) || 0}</span>`;
 }
 
 function toast(message) {
@@ -59,19 +75,19 @@ function selectLead(lead) {
   if (!lead) return;
   selected = lead;
   $("initials").textContent = initials(lead.company);
-  $("companyName").textContent = lead.company || "Empresa não informada";
-  $("companyMeta").textContent = `${lead.sector || "Setor não informado"} · ${lead.origin || "Paraguai"}`;
-  $("companyPlace").textContent = `⌖ ${lead.city || "Cidade não informada"}, ${lead.department || ""}`;
+  $("companyName").textContent = lead.company || "Empresa no informada";
+  $("companyMeta").textContent = `${lead.sector || "Sector no informado"} · ${lead.origin || "Paraguay"}`;
+  $("companyPlace").textContent = `⌖ ${lead.city || "Ciudad no informada"}, ${lead.department || ""}`;
   $("drawerLevel").className = `level ${(lead.level || "MEDIUM").toLowerCase()}`;
-  $("drawerLevel").textContent = `${lead.level || "MEDIUM"} · ${Number(lead.score) || 0}`;
-  $("whyText").textContent = `${lead.project || "O projeto"} pode gerar demanda por acessos industriais em áreas de operação, carga e circulação de veículos.`;
-  $("eventType").textContent = lead.event || "Não informado";
-  $("stage").textContent = lead.stage || "A validar";
-  $("investment").textContent = lead.investment || "Não divulgado";
+  $("drawerLevel").textContent = `${priorityLabel(lead.level)} · ${Number(lead.score) || 0}`;
+  $("whyText").textContent = `${lead.project || "El proyecto"} puede generar demanda de accesos industriales en áreas de operación, carga y circulación de vehículos.`;
+  $("eventType").textContent = eventLabel(lead.event);
+  $("stage").textContent = lead.stage || "Por validar";
+  $("investment").textContent = lead.investment || "No divulgado";
   $("productList").innerHTML = (lead.products || []).map((product) => `<span>${escapeHtml(product)}</span>`).join("");
-  $("evidenceText").textContent = lead.evidence || "Sem evidência cadastrada.";
+  $("evidenceText").textContent = lead.evidence || "No hay evidencia registrada.";
   $("status").value = lead.status || "NOVO";
-  $("approach").value = `Olá! Identificamos que a ${lead.company} está desenvolvendo ${String(lead.project || "um novo projeto").toLowerCase()} em ${lead.city}. A Puertas Brasil PY atua com soluções para acessos industriais e gostaríamos de entender se essa etapa já possui fornecedor definido.`;
+  $("approach").value = `¡Hola! Identificamos que ${lead.company} está desarrollando ${String(lead.project || "un nuevo proyecto").toLowerCase()} en ${lead.city}. Puertas Brasil PY ofrece soluciones para accesos industriales y nos gustaría saber si esta etapa ya cuenta con un proveedor definido.`;
   render();
 }
 
@@ -88,16 +104,16 @@ async function loadTimeline() {
   activateTab("timeline");
   if (!selected) return;
   if (selected.demo) {
-    $("timelineList").innerHTML = "<article><i></i><small>DESCOBERTA</small><strong>Evento demonstrativo identificado pelo radar</strong></article>";
+    $("timelineList").innerHTML = "<article><i></i><small>DESCUBRIMIENTO</small><strong>Evento demostrativo identificado por el radar</strong></article>";
     return;
   }
   try {
     const response = await fetch(`/api/timeline/${selected.id}`);
-    if (!response.ok) throw new Error("Falha ao carregar timeline");
+    if (!response.ok) throw new Error("No se pudo cargar la cronología");
     const rows = await response.json();
-    $("timelineList").innerHTML = rows.map((event) => `<article><i></i><small>${escapeHtml(event.type)}</small><strong>${escapeHtml(event.description)}</strong></article>`).join("") || "<p>Nenhum evento registrado.</p>";
+    $("timelineList").innerHTML = rows.map((event) => `<article><i></i><small>${escapeHtml(event.type)}</small><strong>${escapeHtml(event.description)}</strong></article>`).join("") || "<p>No hay eventos registrados.</p>";
   } catch (_error) {
-    toast("Não foi possível carregar a timeline");
+    toast("No se pudo cargar la cronología");
   }
 }
 
@@ -122,7 +138,7 @@ document.querySelectorAll(".tabs button").forEach((button) => {
 $("status").addEventListener("change", async (event) => {
   if (!selected) return;
   if (selected.demo) {
-    toast("DEMO DATA: cadastre uma oportunidade para salvar no CRM");
+    toast("DATOS DEMO: registre una oportunidad para guardarla en el CRM");
     event.target.value = selected.status || "NOVO";
     return;
   }
@@ -132,23 +148,23 @@ $("status").addEventListener("change", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: event.target.value }),
     });
-    if (!response.ok) throw new Error("Falha ao salvar status");
+    if (!response.ok) throw new Error("No se pudo guardar el estado");
     selected.status = event.target.value;
-    toast("Status salvo no PostgreSQL");
+    toast("Estado guardado en PostgreSQL");
   } catch (_error) {
     event.target.value = selected.status || "NOVO";
-    toast("Não foi possível salvar o status");
+    toast("No se pudo guardar el estado");
   }
 });
 
 $("copyApproach").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText($("approach").value);
-    toast("Abordagem copiada");
+    toast("Mensaje copiado");
   } catch (_error) {
     $("approach").select();
     document.execCommand("copy");
-    toast("Abordagem copiada");
+    toast("Mensaje copiado");
   }
 });
 
@@ -156,7 +172,7 @@ document.querySelectorAll(".channels button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".channels button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
-    toast(`Canal selecionado: ${button.textContent}`);
+    toast(`Canal seleccionado: ${button.textContent}`);
   });
 });
 
@@ -174,18 +190,18 @@ $("leadForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.target));
   data.score = Number(data.score);
-  $("formMessage").textContent = "Salvando...";
+  $("formMessage").textContent = "Guardando...";
   try {
     const response = await fetch("/api/opportunities", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error("Falha ao cadastrar oportunidade");
-    $("formMessage").textContent = "Oportunidade salva. Atualizando...";
+    if (!response.ok) throw new Error("No se pudo registrar la oportunidad");
+    $("formMessage").textContent = "Oportunidad guardada. Actualizando...";
     window.setTimeout(() => window.location.reload(), 500);
   } catch (_error) {
-    $("formMessage").textContent = "Verifique os campos e a conexão com o banco.";
+    $("formMessage").textContent = "Verifique los campos y la conexión con la base de datos.";
   }
 });
 
@@ -198,24 +214,24 @@ document.querySelectorAll('.sidebar nav a[href^="#"]').forEach((link) => {
     if (["#empresas", "#projetos"].includes(target)) {
       event.preventDefault();
       $("prioridades").scrollIntoView({ behavior: "smooth" });
-      toast(target === "#empresas" ? "Empresas estão organizadas nas oportunidades" : "Projetos estão organizados nas oportunidades");
+      toast(target === "#empresas" ? "Las empresas están organizadas por oportunidades" : "Los proyectos están organizados por oportunidades");
     } else if (target === "#crm") {
       event.preventDefault();
       activateTab("overview");
       $("status").focus();
-      toast("CRM aberto no painel lateral");
+      toast("CRM abierto en el panel lateral");
     } else if (target === "#timeline") {
       event.preventDefault();
       await loadTimeline();
     } else if (target === "#pesquisas") {
       event.preventDefault();
       $("search").focus();
-      toast("Use a busca para pesquisar empresa, cidade ou projeto");
+      toast("Use la búsqueda para encontrar una empresa, ciudad o proyecto");
     }
   });
 });
 
-$("drawerMenu").addEventListener("click", () => toast("Selecione uma oportunidade para ver as ações"));
+$("drawerMenu").addEventListener("click", () => toast("Seleccione una oportunidad para ver las acciones"));
 
 render();
 if (selected) selectLead(selected);
