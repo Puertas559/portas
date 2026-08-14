@@ -126,6 +126,84 @@ def website_analysis_list():
     return jsonify([row.to_dict() for row in rows])
 
 
+def _commercial_messages(analysis):
+    contact = analysis.contacts[0] if analysis.contacts else f"equipo de {analysis.company_name}"
+    products = analysis.products or ["soluciones de accesos automáticos"]
+    services = analysis.services or ["evaluación técnica y proyecto a medida"]
+    product_text = ", ".join(products[:3])
+    service_text = ", ".join(services[:2])
+    whatsapp = (
+        f"Hola, {contact}. Soy parte del equipo comercial de Puertas Brasil PY. "
+        f"Al conocer la actividad de {analysis.company_name} en el sector {analysis.sector}, "
+        f"identificamos una posible aplicación para {product_text}. "
+        f"Podemos realizar {service_text} para validar la solución adecuada. "
+        "¿Con quién podríamos coordinar una breve conversación técnica?"
+    )
+    subject = f"Propuesta de soluciones de accesos automáticos para {analysis.company_name}"
+    email = (
+        f"Estimado/a {contact}:\n\n"
+        "Es un gusto presentarle a Puertas Brasil PY, fábrica paraguaya especializada en soluciones "
+        "de cerramientos automáticos para los segmentos industrial, logístico, comercial y aeronáutico.\n\n"
+        f"A partir de la información pública de {analysis.company_name}, dedicada al sector {analysis.sector}, "
+        f"identificamos una posible oportunidad de mejora mediante {product_text}. Nuestra propuesta puede incluir "
+        f"{service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones, repuestos "
+        "multimarca y retrofit.\n\n"
+        "Nos gustaría conocer su operación y verificar, sin compromiso, si estas soluciones pueden aportar mayor "
+        "seguridad, eficiencia y continuidad operativa. Quedamos a disposición para coordinar una visita técnica "
+        "o una breve reunión con la persona responsable de mantenimiento, operaciones o compras.\n\n"
+        "Atentamente,\nEquipo comercial de Puertas Brasil PY\n"
+        "+595 986 986215\ngerenciacomercial@puertasbrasil.com.py\npuertasbrasil.com.py"
+    )
+    return whatsapp, subject, email
+
+
+@api_bp.post("/website-analysis/<int:analysis_id>/qualify")
+def website_analysis_qualify(analysis_id):
+    analysis = db.get_or_404(WebsiteAnalysis, analysis_id)
+    if analysis.opportunity_id:
+        return jsonify(analysis=analysis.to_dict(), opportunity=analysis.opportunity.to_dict())
+    company = Company.query.filter_by(name=analysis.company_name).first()
+    if not company:
+        company = Company(name=analysis.company_name, sector=analysis.sector, origin_country="Paraguay", website=analysis.url)
+        db.session.add(company)
+    else:
+        company.website = company.website or analysis.url
+        company.sector = company.sector or analysis.sector
+    project = Project(
+        company=company, name=f"Calificación comercial desde {analysis.url}",
+        city=(analysis.address or "Por validar")[:120], department="Por validar",
+        stage="Empresa calificada desde análisis web",
+    )
+    level = {"MUY ALTO": "HOT", "ALTO": "HIGH", "MEDIO": "MEDIUM", "BAJO": "LOW"}.get(analysis.potential_level, "MEDIUM")
+    evidence = "; ".join(analysis.reasons or []) or analysis.summary or "Análisis público del sitio empresarial"
+    opportunity = Opportunity(
+        project=project, event_type="BUYING_INTENT", score=analysis.potential_score, level=level,
+        status="QUALIFICADO", products=analysis.products or [], evidence=evidence,
+        source_name="Análisis minucioso del sitio", source_url=analysis.url,
+    )
+    db.session.add(opportunity)
+    db.session.flush()
+    whatsapp, subject, email = _commercial_messages(analysis)
+    analysis.decision, analysis.opportunity_id = "QUALIFIED", opportunity.id
+    analysis.whatsapp_message, analysis.email_subject, analysis.email_body = whatsapp, subject, email
+    db.session.add(TimelineEvent(
+        opportunity=opportunity, event_type="WEBSITE_QUALIFICATION",
+        description="Empresa calificada manualmente; mensajes comerciales personalizados generados",
+    ))
+    db.session.commit()
+    return jsonify(analysis=analysis.to_dict(), opportunity=opportunity.to_dict()), 201
+
+
+@api_bp.post("/website-analysis/<int:analysis_id>/disqualify")
+def website_analysis_disqualify(analysis_id):
+    analysis = db.get_or_404(WebsiteAnalysis, analysis_id)
+    if analysis.opportunity_id:
+        return jsonify(error="La empresa ya ingresó al CRM; márquela como descartada desde el CRM"), 409
+    analysis.decision = "DISQUALIFIED"
+    db.session.commit()
+    return jsonify(analysis.to_dict())
+
+
 @api_bp.get("/health")
 def api_health():
     return _health()
