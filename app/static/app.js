@@ -1,6 +1,9 @@
 const leads = Array.isArray(window.RADAR_LEADS) ? window.RADAR_LEADS : [];
 let selected = leads[0] || null;
 let level = "ALL";
+let selectedChannel = "whatsapp";
+const visitSelection = new Set();
+let discoveredCompanies = [];
 
 const $ = (id) => document.getElementById(id);
 
@@ -46,7 +49,7 @@ function render() {
   const query = $("search").value.trim().toLowerCase();
   const rows = leads.filter((lead) => {
     const matchesLevel = level === "ALL" || lead.level === level;
-    const searchable = `${lead.company || ""} ${lead.city || ""} ${lead.project || ""}`.toLowerCase();
+    const searchable = `${lead.company || ""} ${lead.city || ""} ${lead.department || ""} ${lead.sector || ""} ${lead.project || ""}`.toLowerCase();
     return matchesLevel && searchable.includes(query);
   });
 
@@ -69,6 +72,45 @@ function render() {
       if (lead) selectLead(lead);
     });
   });
+  renderCrm();
+}
+
+function contactMessage(lead, channel = selectedChannel) {
+  const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos";
+  if (channel === "email") return `Asunto: Soluciones de accesos industriales para ${lead.company}\n\nEstimado equipo de ${lead.company}:\n\nIdentificamos una posible aplicación de ${products} para su operación en ${lead.city}. Puertas Brasil PY puede realizar una evaluación técnica y proponer una solución a medida.\n\n¿Podemos coordinar una breve conversación con la persona responsable de mantenimiento, operaciones o compras?\n\nAtentamente,\nEquipo comercial de Puertas Brasil PY`;
+  if (channel === "call") return `GUION DE LLAMADA\n\nPresentarse como Puertas Brasil PY. Confirmar la actividad de ${lead.company} y preguntar por el responsable de mantenimiento, operaciones o compras. Validar necesidades de ${products}, próximos proyectos y disponibilidad para una visita técnica.`;
+  if (channel === "linkedin") return `Hola. Soy parte del equipo comercial de Puertas Brasil PY. Conocimos la operación de ${lead.company} y nos gustaría conectar con la persona responsable de mantenimiento, operaciones o compras para presentar soluciones de accesos industriales.`;
+  return `¡Hola! Soy parte del equipo comercial de Puertas Brasil PY. Identificamos que ${lead.company} opera en ${lead.city} y puede tener aplicación para ${products}. ¿Con quién podríamos coordinar una breve conversación técnica?`;
+}
+
+function renderCrm() {
+  const grid = $("crmGrid");
+  if (!grid) return;
+  const status = $("crmStatusFilter").value;
+  const rows = leads.filter((lead) => status === "ALL" || lead.status === status);
+  $("crmCount").textContent = `${rows.length} empresas`;
+  grid.innerHTML = rows.map((lead) => {
+    const address = lead.address || `${lead.city || ""}, ${lead.department || ""}, Paraguay`;
+    return `<article class="crm-card" data-id="${escapeHtml(lead.id)}">
+      <div class="crm-card-top"><span class="avatar">${escapeHtml(initials(lead.company))}</span><div><h3>${escapeHtml(lead.company)}</h3><p>${escapeHtml(lead.sector)} · ${escapeHtml(lead.city)}</p></div>${tag(lead.level, lead.score)}</div>
+      <strong>${escapeHtml(lead.project)}</strong><small><i class="bi bi-geo-alt"></i> ${escapeHtml(address)}</small>
+      <div class="crm-flags"><span class="${lead.contactVerified ? "verified" : "pending"}"><i class="bi bi-${lead.contactVerified ? "person-check-fill" : "person-exclamation"}"></i> ${lead.contactVerified ? "Contacto validado" : "Validar contacto"}</span>${lead.nextActionAt ? `<span><i class="bi bi-calendar-event"></i> ${new Date(lead.nextActionAt).toLocaleDateString("es-PY")}</span>` : ""}</div>
+      <div class="crm-card-actions"><button class="open-crm-detail"><i class="bi bi-eye"></i> Ver ficha</button><label><input class="visit-check" type="checkbox" ${visitSelection.has(String(lead.id)) ? "checked" : ""}> Incluir en visita</label></div>
+    </article>`;
+  }).join("") || '<div class="empty-signals"><strong>No hay empresas en este estado.</strong></div>';
+}
+
+function renderRoutePlan() {
+  const selectedLeads = leads.filter((lead) => visitSelection.has(String(lead.id)))
+    .sort((a, b) => `${a.department} ${a.city}`.localeCompare(`${b.department} ${b.city}`));
+  if (!selectedLeads.length) {
+    $("routePlan").innerHTML = '<div class="route-empty"><i class="bi bi-geo-alt"></i><strong>Ninguna empresa seleccionada</strong><span>Marque “Incluir en visita” en la Caja CRM.</span></div>';
+    return;
+  }
+  $("routePlan").innerHTML = `<div class="route-summary"><b>${selectedLeads.length} visitas seleccionadas</b><span>Ordenadas por región y ciudad</span></div>${selectedLeads.map((lead, index) => {
+    const address = lead.address || `${lead.city}, ${lead.department}, Paraguay`;
+    return `<article class="route-stop"><span>${index + 1}</span><div><h3>${escapeHtml(lead.company)}</h3><p>${escapeHtml(lead.sector)} · ${escapeHtml(address)}</p><b>Ofrecer:</b> ${escapeHtml((lead.products || []).join(", ") || "Evaluación técnica de accesos")}<br><b>Dolores probables:</b> ${escapeHtml((lead.painPoints || []).join(", "))}</div><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" aria-label="Abrir ubicación"><i class="bi bi-geo-alt-fill"></i></a></article>`;
+  }).join("")}`;
 }
 
 function selectLead(lead) {
@@ -87,8 +129,18 @@ function selectLead(lead) {
   $("productList").innerHTML = (lead.products || []).map((product) => `<span>${escapeHtml(product)}</span>`).join("");
   $("evidenceText").textContent = lead.evidence || "No hay evidencia registrada.";
   $("status").value = lead.status || "NOVO";
-  $("approach").value = `¡Hola! Identificamos que ${lead.company} está desarrollando ${String(lead.project || "un nuevo proyecto").toLowerCase()} en ${lead.city}. Puertas Brasil PY ofrece soluciones para accesos industriales y nos gustaría saber si esta etapa ya cuenta con un proveedor definido.`;
+  $("contactVerified").checked = Boolean(lead.contactVerified);
+  $("followUpDate").value = lead.nextActionAt ? String(lead.nextActionAt).slice(0, 10) : "";
+  $("approach").value = contactMessage(lead);
+  updateChannelAction();
   render();
+}
+
+function updateChannelAction() {
+  if (!selected) return;
+  const labels = { whatsapp: "Abrir WhatsApp", email: "Redactar correo", call: "Iniciar llamada", linkedin: "Abrir LinkedIn" };
+  $("openChannel").innerHTML = `<i class="bi bi-box-arrow-up-right"></i> ${labels[selectedChannel]}`;
+  $("approach").value = contactMessage(selected, selectedChannel);
 }
 
 function activateTab(tabName) {
@@ -127,6 +179,22 @@ document.querySelectorAll(".filters button").forEach((button) => {
 });
 
 $("search").addEventListener("input", render);
+$("crmStatusFilter").addEventListener("change", renderCrm);
+
+$("crmGrid").addEventListener("click", (event) => {
+  const card = event.target.closest(".crm-card");
+  if (!card) return;
+  const lead = leads.find((item) => String(item.id) === card.dataset.id);
+  if (!lead) return;
+  if (event.target.closest(".open-crm-detail")) {
+    selectLead(lead);
+    $("drawer").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  if (event.target.matches(".visit-check")) {
+    if (event.target.checked) visitSelection.add(String(lead.id)); else visitSelection.delete(String(lead.id));
+    renderRoutePlan();
+  }
+});
 
 document.querySelectorAll(".tabs button").forEach((button) => {
   button.addEventListener("click", async () => {
@@ -157,6 +225,30 @@ $("status").addEventListener("change", async (event) => {
   }
 });
 
+$("contactVerified").addEventListener("change", async (event) => {
+  if (!selected || selected.demo) return toast("Registre una oportunidad real para validar el contacto");
+  const response = await fetch(`/api/opportunities/${selected.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactVerified: event.target.checked }) });
+  if (!response.ok) {
+    event.target.checked = !event.target.checked;
+    return toast("No se pudo guardar la validación");
+  }
+  selected.contactVerified = event.target.checked;
+  renderCrm();
+  toast("Validación del contacto guardada");
+});
+
+$("scheduleFollowUp").addEventListener("click", async () => {
+  if (!selected || selected.demo) return toast("Registre una oportunidad real para programar seguimiento");
+  const date = $("followUpDate").value;
+  if (!date) return toast("Seleccione la fecha del próximo seguimiento");
+  const response = await fetch(`/api/opportunities/${selected.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nextActionAt: `${date}T12:00:00` }) });
+  const data = await response.json();
+  if (!response.ok) return toast(data.error || "No se pudo programar el seguimiento");
+  selected.nextActionAt = data.nextActionAt;
+  renderCrm();
+  toast("Seguimiento programado en el CRM");
+});
+
 $("copyApproach").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText($("approach").value);
@@ -172,8 +264,41 @@ document.querySelectorAll(".channels button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".channels button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
-    toast(`Canal seleccionado: ${button.textContent}`);
+    selectedChannel = button.dataset.channel;
+    updateChannelAction();
+    toast(`Canal seleccionado: ${button.textContent.trim()}`);
   });
+});
+
+$("openChannel").addEventListener("click", () => {
+  if (!selected) return;
+  const message = contactMessage(selected, selectedChannel);
+  let url;
+  if (selectedChannel === "whatsapp") {
+    const number = String(selected.whatsapp || selected.phone || "").replace(/\D/g, "");
+    if (!number) return toast("Esta empresa todavía no tiene WhatsApp registrado");
+    url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+  } else if (selectedChannel === "email") {
+    if (!selected.email) return toast("Esta empresa todavía no tiene correo registrado");
+    const subject = `Soluciones de accesos industriales para ${selected.company}`;
+    url = `mailto:${selected.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message.replace(/^Asunto:.*\n\n/, ""))}`;
+  } else if (selectedChannel === "call") {
+    if (!selected.phone) return toast("Esta empresa todavía no tiene teléfono registrado");
+    url = `tel:${selected.phone}`;
+  } else {
+    url = selected.linkedin || `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(selected.company)}`;
+  }
+  window.open(url, "_blank", "noopener");
+});
+
+$("buildRoute").addEventListener("click", () => {
+  const rows = leads.filter((lead) => visitSelection.has(String(lead.id)))
+    .sort((a, b) => `${a.department} ${a.city}`.localeCompare(`${b.department} ${b.city}`));
+  if (!rows.length) return toast("Seleccione al menos una empresa para la visita");
+  const locations = rows.slice(0, 10).map((lead) => lead.address || `${lead.city}, ${lead.department}, Paraguay`);
+  const params = new URLSearchParams({ api: "1", origin: $("routeOrigin").value || "Asunción, Paraguay", destination: locations.at(-1), travelmode: "driving" });
+  if (locations.length > 1) params.set("waypoints", locations.slice(0, -1).join("|"));
+  window.open(`https://www.google.com/maps/dir/?${params}`, "_blank", "noopener");
 });
 
 document.querySelectorAll(".pin").forEach((button, index) => {
@@ -205,28 +330,91 @@ $("leadForm").addEventListener("submit", async (event) => {
   }
 });
 
+$("findCompanies").addEventListener("click", async () => {
+  const button = $("findCompanies");
+  const params = new URLSearchParams({
+    q: $("search").value.trim(), city: $("searchCity").value.trim(),
+    region: $("searchRegion").value, industry: $("searchIndustry").value,
+  });
+  button.disabled = true;
+  button.innerHTML = '<i class="bi bi-hourglass-split"></i> Buscando...';
+  $("companySearchResults").classList.remove("hidden");
+  $("companySearchMessage").textContent = "Consultando empresas y establecimientos públicos en Paraguay...";
+  $("companyResultGrid").innerHTML = "";
+  try {
+    const response = await fetch(`/api/company-search?${params}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo realizar la búsqueda");
+    discoveredCompanies = data.results || [];
+    $("companySearchMessage").textContent = `${discoveredCompanies.length} empresas o establecimientos encontrados. Valide los datos antes de contactar.`;
+    $("companyResultGrid").innerHTML = discoveredCompanies.map((company, index) => `<article class="company-result" data-index="${index}">
+      <div><span class="source-type">${escapeHtml(company.source)} · POTENCIAL ${Number(company.score)}</span><h3>${escapeHtml(company.company)}</h3><p>${escapeHtml(company.sector)} · ${escapeHtml(company.city)}, ${escapeHtml(company.region)}</p></div>
+      <p><i class="bi bi-geo-alt"></i> ${escapeHtml(company.address || "Dirección por validar")}</p>
+      <div class="result-contacts">${company.website ? `<a href="${escapeHtml(company.website)}" target="_blank" rel="noopener"><i class="bi bi-globe2"></i> Sitio</a>` : ""}${company.phone ? `<span><i class="bi bi-telephone"></i> ${escapeHtml(company.phone)}</span>` : ""}${company.email ? `<span><i class="bi bi-envelope"></i> ${escapeHtml(company.email)}</span>` : ""}</div>
+      <div class="result-actions">${company.website ? '<button class="analyze-discovered"><i class="bi bi-building-check"></i> Analizar sitio</button>' : ""}<button class="add-discovered primary"><i class="bi bi-inbox-fill"></i> Añadir al CRM</button></div>
+    </article>`).join("") || '<div class="empty-signals"><strong>No encontramos empresas con estos criterios.</strong><span>Pruebe otra ciudad, región o actividad.</span></div>';
+    $("companySearchResults").scrollIntoView({ behavior: "smooth" });
+  } catch (error) {
+    $("companySearchMessage").textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i class="bi bi-buildings"></i> Buscar empresas';
+  }
+});
+
+$("closeCompanySearch").addEventListener("click", () => $("companySearchResults").classList.add("hidden"));
+
+$("companyResultGrid").addEventListener("click", async (event) => {
+  const card = event.target.closest(".company-result");
+  if (!card) return;
+  const company = discoveredCompanies[Number(card.dataset.index)];
+  if (!company) return;
+  if (event.target.closest(".analyze-discovered")) {
+    $("companyWebsite").value = company.website;
+    $("triage").scrollIntoView({ behavior: "smooth" });
+    toast("Sitio preparado para el análisis minucioso");
+    return;
+  }
+  const addButton = event.target.closest(".add-discovered");
+  if (!addButton) return;
+  addButton.disabled = true;
+  addButton.textContent = "Añadiendo...";
+  try {
+    const response = await fetch("/api/company-search/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(company) });
+    const lead = await response.json();
+    if (!response.ok) throw new Error(lead.error || "No se pudo añadir al CRM");
+    leads.unshift(lead);
+    selectLead(lead);
+    card.remove();
+    toast("Empresa añadida a la Caja CRM");
+  } catch (error) {
+    addButton.disabled = false;
+    addButton.innerHTML = '<i class="bi bi-inbox-fill"></i> Añadir al CRM';
+    toast(error.message);
+  }
+});
+
 document.querySelectorAll('.sidebar nav a[href^="#"]').forEach((link) => {
   link.addEventListener("click", async (event) => {
     const target = link.getAttribute("href");
     document.querySelectorAll(".sidebar nav a").forEach((item) => item.classList.remove("active"));
     link.classList.add("active");
 
-    if (["#empresas", "#projetos"].includes(target)) {
+    if (target === "#crm") {
       event.preventDefault();
-      $("prioridades").scrollIntoView({ behavior: "smooth" });
-      toast(target === "#empresas" ? "Las empresas están organizadas por oportunidades" : "Los proyectos están organizados por oportunidades");
-    } else if (target === "#crm") {
+      $("crm").scrollIntoView({ behavior: "smooth" });
+      toast("Caja CRM: todas las empresas clasificadas");
+    } else if (target === "#visitas") {
       event.preventDefault();
-      activateTab("overview");
-      $("status").focus();
-      toast("CRM abierto en el panel lateral");
+      $("visitas").scrollIntoView({ behavior: "smooth" });
     } else if (target === "#timeline") {
       event.preventDefault();
       await loadTimeline();
     } else if (target === "#pesquisas") {
       event.preventDefault();
       $("search").focus();
-      toast("Use la búsqueda para encontrar una empresa, ciudad o proyecto");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast("Busque por empresa, ciudad, región o tipo de industria");
     }
   });
 });
@@ -356,6 +544,13 @@ $("siteAnalysisResults").addEventListener("click", async (event) => {
     if (!response.ok) throw new Error(data.error || "No se pudo guardar la decisión");
     const analysis = data.analysis || data;
     card.outerHTML = renderWebsiteAnalysis(analysis);
+    if (qualify && data.opportunity) {
+      const existing = leads.findIndex((lead) => String(lead.id) === String(data.opportunity.id));
+      if (existing >= 0) leads[existing] = data.opportunity; else leads.unshift(data.opportunity);
+      selected = data.opportunity;
+      render();
+      window.setTimeout(() => $("crm").scrollIntoView({ behavior: "smooth" }), 250);
+    }
     toast(qualify ? "Empresa ingresada al CRM y mensajes generados" : "Empresa desclasificada");
   } catch (error) {
     event.target.disabled = false;
