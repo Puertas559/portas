@@ -283,10 +283,20 @@ document.querySelectorAll(".discard-signal").forEach((button) => {
 
 function renderWebsiteAnalysis(analysis) {
   const list = (values, fallback = "No encontrado") => Array.isArray(values) && values.length ? values.map(escapeHtml).join(", ") : fallback;
+  const decision = analysis.decision || "PENDING";
+  const decisionLabel = { QUALIFIED: "CALIFICADA", DISQUALIFIED: "DESCALIFICADA", PENDING: "PENDIENTE" }[decision];
+  const decisionActions = decision === "PENDING"
+    ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
+    : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
+  const drafts = decision === "QUALIFIED" ? `
+    <div class="outreach-drafts">
+      <div><b>Mensaje para WhatsApp</b><textarea readonly>${escapeHtml(analysis.whatsappMessage || "")}</textarea><button class="copy-draft">Copiar WhatsApp</button></div>
+      <div><b>Correo personalizado · ${escapeHtml(analysis.emailSubject || "")}</b><textarea readonly>${escapeHtml(analysis.emailBody || "")}</textarea><button class="copy-draft">Copiar correo</button></div>
+    </div>` : "";
   return `
-    <article class="analysis-card">
+    <article class="analysis-card" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
       <div class="analysis-score"><strong>${Number(analysis.score) || 0}</strong><small>${escapeHtml(analysis.level)}</small></div>
-      <div class="analysis-main"><span class="source-type">${Number(analysis.pagesAnalyzed) || 0} PÁGINAS ANALIZADAS</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
+      <div class="analysis-main"><span class="source-type">${Number(analysis.pagesAnalyzed) || 0} PÁGINAS ANALIZADAS · ${decisionLabel}</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
       <div class="analysis-grid">
         <div><b>Contacto</b><span>${list(analysis.emails)}</span><span>${list(analysis.phones)}</span>${analysis.whatsapp ? `<span>WhatsApp: ${escapeHtml(analysis.whatsapp)}</span>` : ""}</div>
         <div><b>Dirección y responsables</b><span>${escapeHtml(analysis.address || "No encontrado")}</span><span>${list(analysis.contacts, "No identificado")}</span></div>
@@ -294,6 +304,8 @@ function renderWebsiteAnalysis(analysis) {
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
       <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+      <div class="analysis-decision">${decisionActions}</div>
+      ${drafts}
     </article>`;
 }
 
@@ -320,6 +332,35 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
   } finally {
     button.disabled = false;
     button.textContent = "◉ Analizar empresa";
+  }
+});
+
+$("siteAnalysisResults").addEventListener("click", async (event) => {
+  const card = event.target.closest(".analysis-card");
+  if (!card) return;
+  if (event.target.matches(".copy-draft")) {
+    const text = event.target.parentElement.querySelector("textarea").value;
+    await navigator.clipboard.writeText(text);
+    toast("Mensaje copiado");
+    return;
+  }
+  const qualify = event.target.matches(".qualify-analysis");
+  const disqualify = event.target.matches(".disqualify-analysis");
+  if (!qualify && !disqualify) return;
+  event.target.disabled = true;
+  event.target.textContent = qualify ? "Ingresando al CRM..." : "Desclasificando...";
+  try {
+    const action = qualify ? "qualify" : "disqualify";
+    const response = await fetch(`/api/website-analysis/${card.dataset.analysisId}/${action}`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo guardar la decisión");
+    const analysis = data.analysis || data;
+    card.outerHTML = renderWebsiteAnalysis(analysis);
+    toast(qualify ? "Empresa ingresada al CRM y mensajes generados" : "Empresa desclasificada");
+  } catch (error) {
+    event.target.disabled = false;
+    event.target.textContent = qualify ? "Clasificar e ingresar al CRM" : "Desclasificar";
+    toast(error.message);
   }
 });
 
