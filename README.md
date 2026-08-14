@@ -1,52 +1,81 @@
-# Industrial Sales Radar PY — Flask
+# Industrial Revenue Radar — Puertas Brasil PY
 
-Radar de oportunidades comerciais da Puertas Brasil PY, reconstruído em Python Flask para Railway.
+Radar de oportunidades comerciales de Puertas Brasil PY, desarrollado con Python Flask para Railway.
 
-## Arquitetura
+Esta es la primera implementación vertical de una plataforma genérica de Revenue Intelligence B2B. La evaluación, arquitectura objetivo, estrategia de migración y riesgos están documentados en [`docs/architecture-phase1.md`](docs/architecture-phase1.md).
+
+## Arquitectura
 
 - Flask 3 + Jinja + JavaScript
-- PostgreSQL com SQLAlchemy
-- Migrações Alembic/Flask-Migrate
-- Gunicorn em produção
-- `/data` para arquivos persistentes
-- Docker e Railway
+- PostgreSQL con SQLAlchemy
+- Migraciones Alembic/Flask-Migrate
+- Gunicorn en producción
+- `/data` para archivos persistentes
+- Captación automática mediante DNCP, MIC, agregadores y feeds configurables
+- Ejecución automática cada 5 minutos con filtro de necesidad concreta
+- Calificación de sitios empresariales con contactos, dirección, responsables, tamaño y afinidad comercial
+- Docker y Railway
 
-## Variáveis do Railway
-
-No serviço da aplicação:
+## Variables de Railway
 
 ```env
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-SECRET_KEY=gere-uma-chave-longa-e-aleatoria
+SECRET_KEY=genere-una-clave-larga-y-aleatoria
 DATA_DIR=/data
 RAILWAY_RUN_UID=0
+WEB_CONCURRENCY=1
+COLLECTOR_ENABLED=true
+COLLECTOR_INTERVAL_MINUTES=5
+COLLECTOR_MIN_SCORE=60
+COLLECTOR_EXTRA_FEEDS=
+AUTH_REQUIRED=false
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
+ADMIN_NAME=Administrador
+DEFAULT_TENANT_NAME=Puertas Brasil PY
+DEFAULT_TENANT_SLUG=puertas-brasil-py
+SESSION_COOKIE_SECURE=true
 ```
 
-O nome `Postgres` deve ser igual ao nome real do serviço de banco. `PORT` é fornecida automaticamente pelo Railway.
+`COLLECTOR_EXTRA_FEEDS` acepta URLs RSS/Atom separadas por comas. Permite agregar cámaras de comercio, asociaciones, parques industriales, ferias y medios especializados sin modificar el código.
 
-## Volume
+## Persistencia
 
-Anexe um volume ao serviço Flask e monte em `/data`. O PostgreSQL deve continuar como serviço separado, com persistência própria.
+Conecte un volumen al servicio Flask en `/data`. PostgreSQL debe permanecer como servicio separado con su propia persistencia.
 
-## Deploy
+## Despliegue
 
-1. Substitua todo o conteúdo do repositório pelo conteúdo deste pacote.
-2. Faça commit e push na branch conectada ao Railway.
-3. Configure as variáveis acima.
-4. Confirme o volume em `/data`.
+1. Suba el contenido del paquete al repositorio.
+2. Haga commit y push en la rama conectada a Railway.
+3. Configure las variables indicadas.
+4. Confirme el volumen en `/data`.
 5. Use **Deploy Latest Commit**.
 
-O container executa `flask db upgrade` antes de iniciar o Gunicorn.
+El contenedor ejecuta `flask db upgrade` y el bootstrap idempotente del tenant antes de iniciar Gunicorn.
 
-## Rotas
+## Rutas principales
 
-- `/` — dashboard
-- `/health` — saúde do banco
+- `/` — panel comercial y captación automática
+- `/health` — estado de la base de datos
 - `GET/POST /api/opportunities`
 - `PATCH /api/opportunities/<id>`
 - `GET /api/timeline/<id>`
+- `GET /api/collector/status`
+- `POST /api/collector/run`
+- `POST /api/signals/<id>/approve`
+- `POST /api/signals/<id>/discard`
+- `GET/POST /api/website-analysis`
+- `GET /api/companies`
+- `GET /api/projects`
+- `GET /api/sources`
+- `GET /api/intelligence/signals`
+- `GET /api/signals`
+- `GET /api/scores`
+- `GET /api/opportunities/<id>/intelligence`
+- `GET /api/dashboard/revenue-intelligence`
+- `POST /api/auth/login`
 
-## Desenvolvimento local
+## Desarrollo local
 
 ```bash
 python -m venv .venv
@@ -57,8 +86,8 @@ flask --app wsgi.py db upgrade
 flask --app wsgi.py run --debug
 ```
 
-Sem PostgreSQL local, a aplicação usa SQLite apenas para desenvolvimento. Em produção, `start.sh` exige `DATABASE_URL`.
+Sin PostgreSQL local, la aplicación utiliza SQLite únicamente para desarrollo. En producción, `start.sh` exige `DATABASE_URL`.
 
-## Segurança
+## Seguridad
 
-O MVP ainda não possui autenticação. Não cadastre dados confidenciais antes de implementar usuários e controle de acesso.
+La plataforma dispone de autenticación por sesión, aislamiento por tenant y roles `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. Para evitar bloquear el despliegue actual, active `AUTH_REQUIRED=true` solamente después de configurar `ADMIN_EMAIL`, `ADMIN_PASSWORD` y una `SECRET_KEY` fuerte. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
