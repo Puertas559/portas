@@ -151,7 +151,13 @@ class WebsiteAnalysis(db.Model):
     summary = db.Column(db.Text)
     status = db.Column(db.String(30), nullable=False, default="COMPLETED", index=True)
     error = db.Column(db.Text)
+    decision = db.Column(db.String(30), nullable=False, default="PENDING", index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
+    whatsapp_message = db.Column(db.Text)
+    email_subject = db.Column(db.String(300))
+    email_body = db.Column(db.Text)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    opportunity = db.relationship("Opportunity")
 
     def to_dict(self):
         return {
@@ -162,4 +168,7 @@ class WebsiteAnalysis(db.Model):
             "products": self.products or [], "services": self.services or [], "reasons": self.reasons or [],
             "pagesAnalyzed": self.pages_analyzed, "summary": self.summary, "status": self.status,
             "error": self.error, "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "decision": self.decision, "opportunityId": self.opportunity_id,
+            "whatsappMessage": self.whatsapp_message, "emailSubject": self.email_subject,
+            "emailBody": self.email_body,
         }
