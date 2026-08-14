@@ -1,6 +1,7 @@
 import html
 import ipaddress
 import json
+import os
 import re
 import socket
 from html.parser import HTMLParser
@@ -9,8 +10,9 @@ from urllib.request import Request, urlopen
 
 from ..extensions import db
 from ..models import WebsiteAnalysis
+from ..tenant import current_tenant
 
-USER_AGENT = "PuertasBrasilPY-WebsiteQualification/1.0"
+USER_AGENT = os.getenv("RADAR_USER_AGENT", "IndustrialRevenueRadar/1.0")
 MAX_BYTES = 1_500_000
 MAX_PAGES = 6
 
@@ -216,6 +218,7 @@ def analyze_website(url):
         services.extend(["Mantenimiento preventivo y correctivo", "Repuestos multimarca y retrofit"])
 
     analysis = WebsiteAnalysis(
+        tenant_id=current_tenant().id,
         url=normalized, company_name=_best_company_name(titles, parsed.hostname), sector=sector,
         address=_extract_address(text), phones=phones, whatsapp=whatsapp, emails=emails, contacts=contacts,
         social_links=social, company_size=_estimate_size(text), potential_score=score, potential_level=level,
