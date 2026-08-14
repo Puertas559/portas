@@ -29,102 +29,66 @@ html{scroll-behavior:smooth}body{font-size:15px;background:var(--paper)}
 @media(max-width:760px){.sidebar{width:68px}.content{margin-left:68px}.drawer{margin-left:68px;width:calc(100% - 68px)}.company-finder{grid-template-columns:1fr 1fr}.company-finder label,.company-finder button{grid-column:1/-1}.workspace,.signals,.site-triage,.capture,.crm-hub,.visit-planner,.search-results{margin:0 10px 14px}.crm-head{display:block}.crm-controls{margin-top:12px}}
 @media(max-width:540px){.content{margin-left:0}.drawer{margin-left:0;width:100%}.topbar{position:relative}.company-finder{grid-template-columns:1fr}.company-finder>*{grid-column:1!important;grid-row:auto!important}.health{display:none}.company-result-grid,.crm-grid{grid-template-columns:1fr}.signals,.site-triage,.capture,.crm-hub,.visit-planner,.search-results,.today-hub,.pipeline-hub{padding:18px 14px}.sales-metrics,.intelligence-metrics{grid-template-columns:1fr 1fr}.route-stop{grid-template-columns:28px 1fr}.route-stop>a{grid-column:2}.contact-actions{grid-template-columns:1fr}}
 
+
 /* =========================================================
-   PUERTAS BRASIL PY — IDENTIDADE VISUAL
-   Paleta: verde, amarelo e branco
-   Este bloco fica no final do CSS para sobrescrever a paleta antiga.
+   PUERTAS BRASIL PY — IDENTIDADE VISUAL OFICIAL
+   Verde + Amarelo + Branco
+   Este bloco fica por último para prevalecer sobre CSS legado.
    ========================================================= */
 :root{
-  --pb-green:#08783f;
-  --pb-green-dark:#04562d;
-  --pb-green-deep:#033d22;
-  --pb-green-soft:#eaf6ef;
-  --pb-yellow:#f6d436;
-  --pb-yellow-soft:#fff8d8;
-  --pb-white:#ffffff;
-  --pb-ink:#123326;
-  --pb-muted:#6d7d75;
-  --pb-line:#d9e7df;
-
-  --navy:var(--pb-green-dark);
-  --ink:var(--pb-ink);
-  --red:var(--pb-green);
-  --blue:var(--pb-green);
-  --green:var(--pb-green);
-  --muted:var(--pb-muted);
-  --line:var(--pb-line);
-  --paper:#f5faf7;
-  --shadow:0 10px 30px rgba(3,61,34,.09);
+  --navy:#073B2A !important;
+  --ink:#17362B !important;
+  --red:#168A55 !important;
+  --blue:#168A55 !important;
+  --green:#168A55 !important;
+  --muted:#6B7C75 !important;
+  --line:#DCE8E2 !important;
+  --paper:#F7FAF8 !important;
+  --pb-green:#168A55;
+  --pb-green-dark:#073B2A;
+  --pb-green-soft:#EAF6F0;
+  --pb-yellow:#F2C400;
+  --pb-yellow-soft:#FFF8D8;
+  --pb-white:#FFFFFF;
 }
-
-body{background:var(--paper);color:var(--pb-ink)}
-.sidebar{background:linear-gradient(180deg,var(--pb-green-deep),var(--pb-green-dark)) !important;color:#effaf4}
-.brand{color:#fff}
-.brand small{color:#b7d8c6 !important}
-.brand em{color:var(--pb-yellow) !important}
+body{background:#F7FAF8 !important;color:#17362B !important}
+.sidebar{background:linear-gradient(180deg,#073B2A 0%,#0B4A35 100%) !important;color:#fff !important}
+.brand,.sidebar nav a{color:#EAF6F0 !important}
+.brand small,.sidebar nav p,.radar-status small{color:#A9C9BA !important}
+.brand em{color:#F2C400 !important}
 .door{border-color:#fff !important}
-.door i{background:var(--pb-yellow) !important}
-.sidebar nav p{color:#8fc0a5 !important}
-.sidebar nav a{color:#c6dfd1 !important}
-.sidebar nav a.active,.sidebar nav a:hover{background:rgba(255,255,255,.12) !important;color:#fff !important}
-.sidebar nav a b{background:var(--pb-yellow) !important;color:var(--pb-green-deep) !important}
-.radar-status{border-color:#2f8159 !important;background:rgba(0,0,0,.10) !important}
-.radar-status>i{background:var(--pb-yellow) !important}
-
-.topbar{background:#fff;border-bottom-color:var(--pb-line)}
-.company-finder label,.company-finder>input,.company-finder>select,.search{border-color:var(--pb-line) !important;background:#fff !important}
-.health{color:var(--pb-green) !important}
-.primary{background:var(--pb-green) !important;color:#fff !important;border-color:var(--pb-green) !important}
-.primary:hover{background:var(--pb-green-dark) !important}
-.intro h1 em{color:var(--pb-green) !important}
-.live-badge{background:var(--pb-green-soft) !important;color:var(--pb-green-dark) !important}
-.demo-badge{background:var(--pb-yellow-soft) !important;border-color:#ead36b !important;color:#6d5a00 !important}
-
-.red,.hot{background:var(--pb-green-soft) !important;color:var(--pb-green) !important}
-.amber{background:var(--pb-yellow-soft) !important;color:#846b00 !important}
-.blue{background:#eef8f2 !important;color:var(--pb-green-dark) !important}
-.level.hot{background:var(--pb-green-soft) !important;color:var(--pb-green-dark) !important}
-.level.high,.level.medium{background:var(--pb-yellow-soft) !important;color:#705b00 !important}
-.filters button.active{background:var(--pb-green-dark) !important;color:#fff !important}
-
-.daily-guide{background:linear-gradient(135deg,var(--pb-yellow-soft),#fff) !important;color:#665300 !important;border-color:#eadf9c !important}
-.task-item>i{background:var(--pb-green-soft) !important;color:var(--pb-green-dark) !important}
-.task-item.overdue strong{color:#8a6d00 !important}
-.task-item button{background:var(--pb-green) !important;color:#fff !important}
-.task-buttons .open-task{background:#edf5f0 !important;color:var(--pb-green-dark) !important}
-.intelligence-metrics article{border-top-color:var(--pb-green) !important;background:#f1f8f4 !important}
-.intelligence-metrics b{color:var(--pb-green-dark) !important}
-
-.result-contacts a,.result-contacts span{color:var(--pb-green-dark) !important}
-.result-actions .primary{background:var(--pb-green) !important}
-.crm-controls span{color:var(--pb-green) !important}
-
-.prospect-score{background:var(--pb-green-soft) !important;color:var(--pb-green) !important}
-.prospect-content>a{color:var(--pb-green-dark) !important}
-.prospect-tags span,.products span{background:#eef6f1 !important;color:#416b57 !important}
-.prospect-actions .approve-signal{background:var(--pb-green-dark) !important;border-color:var(--pb-green-dark) !important}
-.analysis-score{background:var(--pb-green-soft) !important;color:var(--pb-green-dark) !important}
-.analysis-decision .qualify-analysis{background:var(--pb-green) !important;color:#fff !important;border-color:var(--pb-green) !important}
-.analysis-decision strong{color:var(--pb-green) !important}
-
-.map{background:radial-gradient(circle,#e8f5ed,#f7faf8 60%) !important}
-.ring{border-color:#b9ddc8 !important}
-.country i{background:#d6eade !important}
-.p1,.hot-dot{background:var(--pb-green) !important}
-.p2,.p3,.high-dot,.medium-dot{background:var(--pb-yellow) !important}
-
-.tabs button.active{border-color:var(--pb-yellow) !important;color:var(--pb-green-dark) !important}
-.channels button.active{background:var(--pb-green-dark) !important;color:#fff !important}
-.why{background:#fffaf0 !important;border-left-color:var(--pb-yellow) !important}
-.timeline article i{background:var(--pb-green) !important}
-.toast{background:var(--pb-green-dark) !important}
-
-/* Pequenos elementos da área de captação/triagem */
-.capture-message{background:#eef6f1 !important;color:#4e6d5e !important}
-.site-form{background:#f4f9f6 !important}
-.empty-signals{border-color:#bfd7c9 !important}
-
-/* Foco e seleção de campos */
-input:focus,select:focus,textarea:focus{outline:2px solid rgba(8,120,63,.18);border-color:var(--pb-green) !important}
-button:focus-visible,a:focus-visible{outline:3px solid rgba(246,212,54,.55);outline-offset:2px}
-
+.door i{background:#F2C400 !important}
+.sidebar nav a.active,.sidebar nav a:hover{background:#126143 !important;color:#fff !important}
+.sidebar nav a b{background:#F2C400 !important;color:#073B2A !important}
+.radar-status{background:#0A432F !important;border-color:#2A6F55 !important}
+.radar-status>i{background:#F2C400 !important;box-shadow:0 0 0 5px rgba(242,196,0,.16) !important}
+.primary,.result-actions .primary,.analysis-decision .qualify-analysis{background:#168A55 !important;border-color:#168A55 !important;color:#fff !important}
+.primary:hover,.result-actions .primary:hover,.analysis-decision .qualify-analysis:hover{background:#0E6C41 !important}
+.health,.crm-controls span{color:#168A55 !important}
+.intro h1 em{color:#168A55 !important}
+.tabs button.active{border-color:#F2C400 !important;color:#073B2A !important}
+.filters button.active,.channels button.active{background:#073B2A !important;color:#fff !important}
+.red,.hot,.level.hot,.prospect-score{background:#EAF6F0 !important;color:#168A55 !important}
+.amber,.level.high,.level.medium{background:#FFF8D8 !important;color:#7A6400 !important}
+.blue{background:#EEF7F2 !important;color:#0E6C41 !important}
+.demo-badge{background:#FFF8D8 !important;border-color:#F2DB6E !important;color:#6D5900 !important}
+.live-badge{background:#EAF6F0 !important;color:#168A55 !important}
+.intelligence-metrics article{border-top-color:#168A55 !important;background:#F1F8F4 !important}
+.intelligence-metrics b{color:#0A5237 !important}
+.task-item>i{background:#EAF6F0 !important;color:#168A55 !important}
+.task-item.overdue strong{color:#9A7A00 !important}
+.task-buttons .open-task{background:#EEF4F1 !important;color:#365C4D !important}
+.daily-guide{background:linear-gradient(135deg,#FFF8D8,#fff) !important;color:#665200 !important;border-color:#F0DE83 !important}
+.prospect-content>a,.result-contacts a,.result-contacts span{color:#168A55 !important}
+.prospect-tags span,.products span{background:#EAF6F0 !important;color:#356A55 !important}
+.prospect-actions .approve-signal{background:#073B2A !important;border-color:#073B2A !important}
+.analysis-score{background:#EAF6F0 !important;color:#168A55 !important}
+.why{background:#FFFBEA !important;border-left-color:#F2C400 !important}
+.map{background:radial-gradient(circle,#E8F5EE,#F7FAF8 60%) !important}
+.ring{border-color:#A7D6C0 !important}
+.country i{background:#CFE9DC !important}
+.p1,.p2,.p3,.hot-dot,.high-dot,.medium-dot{background:#F2C400 !important}
+.timeline article i{background:#168A55 !important}
+.toast{background:#073B2A !important}
+dialog::backdrop{background:rgba(7,59,42,.72) !important}
+::selection{background:#F2C400;color:#073B2A}
