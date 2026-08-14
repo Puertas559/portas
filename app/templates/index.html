@@ -15,8 +15,8 @@
   <aside class="sidebar">
     <a class="brand" href="/"><span class="door"><i></i></span><span><b>PUERTAS</b><small>BRASIL <em>PY</em></small></span></a>
     <nav>
-      <p>INTELIGENCIA</p><a class="active" href="#radar"><i class="bi bi-broadcast-pin"></i><span>Radar comercial</span></a><a href="#captacion"><i class="bi bi-radar"></i><span>Captación automática</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a><a href="#prioridades"><i class="bi bi-stars"></i><span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#buscador"><i class="bi bi-search"></i><span>Buscar empresas</span></a>
-      <p>OPERACIÓN</p><a href="#crm"><i class="bi bi-inbox-fill"></i><span>Caja CRM</span><b>{{ leads|length }}</b></a><a href="#visitas"><i class="bi bi-sign-turn-right-fill"></i><span>Rutas de visitas</span></a><a href="#timeline"><i class="bi bi-clock-history"></i><span>Cronología</span></a><a href="#alertas"><i class="bi bi-bell"></i><span>Alertas</span></a>
+      <p>INTELIGENCIA</p><a class="active" href="#hoy"><i class="bi bi-sun-fill"></i><span>Mi día</span></a><a href="#radar"><i class="bi bi-broadcast-pin"></i><span>Radar comercial</span></a><a href="#captacion"><i class="bi bi-radar"></i><span>Captación automática</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a><a href="#prioridades"><i class="bi bi-stars"></i><span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#buscador"><i class="bi bi-search"></i><span>Buscar empresas</span></a>
+      <p>OPERACIÓN</p><a href="#crm"><i class="bi bi-inbox-fill"></i><span>Caja CRM</span><b>{{ leads|length }}</b></a><a href="#pipeline"><i class="bi bi-kanban-fill"></i><span>Pipeline</span></a><a href="#visitas"><i class="bi bi-sign-turn-right-fill"></i><span>Rutas de visitas</span></a><a href="#timeline"><i class="bi bi-clock-history"></i><span>Cronología</span></a><a href="#alertas"><i class="bi bi-bell"></i><span>Alertas</span></a>
       <p>HERRAMIENTAS</p><a href="#triage"><i class="bi bi-building-check"></i><span>Calificar un sitio</span></a><a href="#pesquisas"><i class="bi bi-bookmark-search"></i><span>Búsquedas</span></a><a href="/api/exports/status"><i class="bi bi-download"></i><span>Exportaciones</span></a>
     </nav>
     <div class="radar-status"><i></i><span><b>Radar activo</b><small>Flask · PostgreSQL</small></span></div>
@@ -38,6 +38,12 @@
     <section class="intro">
       <div><p class="eyebrow">INTELIGENCIA COMERCIAL INDUSTRIAL</p><h1>Buenos días, <em>Equipo comercial.</em></h1><p>El radar prioriza acontecimientos que pueden convertirse en negocios para Puertas Brasil PY.</p></div>
       {% if demo_mode %}<span class="demo-badge">DATOS DEMO <small>Datos ilustrativos</small></span>{% else %}<span class="live-badge">DATOS PERSISTENTES</span>{% endif %}
+    </section>
+
+    <section class="today-hub" id="hoy">
+      <div class="today-head"><div><p class="eyebrow">EJECUCIÓN COMERCIAL</p><h2>Mi día</h2><p>La próxima acción correcta para cada oportunidad, sin perder seguimientos.</p></div><button class="primary" id="refreshToday"><i class="bi bi-arrow-clockwise"></i> Actualizar</button></div>
+      <div class="sales-metrics" id="salesMetrics"><article><small>TAREAS DE HOY</small><b>—</b></article><article><small>ATRASADAS</small><b>—</b></article><article><small>VALOR DEL PIPELINE</small><b>—</b></article><article><small>TASA DE RESPUESTA</small><b>—</b></article><article><small>VENTAS GANADAS</small><b>—</b></article></div>
+      <div class="today-grid"><div><h3>Acciones prioritarias</h3><div class="task-list" id="todayTasks"><p>Cargando agenda comercial...</p></div></div><div class="daily-guide"><i class="bi bi-lightning-charge-fill"></i><h3>Regla del día</h3><p>Primero tareas atrasadas, después oportunidades urgentes y finalmente prospección nueva.</p><strong id="dailyFocus">Preparando prioridades...</strong></div></div>
     </section>
 
     <section class="search-results hidden" id="companySearchResults">
@@ -68,6 +74,11 @@
     <section class="crm-hub" id="crm">
       <div class="crm-head"><div><p class="eyebrow">CENTRO DE OPERACIÓN COMERCIAL</p><h2><i class="bi bi-inbox-fill"></i> Caja CRM</h2><p>Todas las empresas clasificadas y oportunidades comerciales están reunidas aquí.</p></div><div class="crm-controls"><select id="crmStatusFilter"><option value="ALL">Todos los estados</option><option value="NOVO">Nuevo</option><option value="QUALIFICADO">Calificado</option><option value="CONTATO_REALIZADO">Contacto realizado</option><option value="RESPONDEU">Respondió</option><option value="VISITA">Visita</option><option value="ORCAMENTO">Presupuesto</option><option value="NEGOCIACAO">Negociación</option><option value="GANHO">Ganado</option><option value="MONITORAMENTO">Seguimiento</option></select><span id="crmCount">{{ leads|length }} empresas</span></div></div>
       <div class="crm-grid" id="crmGrid"></div>
+    </section>
+
+    <section class="pipeline-hub" id="pipeline">
+      <div class="section-head"><div><p class="eyebrow">AVANCE DE NEGOCIOS</p><h2><i class="bi bi-kanban-fill"></i> Pipeline comercial</h2><p>Mueva cada empresa conforme avance la negociación.</p></div></div>
+      <div class="kanban" id="kanbanBoard"></div>
     </section>
 
     <section class="visit-planner" id="visitas">
@@ -129,6 +140,8 @@
       <textarea id="approach" readonly></textarea><div class="contact-actions"><button class="copy" id="copyApproach"><i class="bi bi-copy"></i> Copiar</button><button class="primary" id="openChannel"><i class="bi bi-box-arrow-up-right"></i> Abrir WhatsApp</button></div>
       <label class="crm">ESTADO EN EL CRM<select id="status"><option value="NOVO">NUEVO</option><option value="QUALIFICADO">CALIFICADO</option><option value="CONTATO_REALIZADO">CONTACTO REALIZADO</option><option value="RESPONDEU">RESPONDIÓ</option><option>VISITA</option><option value="ORCAMENTO">PRESUPUESTO</option><option value="NEGOCIACAO">NEGOCIACIÓN</option><option value="GANHO">GANADO</option><option value="PERDIDO">PERDIDO</option><option value="MONITORAMENTO">SEGUIMIENTO</option><option value="DESCARTADO">DESCARTADO</option></select></label>
       <div class="follow-up"><label><input id="contactVerified" type="checkbox"> Contacto responsable validado</label><label>PRÓXIMO SEGUIMIENTO<input id="followUpDate" type="date"></label><button id="scheduleFollowUp"><i class="bi bi-calendar-check"></i> Programar seguimiento</button></div>
+      <div class="deal-data"><label>RESPONSABLE<input id="dealOwner" value="Equipo comercial"></label><label>VALOR ESTIMADO (USD)<input id="dealValue" type="number" min="0"></label><label>PROBABILIDAD (%)<input id="dealProbability" type="number" min="0" max="100"></label><button id="saveDealData"><i class="bi bi-floppy"></i> Guardar datos comerciales</button></div>
+      <div class="execution-actions"><button id="registerVisit"><i class="bi bi-clipboard2-check"></i> Registrar visita</button><button id="createProposal"><i class="bi bi-file-earmark-pdf"></i> Crear propuesta PDF</button></div>
     </div>
     <div class="drawer-body hidden" id="evidencePanel"><p>HECHO</p><blockquote id="evidenceText"></blockquote><p>INFERENCIA</p><strong>El evento es compatible con una posible demanda de soluciones de acceso industrial.</strong><p>RECOMENDACIÓN</p><strong>Validar la etapa e identificar al responsable empresarial de la decisión.</strong></div>
     <div class="drawer-body hidden timeline" id="timelinePanel"><div id="timelineList"><article><i></i><small>DESCUBRIMIENTO</small><strong>Evento identificado por el radar</strong></article></div></div>
@@ -136,6 +149,10 @@
 </div>
 
 <dialog id="leadDialog"><form id="leadForm"><div class="modal-head"><div><p class="eyebrow">NUEVO REGISTRO</p><h2>Registrar oportunidad</h2></div><button type="button" id="closeDialog">×</button></div><div class="form-grid"><label>Empresa*<input name="company" required></label><label>Sector<input name="sector"></label><label>Proyecto*<input name="project" required></label><label>Evento*<select name="event"><option value="NEW_FACTORY">NUEVA FÁBRICA</option><option value="NEW_LOGISTICS_CENTER">NUEVO CENTRO LOGÍSTICO</option><option value="EXPANSION">EXPANSIÓN</option><option value="INVESTMENT">INVERSIÓN</option><option value="BUYING_INTENT">INTENCIÓN DE COMPRA</option><option value="NEW_COMPANY">NUEVA EMPRESA</option></select></label><label>Ciudad*<input name="city" required></label><label>Departamento*<input name="department" required></label><label>Puntuación<input name="score" type="number" min="0" max="100" value="75"></label><label>Etapa<input name="stage"></label><label class="wide">Evidencia*<textarea name="evidence" required></textarea></label><label>Fuente<input name="sourceName"></label><label>URL de la fuente<input name="sourceUrl" type="url"></label></div><button class="primary submit">Guardar oportunidad</button><p id="formMessage"></p></form></dialog>
+
+<dialog id="visitDialog"><form id="visitForm"><div class="modal-head"><div><p class="eyebrow">TRABAJO EN CAMPO</p><h2>Registrar visita comercial</h2><p id="visitCompany"></p></div><button type="button" data-close-dialog="visitDialog">×</button></div><input type="hidden" name="opportunityId" id="visitOpportunityId"><div class="form-grid"><label class="wide">Medidas y características técnicas<textarea name="measurements" placeholder="Vanos, altura, ancho, flujo, temperatura..."></textarea></label><label class="wide">Necesidades y dolores identificados<textarea name="needs" required></textarea></label><label class="wide">Notas de la visita<textarea name="notes"></textarea></label><label class="wide">Próximo paso acordado<textarea name="nextStep" required></textarea></label><label class="wide">Fotos del lugar<input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></label></div><button class="primary submit">Guardar visita</button><p id="visitMessage"></p></form></dialog>
+
+<dialog id="proposalDialog"><form id="proposalForm"><div class="modal-head"><div><p class="eyebrow">DOCUMENTO COMERCIAL</p><h2>Crear propuesta en PDF</h2><p id="proposalCompany"></p></div><button type="button" data-close-dialog="proposalDialog">×</button></div><div class="form-grid"><label>Valor estimado (USD)*<input name="amount" type="number" min="0" step="0.01" required></label><label>Validez (días)<input name="validityDays" type="number" min="1" max="90" value="15"></label><label class="wide">Alcance, solución y condiciones*<textarea name="scope" required placeholder="Describa productos, cantidades, instalación y servicios incluidos"></textarea></label></div><button class="primary submit">Generar PDF</button><p id="proposalMessage"></p></form></dialog>
 
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }};</script>
