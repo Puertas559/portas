@@ -613,7 +613,7 @@ async function loadToday() {
       const due = new Date(task.dueAt);
       const overdue = due < new Date();
       const icon = { WHATSAPP: "whatsapp", CALL: "telephone", EMAIL: "envelope", VISIT: "geo-alt", FOLLOW_UP: "arrow-repeat" }[task.channel] || "check2-square";
-      return `<article class="task-item ${overdue ? "overdue" : ""}" data-task-id="${task.id}" data-opportunity-id="${task.opportunityId}"><i class="bi bi-${icon}"></i><div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.company)} · ${escapeHtml(task.owner)} · ${due.toLocaleDateString("es-PY")}</span></div><button class="complete-task"><i class="bi bi-check-lg"></i> Hecho</button></article>`;
+      return `<article class="task-item ${overdue ? "overdue" : ""}" data-task-id="${task.id}" data-opportunity-id="${task.opportunityId}"><i class="bi bi-${icon}"></i><div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.company)} · ${escapeHtml(task.owner)} · ${due.toLocaleDateString("es-PY")}</span></div><div class="task-buttons"><button class="open-task"><i class="bi bi-box-arrow-up-right"></i> Abrir</button><button class="complete-task"><i class="bi bi-check-lg"></i> Hecho</button></div></article>`;
     }).join("") || '<div class="empty-signals"><strong>Agenda al día.</strong><span>No hay tareas vencidas ni programadas para hoy.</span></div>';
   } catch (_error) {
     $("todayTasks").innerHTML = "<p>No se pudo cargar la agenda comercial.</p>";
@@ -622,6 +622,13 @@ async function loadToday() {
 
 $("refreshToday").addEventListener("click", loadToday);
 $("todayTasks").addEventListener("click", async (event) => {
+  const openButton = event.target.closest(".open-task");
+  if (openButton) {
+    const row = openButton.closest(".task-item");
+    const lead = leads.find((item) => String(item.id) === row.dataset.opportunityId);
+    if (lead) { selectLead(lead); toast("Ficha abierta en el panel derecho"); }
+    return;
+  }
   const button = event.target.closest(".complete-task");
   if (!button) return;
   const task = button.closest(".task-item");
