@@ -70,3 +70,60 @@ class TimelineEvent(db.Model):
     description = db.Column(db.Text, nullable=False)
     occurred_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     opportunity = db.relationship("Opportunity", back_populates="timeline")
+
+
+class ProspectSignal(db.Model):
+    __tablename__ = "prospect_signals"
+    id = db.Column(db.Integer, primary_key=True)
+    fingerprint = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    company_name = db.Column(db.String(220), nullable=False, index=True)
+    title = db.Column(db.String(500), nullable=False)
+    summary = db.Column(db.Text, nullable=False)
+    source_name = db.Column(db.String(160), nullable=False, index=True)
+    source_url = db.Column(db.String(1200), nullable=False)
+    source_type = db.Column(db.String(40), nullable=False, default="NEWS")
+    source_reliability = db.Column(db.Integer, nullable=False, default=50)
+    published_at = db.Column(db.DateTime(timezone=True))
+    city = db.Column(db.String(120))
+    department = db.Column(db.String(120))
+    event_type = db.Column(db.String(80), nullable=False)
+    score = db.Column(db.Integer, nullable=False, index=True)
+    level = db.Column(db.String(20), nullable=False, index=True)
+    products = db.Column(db.JSON, default=list, nullable=False)
+    reasons = db.Column(db.JSON, default=list, nullable=False)
+    status = db.Column(db.String(40), nullable=False, default="PENDING_VALIDATION", index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
+    discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    opportunity = db.relationship("Opportunity")
+
+    def to_dict(self):
+        return {
+            "id": self.id, "company": self.company_name, "title": self.title, "summary": self.summary,
+            "sourceName": self.source_name, "sourceUrl": self.source_url, "sourceType": self.source_type,
+            "reliability": self.source_reliability, "publishedAt": self.published_at.isoformat() if self.published_at else None,
+            "city": self.city, "department": self.department, "event": self.event_type, "score": self.score,
+            "level": self.level, "products": self.products or [], "reasons": self.reasons or [],
+            "status": self.status, "opportunityId": self.opportunity_id,
+            "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
+        }
+
+
+class CollectorRun(db.Model):
+    __tablename__ = "collector_runs"
+    id = db.Column(db.Integer, primary_key=True)
+    started_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    finished_at = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(30), nullable=False, default="RUNNING", index=True)
+    sources_scanned = db.Column(db.Integer, nullable=False, default=0)
+    items_scanned = db.Column(db.Integer, nullable=False, default=0)
+    signals_created = db.Column(db.Integer, nullable=False, default=0)
+    errors = db.Column(db.JSON, default=list, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "startedAt": self.started_at.isoformat() if self.started_at else None,
+            "finishedAt": self.finished_at.isoformat() if self.finished_at else None, "status": self.status,
+            "sourcesScanned": self.sources_scanned, "itemsScanned": self.items_scanned,
+            "signalsCreated": self.signals_created, "errors": self.errors or [],
+        }
