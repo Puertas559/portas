@@ -6,10 +6,35 @@ from flask import Blueprint, current_app, jsonify, request, send_file, send_from
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
 from ..extensions import db
-from ..models import CollectorRun, Company, Opportunity, Project, Proposal, ProspectSignal, SalesTask, TimelineEvent, VisitRecord, WebsiteAnalysis
+from ..models import (
+    AuditLog, CollectorRun, Company, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
+    ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, WebsiteAnalysis,
+)
+from ..services.entity_resolution import resolve_company, resolve_project
+from ..services.intelligence import as_datetime, link_evidence_and_products, record_evidence, score_opportunity
+from ..tenant import current_tenant, current_user, require_permission
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
+BUYING_STAGES = {"AWARENESS", "RESEARCH", "PROJECT_PLANNING", "SUPPLIER_DISCOVERY", "RFQ", "PROCUREMENT", "NEGOTIATION", "PURCHASE", "POSTPONED", "UNKNOWN"}
+
+
+def _audit(action, entity_type, entity_id, details=None):
+    tenant = current_tenant()
+    user = current_user()
+    db.session.add(AuditLog(
+        tenant_id=tenant.id, user_id=user.id if user else None, action=action,
+        entity_type=entity_type, entity_id=str(entity_id), details=details or {},
+    ))
+
+
+def _optional_number(value):
+    if value in (None, ""):
+        return None
+    try:
+        return max(0, float(value))
+    except (TypeError, ValueError):
+        raise ValueError("Valor numérico inválido")
 
 
 def _create_cadence(opportunity):
@@ -26,9 +51,65 @@ def _create_cadence(opportunity):
         db.session.add(SalesTask(opportunity=opportunity, title=title, channel=channel, due_at=now + timedelta(days=days), sequence_step=step))
 
 
+def _create_intelligence_opportunity(data, status="NOVO"):
+    tenant = current_tenant()
+    company = resolve_company(
+        tenant.id, data.get("company"), sector=data.get("sector"), origin_country=data.get("origin"),
+        website=data.get("website"), address=data.get("address"),
+        city=data.get("city"), department=data.get("department") or data.get("region"), country=data.get("country") or "Paraguay",
+        phone=data.get("phone"), phone_business=data.get("phone"), whatsapp=data.get("whatsapp") or data.get("phone"),
+        email=data.get("email"), email_business=data.get("email"), linkedin_url=data.get("linkedin"),
+        registration_id=data.get("registrationId"), description=data.get("companyDescription"),
+    )
+    db.session.flush()
+    project = resolve_project(
+        tenant.id, company, data.get("project") or data.get("sourceTitle") or "Proyecto por validar",
+        city=data.get("city") or "Por validar", department=data.get("department") or data.get("region") or "Por validar",
+        country=data.get("country") or "Paraguay", project_type=data.get("projectType") or data.get("event") or "UNKNOWN",
+        stage=data.get("stage"), investment=data.get("investment"), investment_amount=_optional_number(data.get("investmentAmount")),
+        investment_currency=(data.get("investmentCurrency") or "USD")[:3].upper(), area_m2=_optional_number(data.get("areaM2")),
+        description=data.get("projectDescription"), announced_at=as_datetime(data.get("announcedAt")), started_at=as_datetime(data.get("startedAt")),
+    )
+    db.session.flush()
+    signal, evidence = record_evidence(tenant, company, project, data)
+    linked = OpportunityEvidence.query.join(Opportunity).filter(
+        OpportunityEvidence.evidence_id == evidence.id,
+        Opportunity.tenant_id == tenant.id,
+        ~Opportunity.status.in_({"PERDIDO", "DESCARTADO"}),
+    ).first()
+    if linked:
+        return linked.opportunity, False
+    buying_stage = (data.get("buyingStage") or "UNKNOWN").upper()
+    if buying_stage not in BUYING_STAGES:
+        buying_stage = "UNKNOWN"
+    try:
+        probability = max(0, min(100, int(data.get("probability", 20))))
+        potential_value = max(0, float(data.get("potentialDealValue", data.get("estimatedValue", 0))))
+    except (TypeError, ValueError):
+        probability, potential_value = 20, 0
+    opportunity = Opportunity(
+        tenant_id=tenant.id, project=project, event_type=signal.signal_type, score=0, level="MEDIUM", status=status,
+        products=data.get("products") or [], evidence=evidence.claim, source_name=signal.source_document.source.name,
+        source_url=signal.source_document.canonical_url, probability=probability,
+        estimated_value=potential_value, potential_deal_value=potential_value, buying_stage=buying_stage,
+    )
+    db.session.add(opportunity)
+    db.session.flush()
+    score_opportunity(tenant, opportunity, data)
+    link_evidence_and_products(tenant, opportunity, evidence, opportunity.products, data.get("productFit", 70))
+    _create_cadence(opportunity)
+    db.session.add(TimelineEvent(
+        opportunity=opportunity, event_type="INTELLIGENCE_CREATED",
+        description=f"Oportunidad creada desde señal {signal.signal_type} con evidencia trazable y scoring {opportunity.score_version}",
+    ))
+    _audit("CREATE", "OPPORTUNITY", opportunity.id, {"signal_id": signal.id, "project_id": project.id, "score": opportunity.score})
+    return opportunity, True
+
+
 @api_bp.get("/opportunities")
 def opportunities_list():
-    rows = Opportunity.query.order_by(Opportunity.score.desc()).limit(500).all()
+    tenant = current_tenant()
+    rows = Opportunity.query.filter_by(tenant_id=tenant.id).order_by(Opportunity.score.desc()).limit(500).all()
     return jsonify([row.to_dict() for row in rows])
 
 
@@ -48,70 +129,52 @@ def company_search():
 
 
 @api_bp.post("/company-search/add")
+@require_permission("WRITE_CRM")
 def company_search_add():
     data = request.get_json(silent=True) or {}
     if not data.get("company"):
         return jsonify(error="Falta el nombre de la empresa"), 400
-    company = Company.query.filter_by(name=data["company"].strip()).first()
-    if not company:
-        company = Company(name=data["company"].strip(), origin_country="Paraguay")
-        db.session.add(company)
-    company.sector = data.get("sector") or company.sector or "Por validar"
-    company.website = data.get("website") or company.website
-    company.address = data.get("address") or company.address
-    company.phone = data.get("phone") or company.phone
-    company.whatsapp = data.get("phone") or company.whatsapp
-    company.email = data.get("email") or company.email
-    company.linkedin_url = data.get("linkedin") or company.linkedin_url
-    project = Project(
-        company=company, name="Empresa identificada por búsqueda geográfica",
-        city=data.get("city") or "Por validar", department=data.get("region") or "Por validar",
-        stage="Prospección geográfica",
-    )
+    payload = dict(data)
+    payload.update({
+        "project": data.get("project") or "Empresa identificada por búsqueda geográfica",
+        "event": "COMPANY_DISCOVERY", "department": data.get("region") or "Por validar",
+        "stage": "Prospección geográfica", "sourceName": data.get("source") or "Buscador empresarial",
+        "sourceUrl": data.get("website"),
+        "evidence": f"Empresa identificada por fuente pública en {data.get('city') or 'Paraguay'}.",
+        "dataConfidence": data.get("score", 55), "intent": 35, "icpFit": data.get("score", 55),
+        "evidenceClassification": "FACT",
+    })
     try:
-        score = max(0, min(100, int(data.get("score", 55))))
-    except (TypeError, ValueError):
-        score = 55
-    opportunity = Opportunity(
-        project=project, event_type="COMPANY_DISCOVERY", score=score,
-        level="HIGH" if score >= 75 else "MEDIUM", status="NOVO",
-        products=[], evidence=f"Empresa identificada por fuente pública en {data.get('city') or 'Paraguay'}.",
-        source_name=data.get("source") or "Buscador empresarial", source_url=data.get("website"),
-    )
-    db.session.add(opportunity)
-    db.session.flush()
-    _create_cadence(opportunity)
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="GEOGRAPHIC_DISCOVERY", description="Empresa añadida desde la búsqueda por región e industria"))
+        opportunity, created = _create_intelligence_opportunity(payload)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 400
     db.session.commit()
-    return jsonify(opportunity.to_dict()), 201
+    return jsonify(opportunity.to_dict()), 201 if created else 200
 
 
 @api_bp.post("/opportunities")
+@require_permission("WRITE_CRM")
 def opportunities_create():
     data = request.get_json(silent=True) or {}
     required = ("company", "project", "city", "department", "event", "evidence")
     missing = [key for key in required if not data.get(key)]
     if missing:
         return jsonify(error="Faltan campos obligatorios", fields=missing), 400
-    score = max(0, min(100, int(data.get("score", 0))))
-    level = "HOT" if score >= 90 else "HIGH" if score >= 75 else "MEDIUM" if score >= 55 else "LOW" if score >= 30 else "VERY_LOW"
-    company = Company.query.filter_by(name=data["company"].strip()).first()
-    if not company:
-        company = Company(name=data["company"].strip(), sector=data.get("sector"), origin_country=data.get("origin"))
-        db.session.add(company)
-    project = Project(company=company, name=data["project"].strip(), city=data["city"].strip(), department=data["department"].strip(), stage=data.get("stage"), investment=data.get("investment"))
-    opportunity = Opportunity(project=project, event_type=data["event"], score=score, level=level, products=data.get("products") or [], evidence=data["evidence"], source_name=data.get("sourceName"), source_url=data.get("sourceUrl"))
-    db.session.add(opportunity)
-    db.session.flush()
-    _create_cadence(opportunity)
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="DISCOVERY", description="Oportunidad registrada en el radar"))
+    try:
+        opportunity, created = _create_intelligence_opportunity(data)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 400
     db.session.commit()
-    return jsonify(opportunity.to_dict()), 201
+    return jsonify(opportunity.to_dict()), 201 if created else 200
 
 
 @api_bp.patch("/opportunities/<int:opportunity_id>")
+@require_permission("WRITE_CRM")
 def opportunity_update(opportunity_id):
-    opportunity = db.get_or_404(Opportunity, opportunity_id)
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
     data = request.get_json(silent=True) or {}
     status = data.get("status")
     if status is not None and status not in STATUSES:
@@ -137,6 +200,7 @@ def opportunity_update(opportunity_id):
     if data.get("estimatedValue") is not None:
         try:
             opportunity.estimated_value = max(0, float(data["estimatedValue"]))
+            opportunity.potential_deal_value = opportunity.estimated_value
             changes.append("Valor estimado actualizado")
         except (TypeError, ValueError):
             return jsonify(error="Valor estimado inválido"), 400
@@ -146,15 +210,19 @@ def opportunity_update(opportunity_id):
             changes.append("Probabilidad actualizada")
         except (TypeError, ValueError):
             return jsonify(error="Probabilidad inválida"), 400
+    opportunity.expected_revenue = (opportunity.potential_deal_value or 0) * (opportunity.probability or 0) / 100
     if not changes:
         return jsonify(error="No se recibió ningún cambio"), 400
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_UPDATE", description=" · ".join(changes)))
+    _audit("UPDATE", "OPPORTUNITY", opportunity.id, {"changes": changes})
     db.session.commit()
     return jsonify(opportunity.to_dict())
 
 
 @api_bp.get("/timeline/<int:opportunity_id>")
 def timeline(opportunity_id):
+    tenant = current_tenant()
+    Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
     rows = TimelineEvent.query.filter_by(opportunity_id=opportunity_id).order_by(TimelineEvent.occurred_at.desc()).all()
     return jsonify([{"id": row.id, "type": row.event_type, "description": row.description, "occurredAt": row.occurred_at.isoformat()} for row in rows])
 
@@ -166,15 +234,18 @@ def export_status():
 
 @api_bp.get("/collector/status")
 def collector_status():
-    last_run = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
-    pending = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").count()
+    tenant = current_tenant()
+    last_run = CollectorRun.query.filter_by(tenant_id=tenant.id).order_by(CollectorRun.started_at.desc()).first()
+    pending = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").count()
     return jsonify(enabled=True, pending=pending, lastRun=last_run.to_dict() if last_run else None)
 
 
 @api_bp.post("/collector/run")
+@require_permission("RUN_COLLECTOR")
 def collector_run():
     from datetime import datetime, timedelta, timezone
-    recent = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
+    tenant = current_tenant()
+    recent = CollectorRun.query.filter_by(tenant_id=tenant.id).order_by(CollectorRun.started_at.desc()).first()
     if recent and recent.started_at and recent.started_at > datetime.now(timezone.utc) - timedelta(minutes=1):
         return jsonify(error="La captación ya fue ejecutada recientemente", run=recent.to_dict()), 429
     from ..services.collector import run_collector
@@ -183,28 +254,32 @@ def collector_run():
 
 
 @api_bp.post("/signals/<int:signal_id>/approve")
+@require_permission("WRITE_CRM")
 def signal_approve(signal_id):
-    signal = db.get_or_404(ProspectSignal, signal_id)
+    tenant = current_tenant()
+    signal = ProspectSignal.query.filter_by(id=signal_id, tenant_id=tenant.id).first_or_404()
     if signal.opportunity_id:
         return jsonify(signal.to_dict())
-    company = Company.query.filter_by(name=signal.company_name).first()
-    if not company:
-        company = Company(name=signal.company_name, sector="Por validar", origin_country="Paraguay")
-        db.session.add(company)
-    project = Project(company=company, name=signal.title, city=signal.city or "Por validar", department=signal.department or "Por validar", stage="Prospección automática")
-    opportunity = Opportunity(project=project, event_type=signal.event_type, score=signal.score, level=signal.level, products=signal.products or [], evidence=signal.summary, source_name=signal.source_name, source_url=signal.source_url)
-    db.session.add(opportunity)
-    db.session.flush()
-    _create_cadence(opportunity)
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="AUTOMATIC_DISCOVERY", description=f"Señal aprobada desde {signal.source_name}"))
+    opportunity, _ = _create_intelligence_opportunity({
+        "company": signal.company_name, "project": signal.title, "city": signal.city or "Por validar",
+        "department": signal.department or "Por validar", "country": "Paraguay", "event": signal.event_type,
+        "score": signal.score, "icpFit": signal.score, "intent": signal.score,
+        "dataConfidence": signal.source_reliability, "products": signal.products or [],
+        "evidence": signal.summary, "sourceName": signal.source_name, "sourceUrl": signal.source_url,
+        "sourceType": signal.source_type, "sourceReliability": signal.source_reliability,
+        "publishedAt": signal.published_at, "evidenceClassification": "FACT",
+        "stage": "Prospección automática",
+    })
     signal.status, signal.opportunity_id = "APPROVED", opportunity.id
     db.session.commit()
     return jsonify(opportunity=opportunity.to_dict(), signal=signal.to_dict()), 201
 
 
 @api_bp.post("/signals/<int:signal_id>/discard")
+@require_permission("WRITE_CRM")
 def signal_discard(signal_id):
-    signal = db.get_or_404(ProspectSignal, signal_id)
+    tenant = current_tenant()
+    signal = ProspectSignal.query.filter_by(id=signal_id, tenant_id=tenant.id).first_or_404()
     signal.status = "DISCARDED"
     db.session.commit()
     return jsonify(signal.to_dict())
@@ -228,18 +303,21 @@ def website_analysis_create():
 
 @api_bp.get("/website-analysis")
 def website_analysis_list():
-    rows = WebsiteAnalysis.query.order_by(WebsiteAnalysis.created_at.desc()).limit(30).all()
+    tenant = current_tenant()
+    rows = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id).order_by(WebsiteAnalysis.created_at.desc()).limit(30).all()
     return jsonify([row.to_dict() for row in rows])
 
 
 def _commercial_messages(analysis):
+    brand = current_tenant().settings or {}
+    brand_name = brand.get("brand_name", "Puertas Brasil PY")
     contact = analysis.contacts[0] if analysis.contacts else f"equipo de {analysis.company_name}"
     products = analysis.products or ["soluciones de accesos automáticos"]
     services = analysis.services or ["evaluación técnica y proyecto a medida"]
     product_text = ", ".join(products[:3])
     service_text = ", ".join(services[:2])
     whatsapp = (
-        f"Hola, {contact}. Soy parte del equipo comercial de Puertas Brasil PY. "
+        f"Hola, {contact}. Soy parte del equipo comercial de {brand_name}. "
         f"Al conocer la actividad de {analysis.company_name} en el sector {analysis.sector}, "
         f"identificamos una posible aplicación para {product_text}. "
         f"Podemos realizar {service_text} para validar la solución adecuada. "
@@ -248,7 +326,7 @@ def _commercial_messages(analysis):
     subject = f"Propuesta de soluciones de accesos automáticos para {analysis.company_name}"
     email = (
         f"Estimado/a {contact}:\n\n"
-        "Es un gusto presentarle a Puertas Brasil PY, fábrica paraguaya especializada en soluciones "
+        f"Es un gusto presentarle a {brand_name}, empresa especializada en soluciones "
         "de cerramientos automáticos para los segmentos industrial, logístico, comercial y aeronáutico.\n\n"
         f"A partir de la información pública de {analysis.company_name}, dedicada al sector {analysis.sector}, "
         f"identificamos una posible oportunidad de mejora mediante {product_text}. Nuestra propuesta puede incluir "
@@ -257,44 +335,36 @@ def _commercial_messages(analysis):
         "Nos gustaría conocer su operación y verificar, sin compromiso, si estas soluciones pueden aportar mayor "
         "seguridad, eficiencia y continuidad operativa. Quedamos a disposición para coordinar una visita técnica "
         "o una breve reunión con la persona responsable de mantenimiento, operaciones o compras.\n\n"
-        "Atentamente,\nEquipo comercial de Puertas Brasil PY\n"
-        "+595 986 986215\ngerenciacomercial@puertasbrasil.com.py\npuertasbrasil.com.py"
+        f"Atentamente,\nEquipo comercial de {brand_name}\n"
+        f"{brand.get('sales_phone', '')}\n{brand.get('sales_email', '')}\n{brand.get('website', '')}"
     )
     return whatsapp, subject, email
 
 
 @api_bp.post("/website-analysis/<int:analysis_id>/qualify")
+@require_permission("WRITE_CRM")
 def website_analysis_qualify(analysis_id):
-    analysis = db.get_or_404(WebsiteAnalysis, analysis_id)
+    tenant = current_tenant()
+    analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
     if analysis.opportunity_id:
         return jsonify(analysis=analysis.to_dict(), opportunity=analysis.opportunity.to_dict())
-    company = Company.query.filter_by(name=analysis.company_name).first()
-    if not company:
-        company = Company(name=analysis.company_name, sector=analysis.sector, origin_country="Paraguay", website=analysis.url)
-        db.session.add(company)
-    else:
-        company.website = company.website or analysis.url
-        company.sector = company.sector or analysis.sector
-    company.address = company.address or analysis.address
-    company.phone = company.phone or (analysis.phones[0] if analysis.phones else None)
-    company.whatsapp = company.whatsapp or analysis.whatsapp
-    company.email = company.email or (analysis.emails[0] if analysis.emails else None)
-    company.linkedin_url = company.linkedin_url or (analysis.social_links or {}).get("linkedin")
-    project = Project(
-        company=company, name=f"Calificación comercial desde {analysis.url}",
-        city=(analysis.address or "Por validar")[:120], department="Por validar",
-        stage="Empresa calificada desde análisis web",
-    )
-    level = {"MUY ALTO": "HOT", "ALTO": "HIGH", "MEDIO": "MEDIUM", "BAJO": "LOW"}.get(analysis.potential_level, "MEDIUM")
     evidence = "; ".join(analysis.reasons or []) or analysis.summary or "Análisis público del sitio empresarial"
-    opportunity = Opportunity(
-        project=project, event_type="BUYING_INTENT", score=analysis.potential_score, level=level,
-        status="QUALIFICADO", products=analysis.products or [], evidence=evidence,
-        source_name="Análisis minucioso del sitio", source_url=analysis.url,
-    )
-    db.session.add(opportunity)
-    db.session.flush()
-    _create_cadence(opportunity)
+    opportunity, _ = _create_intelligence_opportunity({
+        "company": analysis.company_name, "sector": analysis.sector, "website": analysis.url,
+        "address": analysis.address, "phone": analysis.phones[0] if analysis.phones else None,
+        "whatsapp": analysis.whatsapp, "email": analysis.emails[0] if analysis.emails else None,
+        "linkedin": (analysis.social_links or {}).get("linkedin"),
+        "project": f"Calificación comercial desde {analysis.url}",
+        "city": (analysis.address or "Por validar")[:120], "department": "Por validar",
+        "stage": "Empresa calificada desde análisis web", "projectType": "ACCOUNT_RESEARCH",
+        "event": "BUYING_INTENT", "score": analysis.potential_score, "icpFit": analysis.potential_score,
+        "intent": analysis.potential_score, "productFit": analysis.potential_score,
+        "dataConfidence": min(90, 45 + analysis.pages_analyzed * 10), "signalRecency": 100,
+        "products": analysis.products or [], "evidence": evidence,
+        "sourceName": "Análisis minucioso del sitio", "sourceUrl": analysis.url,
+        "sourceType": "COMPANY_WEBSITE", "evidenceClassification": "INFERENCE",
+        "buyingStage": "RESEARCH",
+    }, status="QUALIFICADO")
     whatsapp, subject, email = _commercial_messages(analysis)
     analysis.decision, analysis.opportunity_id = "QUALIFIED", opportunity.id
     analysis.whatsapp_message, analysis.email_subject, analysis.email_body = whatsapp, subject, email
@@ -307,8 +377,10 @@ def website_analysis_qualify(analysis_id):
 
 
 @api_bp.post("/website-analysis/<int:analysis_id>/disqualify")
+@require_permission("WRITE_CRM")
 def website_analysis_disqualify(analysis_id):
-    analysis = db.get_or_404(WebsiteAnalysis, analysis_id)
+    tenant = current_tenant()
+    analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
     if analysis.opportunity_id:
         return jsonify(error="La empresa ya ingresó al CRM; márquela como descartada desde el CRM"), 409
     analysis.decision = "DISQUALIFIED"
@@ -319,7 +391,8 @@ def website_analysis_disqualify(analysis_id):
 @api_bp.post("/tasks/ensure")
 def tasks_ensure():
     created = 0
-    rows = Opportunity.query.filter(~Opportunity.status.in_({"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"})).all()
+    tenant = current_tenant()
+    rows = Opportunity.query.filter(Opportunity.tenant_id == tenant.id, ~Opportunity.status.in_({"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"})).all()
     for opportunity in rows:
         if not opportunity.tasks:
             _create_cadence(opportunity)
@@ -330,9 +403,10 @@ def tasks_ensure():
 
 @api_bp.get("/dashboard/today")
 def dashboard_today():
+    tenant = current_tenant()
     now = datetime.now(timezone.utc)
     tomorrow = now + timedelta(days=1)
-    tasks = SalesTask.query.filter(SalesTask.status == "PENDING", SalesTask.due_at <= tomorrow).order_by(SalesTask.due_at.asc()).limit(50).all()
+    tasks = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id, SalesTask.status == "PENDING", SalesTask.due_at <= tomorrow).order_by(SalesTask.due_at.asc()).limit(50).all()
     return jsonify(
         tasks=[task.to_dict() for task in tasks],
         overdue=sum(1 for task in tasks if task.due_at.replace(tzinfo=timezone.utc) < now if task.due_at.tzinfo is None) + sum(1 for task in tasks if task.due_at.tzinfo is not None and task.due_at < now),
@@ -341,8 +415,10 @@ def dashboard_today():
 
 
 @api_bp.patch("/tasks/<int:task_id>")
+@require_permission("WRITE_CRM")
 def task_update(task_id):
-    task = db.get_or_404(SalesTask, task_id)
+    tenant = current_tenant()
+    task = SalesTask.query.join(Opportunity).filter(SalesTask.id == task_id, Opportunity.tenant_id == tenant.id).first_or_404()
     data = request.get_json(silent=True) or {}
     if data.get("status") not in {"DONE", "PENDING", "CANCELLED"}:
         return jsonify(error="Estado de tarea inválido"), 400
@@ -356,9 +432,11 @@ def task_update(task_id):
 
 
 @api_bp.post("/visits")
+@require_permission("WRITE_CRM")
 def visit_create():
     data = request.form if request.files else (request.get_json(silent=True) or {})
-    opportunity = db.get_or_404(Opportunity, int(data.get("opportunityId", 0)))
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=int(data.get("opportunityId", 0)), tenant_id=tenant.id).first_or_404()
     photos = []
     upload_dir = Path(current_app.config["DATA_DIR"]) / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -387,12 +465,15 @@ def uploaded_file(filename):
 
 
 @api_bp.post("/proposals/<int:opportunity_id>")
+@require_permission("WRITE_CRM")
 def proposal_create(opportunity_id):
     import textwrap
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
 
-    opportunity = db.get_or_404(Opportunity, opportunity_id)
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
+    brand = tenant.settings or {}
     data = request.get_json(silent=True) or {}
     try:
         amount = max(0, float(data.get("amount", 0)))
@@ -410,7 +491,7 @@ def proposal_create(opportunity_id):
     pdf = canvas.Canvas(str(path), pagesize=A4)
     width, height = A4
     pdf.setFillColorRGB(.07, .12, .21); pdf.rect(0, height - 105, width, 105, fill=1, stroke=0)
-    pdf.setFillColorRGB(1, 1, 1); pdf.setFont("Helvetica-Bold", 22); pdf.drawString(45, height - 55, "PUERTAS BRASIL PY")
+    pdf.setFillColorRGB(1, 1, 1); pdf.setFont("Helvetica-Bold", 22); pdf.drawString(45, height - 55, brand.get("brand_name", tenant.name).upper())
     pdf.setFont("Helvetica", 10); pdf.drawString(45, height - 78, f"Propuesta comercial {number}")
     y = height - 145; pdf.setFillColorRGB(.08, .13, .22)
     for title, value in (("Cliente", opportunity.project.company.name), ("Proyecto", opportunity.project.name), ("Ubicación", f"{opportunity.project.city}, {opportunity.project.department}"), ("Validez", f"{validity} días"), ("Valor estimado", f"USD {amount:,.2f}")):
@@ -421,7 +502,7 @@ def proposal_create(opportunity_id):
     y -= 16; pdf.setFont("Helvetica-Bold", 12); pdf.drawString(45, y, "Productos y servicios recomendados"); y -= 21
     pdf.setFont("Helvetica", 10)
     for product in opportunity.products or ["Evaluación técnica de accesos industriales"]: pdf.drawString(55, y, f"• {product}"); y -= 16
-    pdf.setFont("Helvetica", 9); pdf.drawString(45, 65, "+595 986 986215 · gerenciacomercial@puertasbrasil.com.py · puertasbrasil.com.py")
+    pdf.setFont("Helvetica", 9); pdf.drawString(45, 65, " · ".join(filter(None, (brand.get("sales_phone"), brand.get("sales_email"), brand.get("website")))))
     pdf.save()
     proposal = Proposal(opportunity=opportunity, number=number, amount=amount, validity_days=validity, scope=scope, pdf_filename=filename)
     opportunity.status = "ORCAMENTO"; opportunity.estimated_value = amount; opportunity.probability = max(opportunity.probability, 60)
@@ -434,19 +515,21 @@ def proposal_create(opportunity_id):
 
 @api_bp.get("/proposals/<int:proposal_id>/download")
 def proposal_download(proposal_id):
-    proposal = db.get_or_404(Proposal, proposal_id)
+    tenant = current_tenant()
+    proposal = Proposal.query.join(Opportunity).filter(Proposal.id == proposal_id, Opportunity.tenant_id == tenant.id).first_or_404()
     path = Path(current_app.config["DATA_DIR"]) / "proposals" / proposal.pdf_filename
     return send_file(path, as_attachment=True, download_name=f"Propuesta-{proposal.number}.pdf")
 
 
 @api_bp.get("/metrics")
 def commercial_metrics():
-    opportunities = Opportunity.query.all()
-    proposals = Proposal.query.all()
+    tenant = current_tenant()
+    opportunities = Opportunity.query.filter_by(tenant_id=tenant.id).all()
+    proposals = Proposal.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id).all()
     active = [row for row in opportunities if row.status not in {"GANHO", "PERDIDO", "DESCARTADO"}]
     contacted = [row for row in opportunities if row.status not in {"NOVO", "QUALIFICADO", "DESCARTADO"}]
     won = [row for row in opportunities if row.status == "GANHO"]
-    overdue = SalesTask.query.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
+    overdue = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id, SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
     return jsonify(
         opportunities=len(opportunities), contacted=len(contacted), proposals=len(proposals), won=len(won),
         pipelineValue=sum(row.estimated_value or 0 for row in active),
@@ -454,6 +537,145 @@ def commercial_metrics():
         proposalValue=sum(row.amount for row in proposals), overdueTasks=overdue,
         responseRate=round(100 * len(contacted) / len(opportunities), 1) if opportunities else 0,
         winRate=round(100 * len(won) / len(opportunities), 1) if opportunities else 0,
+    )
+
+
+def _pagination():
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(100, int(request.args.get("perPage", 25))))
+    except ValueError:
+        page, per_page = 1, 25
+    return page, per_page
+
+
+@api_bp.get("/companies")
+def companies_list():
+    tenant = current_tenant()
+    page, per_page = _pagination()
+    query = Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE")
+    if request.args.get("q"):
+        query = query.filter(Company.normalized_name.contains(request.args["q"].strip().casefold()))
+    pagination = query.order_by(Company.name).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(items=[{
+        "id": row.id, "name": row.name, "canonicalName": row.canonical_name,
+        "normalizedName": row.normalized_name, "sector": row.sector, "domain": row.domain,
+        "city": row.city, "department": row.department, "country": row.country,
+        "identityConfidence": row.identity_confidence, "projects": len(row.projects),
+    } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
+
+
+@api_bp.get("/projects")
+def projects_list():
+    tenant = current_tenant()
+    page, per_page = _pagination()
+    query = Project.query.filter_by(tenant_id=tenant.id, status="ACTIVE")
+    if request.args.get("companyId"):
+        query = query.filter_by(company_id=request.args["companyId"])
+    pagination = query.order_by(Project.updated_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(items=[{
+        "id": row.id, "companyId": row.company_id, "company": row.company.name,
+        "name": row.name, "projectType": row.project_type, "city": row.city,
+        "department": row.department, "country": row.country, "stage": row.stage,
+        "investmentAmount": float(row.investment_amount) if row.investment_amount is not None else None,
+        "investmentCurrency": row.investment_currency, "signals": len(row.signals),
+    } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
+
+
+@api_bp.get("/sources")
+def sources_list():
+    tenant = current_tenant()
+    page, per_page = _pagination()
+    pagination = Source.query.filter_by(tenant_id=tenant.id).order_by(Source.reliability.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(items=[{
+        "id": row.id, "name": row.name, "type": row.source_type, "domain": row.domain,
+        "reliability": row.reliability, "status": row.status, "documents": len(row.documents),
+    } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
+
+
+@api_bp.get("/intelligence/signals")
+@api_bp.get("/signals")
+def intelligence_signals_list():
+    tenant = current_tenant()
+    page, per_page = _pagination()
+    query = Signal.query.filter_by(tenant_id=tenant.id)
+    if request.args.get("type"):
+        query = query.filter_by(signal_type=request.args["type"])
+    pagination = query.order_by(Signal.detected_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(items=[{
+        "id": row.id, "company": row.company.name if row.company else "UNKNOWN",
+        "project": row.project.name if row.project else "UNKNOWN", "type": row.signal_type,
+        "title": row.title, "summary": row.summary, "confidence": row.confidence,
+        "freshness": row.freshness, "relevance": row.relevance, "status": row.status,
+        "detectedAt": row.detected_at.isoformat(),
+    } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
+
+
+@api_bp.get("/scores")
+def scores_list():
+    tenant = current_tenant()
+    page, per_page = _pagination()
+    query = OpportunityScore.query.filter_by(tenant_id=tenant.id)
+    if request.args.get("current", "true").lower() == "true":
+        query = query.filter_by(is_current=True)
+    pagination = query.order_by(OpportunityScore.calculated_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(items=[{
+        "id": row.id, "opportunityId": row.opportunity_id, "total": row.total_score,
+        "modelVersion": row.model_version, "isCurrent": row.is_current,
+        "calculatedAt": row.calculated_at.isoformat(),
+    } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
+
+
+@api_bp.get("/opportunities/<int:opportunity_id>/intelligence")
+def opportunity_intelligence(opportunity_id):
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
+    evaluation = OpportunityScore.query.filter_by(
+        tenant_id=tenant.id, opportunity_id=opportunity.id, is_current=True,
+    ).order_by(OpportunityScore.calculated_at.desc()).first()
+    evidence_rows = Evidence.query.join(OpportunityEvidence).filter(
+        OpportunityEvidence.opportunity_id == opportunity.id, Evidence.tenant_id == tenant.id,
+    ).order_by(Evidence.created_at.desc()).all()
+    return jsonify(
+        opportunity=opportunity.to_dict(),
+        score={
+            "total": evaluation.total_score, "modelVersion": evaluation.model_version,
+            "calculatedAt": evaluation.calculated_at.isoformat(),
+            "factors": [{
+                "code": factor.factor_code, "value": float(factor.raw_value),
+                "weight": float(factor.weight), "points": float(factor.points),
+                "explanation": factor.explanation,
+            } for factor in evaluation.factors],
+        } if evaluation else None,
+        evidence=[{
+            "id": row.id, "classification": row.classification, "claim": row.claim,
+            "confidence": row.confidence, "source": row.source_document.source.name,
+            "url": row.source_document.canonical_url,
+            "publishedAt": row.source_document.published_at.isoformat() if row.source_document.published_at else None,
+        } for row in evidence_rows],
+        productMatches=[{
+            "product": row.product.name, "fit": row.fit_score, "confidence": row.confidence,
+            "why": row.rationale,
+        } for row in opportunity.product_matches],
+    )
+
+
+@api_bp.get("/dashboard/revenue-intelligence")
+def revenue_intelligence_dashboard():
+    tenant = current_tenant()
+    opportunities = Opportunity.query.filter_by(tenant_id=tenant.id).all()
+    active = [row for row in opportunities if row.status not in {"GANHO", "PERDIDO", "DESCARTADO"}]
+    return jsonify(
+        tenant={"id": tenant.id, "name": tenant.name},
+        companies=Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").count(),
+        projects=Project.query.filter_by(tenant_id=tenant.id, status="ACTIVE").count(),
+        signals=Signal.query.filter_by(tenant_id=tenant.id).count(),
+        sources=Source.query.filter_by(tenant_id=tenant.id).count(),
+        opportunities=len(opportunities), hot=sum(1 for row in active if row.level == "HOT"),
+        qualified=sum(1 for row in opportunities if row.status not in {"NOVO", "DESCARTADO"}),
+        pipelineGenerated=sum(float(row.potential_deal_value or row.estimated_value or 0) for row in active),
+        expectedRevenue=sum(float(row.expected_revenue or 0) for row in active),
+        evidence=Evidence.query.filter_by(tenant_id=tenant.id).count(),
     )
 
 
