@@ -46,6 +46,31 @@ class RadarTestCase(unittest.TestCase):
         self.assertEqual(follow_up.status_code, 200)
         self.assertTrue(follow_up.json["contactVerified"])
         self.assertTrue(follow_up.json["nextActionAt"].startswith("2026-08-20"))
+        today = self.client.get("/api/dashboard/today")
+        self.assertEqual(today.status_code, 200)
+        self.assertGreaterEqual(len(today.json["tasks"]), 1)
+        task_id = today.json["tasks"][0]["id"]
+        self.assertEqual(self.client.patch(f"/api/tasks/{task_id}", json={"status": "DONE"}).status_code, 200)
+
+        visit = self.client.post("/api/visits", json={
+            "opportunityId": opportunity_id, "measurements": "Vano 4 x 5 m",
+            "needs": "Reducir tiempo de carga", "notes": "Acceso con alto flujo",
+            "nextStep": "Preparar propuesta",
+        })
+        self.assertEqual(visit.status_code, 201)
+        proposal = self.client.post(f"/api/proposals/{opportunity_id}", json={
+            "amount": 12500, "validityDays": 15,
+            "scope": "Puerta seccional, instalación y puesta en marcha.",
+        })
+        self.assertEqual(proposal.status_code, 201)
+        download = self.client.get(proposal.json["downloadUrl"])
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.mimetype, "application/pdf")
+        download.close()
+        metrics = self.client.get("/api/metrics")
+        self.assertEqual(metrics.status_code, 200)
+        self.assertEqual(metrics.json["proposals"], 1)
+        self.assertEqual(metrics.json["pipelineValue"], 12500)
         timeline = self.client.get(f"/api/timeline/{opportunity_id}")
         self.assertEqual(timeline.status_code, 200)
         self.assertGreaterEqual(len(timeline.json), 2)
