@@ -233,5 +233,53 @@ document.querySelectorAll('.sidebar nav a[href^="#"]').forEach((link) => {
 
 $("drawerMenu").addEventListener("click", () => toast("Seleccione una oportunidad para ver las acciones"));
 
+$("runCollector").addEventListener("click", async () => {
+  const button = $("runCollector");
+  button.disabled = true;
+  button.textContent = "Buscando empresas y proyectos...";
+  $("collectorMessage").textContent = "Consultando fuentes públicas. Esto puede tardar algunos segundos.";
+  try {
+    const response = await fetch("/api/collector/run", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok && response.status !== 429) throw new Error(data.error || "Error de captación");
+    const run = data.run;
+    $("collectorMessage").textContent = `${run.itemsScanned} elementos analizados · ${run.signalsCreated} señales nuevas`;
+    window.setTimeout(() => window.location.reload(), 900);
+  } catch (_error) {
+    button.disabled = false;
+    button.textContent = "⚙ Ejecutar búsqueda ahora";
+    $("collectorMessage").textContent = "No se pudo completar la búsqueda. Intente nuevamente.";
+  }
+});
+
+document.querySelectorAll(".approve-signal").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const card = button.closest(".prospect-card");
+    button.disabled = true;
+    button.textContent = "Convirtiendo...";
+    const response = await fetch(`/api/signals/${card.dataset.signalId}/approve`, { method: "POST" });
+    if (response.ok) {
+      card.remove();
+      toast("Señal convertida en oportunidad del CRM");
+      window.setTimeout(() => window.location.reload(), 700);
+    } else {
+      button.disabled = false;
+      button.textContent = "Convertir en oportunidad";
+      toast("No se pudo convertir la señal");
+    }
+  });
+});
+
+document.querySelectorAll(".discard-signal").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const card = button.closest(".prospect-card");
+    const response = await fetch(`/api/signals/${card.dataset.signalId}/discard`, { method: "POST" });
+    if (response.ok) {
+      card.remove();
+      toast("Señal descartada");
+    } else toast("No se pudo descartar la señal");
+  });
+});
+
 render();
 if (selected) selectLead(selected);
