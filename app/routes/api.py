@@ -1,12 +1,29 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file, send_from_directory
 from sqlalchemy import text
+from werkzeug.utils import secure_filename
 from ..extensions import db
-from ..models import CollectorRun, Company, Opportunity, Project, ProspectSignal, TimelineEvent, WebsiteAnalysis
+from ..models import CollectorRun, Company, Opportunity, Project, Proposal, ProspectSignal, SalesTask, TimelineEvent, VisitRecord, WebsiteAnalysis
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
+
+
+def _create_cadence(opportunity):
+    if opportunity.tasks:
+        return
+    now = datetime.now(timezone.utc)
+    steps = [
+        (0, "WHATSAPP", "Enviar primer contacto personalizado por WhatsApp"),
+        (2, "CALL", "Llamar e identificar al responsable de mantenimiento, operaciones o compras"),
+        (5, "EMAIL", "Enviar carta de presentación y casos aplicables"),
+        (10, "VISIT", "Proponer una visita técnica presencial"),
+    ]
+    for step, (days, channel, title) in enumerate(steps, 1):
+        db.session.add(SalesTask(opportunity=opportunity, title=title, channel=channel, due_at=now + timedelta(days=days), sequence_step=step))
 
 
 @api_bp.get("/opportunities")
@@ -63,6 +80,7 @@ def company_search_add():
     )
     db.session.add(opportunity)
     db.session.flush()
+    _create_cadence(opportunity)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="GEOGRAPHIC_DISCOVERY", description="Empresa añadida desde la búsqueda por región e industria"))
     db.session.commit()
     return jsonify(opportunity.to_dict()), 201
@@ -85,6 +103,7 @@ def opportunities_create():
     opportunity = Opportunity(project=project, event_type=data["event"], score=score, level=level, products=data.get("products") or [], evidence=data["evidence"], source_name=data.get("sourceName"), source_url=data.get("sourceUrl"))
     db.session.add(opportunity)
     db.session.flush()
+    _create_cadence(opportunity)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="DISCOVERY", description="Oportunidad registrada en el radar"))
     db.session.commit()
     return jsonify(opportunity.to_dict()), 201
@@ -101,6 +120,8 @@ def opportunity_update(opportunity_id):
     if status is not None:
         opportunity.status = status
         changes.append(f"Estado actualizado a {status}")
+        if status in {"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"}:
+            SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status": "CANCELLED"})
     if "contactVerified" in data:
         opportunity.contact_verified = bool(data["contactVerified"])
         changes.append("Contacto validado" if opportunity.contact_verified else "Contacto pendiente de validación")
@@ -110,6 +131,21 @@ def opportunity_update(opportunity_id):
             changes.append("Próxima acción comercial programada")
         except ValueError:
             return jsonify(error="Fecha de seguimiento inválida"), 400
+    if data.get("owner") is not None:
+        opportunity.owner_name = str(data["owner"]).strip() or "Equipo comercial"
+        changes.append("Responsable comercial actualizado")
+    if data.get("estimatedValue") is not None:
+        try:
+            opportunity.estimated_value = max(0, float(data["estimatedValue"]))
+            changes.append("Valor estimado actualizado")
+        except (TypeError, ValueError):
+            return jsonify(error="Valor estimado inválido"), 400
+    if data.get("probability") is not None:
+        try:
+            opportunity.probability = max(0, min(100, int(data["probability"])))
+            changes.append("Probabilidad actualizada")
+        except (TypeError, ValueError):
+            return jsonify(error="Probabilidad inválida"), 400
     if not changes:
         return jsonify(error="No se recibió ningún cambio"), 400
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_UPDATE", description=" · ".join(changes)))
@@ -159,6 +195,7 @@ def signal_approve(signal_id):
     opportunity = Opportunity(project=project, event_type=signal.event_type, score=signal.score, level=signal.level, products=signal.products or [], evidence=signal.summary, source_name=signal.source_name, source_url=signal.source_url)
     db.session.add(opportunity)
     db.session.flush()
+    _create_cadence(opportunity)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="AUTOMATIC_DISCOVERY", description=f"Señal aprobada desde {signal.source_name}"))
     signal.status, signal.opportunity_id = "APPROVED", opportunity.id
     db.session.commit()
@@ -257,6 +294,7 @@ def website_analysis_qualify(analysis_id):
     )
     db.session.add(opportunity)
     db.session.flush()
+    _create_cadence(opportunity)
     whatsapp, subject, email = _commercial_messages(analysis)
     analysis.decision, analysis.opportunity_id = "QUALIFIED", opportunity.id
     analysis.whatsapp_message, analysis.email_subject, analysis.email_body = whatsapp, subject, email
@@ -276,6 +314,147 @@ def website_analysis_disqualify(analysis_id):
     analysis.decision = "DISQUALIFIED"
     db.session.commit()
     return jsonify(analysis.to_dict())
+
+
+@api_bp.post("/tasks/ensure")
+def tasks_ensure():
+    created = 0
+    rows = Opportunity.query.filter(~Opportunity.status.in_({"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"})).all()
+    for opportunity in rows:
+        if not opportunity.tasks:
+            _create_cadence(opportunity)
+            created += 4
+    db.session.commit()
+    return jsonify(created=created)
+
+
+@api_bp.get("/dashboard/today")
+def dashboard_today():
+    now = datetime.now(timezone.utc)
+    tomorrow = now + timedelta(days=1)
+    tasks = SalesTask.query.filter(SalesTask.status == "PENDING", SalesTask.due_at <= tomorrow).order_by(SalesTask.due_at.asc()).limit(50).all()
+    return jsonify(
+        tasks=[task.to_dict() for task in tasks],
+        overdue=sum(1 for task in tasks if task.due_at.replace(tzinfo=timezone.utc) < now if task.due_at.tzinfo is None) + sum(1 for task in tasks if task.due_at.tzinfo is not None and task.due_at < now),
+        dueToday=len(tasks),
+    )
+
+
+@api_bp.patch("/tasks/<int:task_id>")
+def task_update(task_id):
+    task = db.get_or_404(SalesTask, task_id)
+    data = request.get_json(silent=True) or {}
+    if data.get("status") not in {"DONE", "PENDING", "CANCELLED"}:
+        return jsonify(error="Estado de tarea inválido"), 400
+    task.status = data["status"]
+    task.completed_at = datetime.now(timezone.utc) if task.status == "DONE" else None
+    if task.status == "DONE":
+        task.opportunity.next_action_at = min((row.due_at for row in task.opportunity.tasks if row.status == "PENDING"), default=None)
+        db.session.add(TimelineEvent(opportunity=task.opportunity, event_type="TASK_DONE", description=f"Tarea completada: {task.title}"))
+    db.session.commit()
+    return jsonify(task.to_dict())
+
+
+@api_bp.post("/visits")
+def visit_create():
+    data = request.form if request.files else (request.get_json(silent=True) or {})
+    opportunity = db.get_or_404(Opportunity, int(data.get("opportunityId", 0)))
+    photos = []
+    upload_dir = Path(current_app.config["DATA_DIR"]) / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    for uploaded in request.files.getlist("photos"):
+        extension = Path(secure_filename(uploaded.filename or "")).suffix.lower()
+        if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+            continue
+        filename = f"{uuid4().hex}{extension}"
+        uploaded.save(upload_dir / filename)
+        photos.append(filename)
+    visit = VisitRecord(
+        opportunity=opportunity, measurements=data.get("measurements"), needs=data.get("needs"),
+        notes=data.get("notes"), next_step=data.get("nextStep"), photos=photos,
+    )
+    opportunity.status = "VISITA"
+    opportunity.probability = max(opportunity.probability, 50)
+    db.session.add(visit)
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="VISIT", description=f"Visita registrada. Próximo paso: {data.get('nextStep') or 'por definir'}"))
+    db.session.commit()
+    return jsonify(id=visit.id, photos=[f"/api/uploads/{name}" for name in photos]), 201
+
+
+@api_bp.get("/uploads/<path:filename>")
+def uploaded_file(filename):
+    return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", filename)
+
+
+@api_bp.post("/proposals/<int:opportunity_id>")
+def proposal_create(opportunity_id):
+    import textwrap
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    opportunity = db.get_or_404(Opportunity, opportunity_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = max(0, float(data.get("amount", 0)))
+        validity = max(1, min(90, int(data.get("validityDays", 15))))
+    except (TypeError, ValueError):
+        return jsonify(error="Valor o validez inválidos"), 400
+    scope = (data.get("scope") or "").strip()
+    if not scope:
+        return jsonify(error="Describa el alcance de la propuesta"), 400
+    number = f"PB-{datetime.now().strftime('%Y%m%d')}-{uuid4().hex[:6].upper()}"
+    folder = Path(current_app.config["DATA_DIR"]) / "proposals"
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f"{number}.pdf"
+    path = folder / filename
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+    pdf.setFillColorRGB(.07, .12, .21); pdf.rect(0, height - 105, width, 105, fill=1, stroke=0)
+    pdf.setFillColorRGB(1, 1, 1); pdf.setFont("Helvetica-Bold", 22); pdf.drawString(45, height - 55, "PUERTAS BRASIL PY")
+    pdf.setFont("Helvetica", 10); pdf.drawString(45, height - 78, f"Propuesta comercial {number}")
+    y = height - 145; pdf.setFillColorRGB(.08, .13, .22)
+    for title, value in (("Cliente", opportunity.project.company.name), ("Proyecto", opportunity.project.name), ("Ubicación", f"{opportunity.project.city}, {opportunity.project.department}"), ("Validez", f"{validity} días"), ("Valor estimado", f"USD {amount:,.2f}")):
+        pdf.setFont("Helvetica-Bold", 10); pdf.drawString(45, y, f"{title}:"); pdf.setFont("Helvetica", 10); pdf.drawString(130, y, str(value)); y -= 22
+    y -= 10; pdf.setFont("Helvetica-Bold", 13); pdf.drawString(45, y, "Alcance propuesto"); y -= 24
+    pdf.setFont("Helvetica", 10)
+    for line in textwrap.wrap(scope, 90): pdf.drawString(45, y, line); y -= 15
+    y -= 16; pdf.setFont("Helvetica-Bold", 12); pdf.drawString(45, y, "Productos y servicios recomendados"); y -= 21
+    pdf.setFont("Helvetica", 10)
+    for product in opportunity.products or ["Evaluación técnica de accesos industriales"]: pdf.drawString(55, y, f"• {product}"); y -= 16
+    pdf.setFont("Helvetica", 9); pdf.drawString(45, 65, "+595 986 986215 · gerenciacomercial@puertasbrasil.com.py · puertasbrasil.com.py")
+    pdf.save()
+    proposal = Proposal(opportunity=opportunity, number=number, amount=amount, validity_days=validity, scope=scope, pdf_filename=filename)
+    opportunity.status = "ORCAMENTO"; opportunity.estimated_value = amount; opportunity.probability = max(opportunity.probability, 60)
+    db.session.add(proposal); db.session.flush()
+    db.session.add(SalesTask(opportunity=opportunity, title="Acompañar respuesta de la propuesta comercial", channel="FOLLOW_UP", due_at=datetime.now(timezone.utc) + timedelta(days=3), sequence_step=90))
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="PROPOSAL", description=f"Propuesta {number} generada por USD {amount:,.2f}"))
+    db.session.commit()
+    return jsonify(id=proposal.id, number=number, downloadUrl=f"/api/proposals/{proposal.id}/download"), 201
+
+
+@api_bp.get("/proposals/<int:proposal_id>/download")
+def proposal_download(proposal_id):
+    proposal = db.get_or_404(Proposal, proposal_id)
+    path = Path(current_app.config["DATA_DIR"]) / "proposals" / proposal.pdf_filename
+    return send_file(path, as_attachment=True, download_name=f"Propuesta-{proposal.number}.pdf")
+
+
+@api_bp.get("/metrics")
+def commercial_metrics():
+    opportunities = Opportunity.query.all()
+    proposals = Proposal.query.all()
+    active = [row for row in opportunities if row.status not in {"GANHO", "PERDIDO", "DESCARTADO"}]
+    contacted = [row for row in opportunities if row.status not in {"NOVO", "QUALIFICADO", "DESCARTADO"}]
+    won = [row for row in opportunities if row.status == "GANHO"]
+    overdue = SalesTask.query.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
+    return jsonify(
+        opportunities=len(opportunities), contacted=len(contacted), proposals=len(proposals), won=len(won),
+        pipelineValue=sum(row.estimated_value or 0 for row in active),
+        weightedValue=sum((row.estimated_value or 0) * (row.probability or 0) / 100 for row in active),
+        proposalValue=sum(row.amount for row in proposals), overdueTasks=overdue,
+        responseRate=round(100 * len(contacted) / len(opportunities), 1) if opportunities else 0,
+        winRate=round(100 * len(won) / len(opportunities), 1) if opportunities else 0,
+    )
 
 
 @api_bp.get("/health")
