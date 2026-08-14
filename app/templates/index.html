@@ -60,10 +60,16 @@
       <p class="capture-message" id="siteAnalysisMessage">Ingrese un sitio para iniciar la investigación comercial.</p>
       <div id="siteAnalysisResults" class="analysis-list">
         {% for analysis in website_analyses %}
-        <article class="analysis-card">
+        <article class="analysis-card" data-analysis-id="{{ analysis.id }}" data-decision="{{ analysis.decision }}">
           <div class="analysis-score"><strong>{{ analysis.potential_score }}</strong><small>{{ analysis.potential_level }}</small></div>
-          <div class="analysis-main"><span class="source-type">{{ analysis.pages_analyzed }} PÁGINAS ANALIZADAS</span><h3>{{ analysis.company_name }}</h3><p><b>Sector:</b> {{ analysis.sector }} · <b>Tamaño:</b> {{ analysis.company_size }}</p><a href="{{ analysis.url }}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
+          <div class="analysis-main"><span class="source-type">{{ analysis.pages_analyzed }} PÁGINAS ANALIZADAS · {{ 'CALIFICADA' if analysis.decision == 'QUALIFIED' else 'DESCALIFICADA' if analysis.decision == 'DISQUALIFIED' else 'PENDIENTE' }}</span><h3>{{ analysis.company_name }}</h3><p><b>Sector:</b> {{ analysis.sector }} · <b>Tamaño:</b> {{ analysis.company_size }}</p><a href="{{ analysis.url }}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
           <div class="analysis-grid"><div><b>Contacto</b><span>{{ analysis.emails|join(', ') or 'No encontrado' }}</span><span>{{ analysis.phones|join(', ') or 'No encontrado' }}</span>{% if analysis.whatsapp %}<span>WhatsApp: {{ analysis.whatsapp }}</span>{% endif %}</div><div><b>Dirección y responsables</b><span>{{ analysis.address or 'No encontrado' }}</span><span>{{ analysis.contacts|join(', ') or 'No identificado' }}</span></div><div><b>Productos probables</b><span>{{ analysis.products|join(', ') or 'Requiere validación' }}</span></div><div><b>Servicios recomendados</b><span>{{ analysis.services|join(', ') }}</span></div></div>
+          <div class="analysis-decision">
+            {% if analysis.decision == 'PENDING' %}<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>
+            {% elif analysis.decision == 'QUALIFIED' %}<strong>✓ Empresa ingresada al CRM</strong>
+            {% else %}<strong>Empresa desclasificada</strong>{% endif %}
+          </div>
+          {% if analysis.decision == 'QUALIFIED' %}<div class="outreach-drafts"><div><b>Mensaje para WhatsApp</b><textarea readonly>{{ analysis.whatsapp_message }}</textarea><button class="copy-draft" data-draft="whatsapp">Copiar WhatsApp</button></div><div><b>Correo personalizado · {{ analysis.email_subject }}</b><textarea readonly>{{ analysis.email_body }}</textarea><button class="copy-draft" data-draft="email">Copiar correo</button></div></div>{% endif %}
         </article>
         {% endfor %}
       </div>
