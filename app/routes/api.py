@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 from ..extensions import db
-from ..models import Company, Opportunity, Project, TimelineEvent
+from ..models import CollectorRun, Company, Opportunity, Project, ProspectSignal, TimelineEvent
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
@@ -57,6 +57,51 @@ def timeline(opportunity_id):
 @api_bp.get("/exports/status")
 def export_status():
     return jsonify(dataDir="/data", status="ready")
+
+
+@api_bp.get("/collector/status")
+def collector_status():
+    last_run = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
+    pending = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").count()
+    return jsonify(enabled=True, pending=pending, lastRun=last_run.to_dict() if last_run else None)
+
+
+@api_bp.post("/collector/run")
+def collector_run():
+    from datetime import datetime, timedelta, timezone
+    recent = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
+    if recent and recent.started_at and recent.started_at > datetime.now(timezone.utc) - timedelta(minutes=5):
+        return jsonify(error="La captación ya fue ejecutada recientemente", run=recent.to_dict()), 429
+    from ..services.collector import run_collector
+    run = run_collector()
+    return jsonify(run.to_dict())
+
+
+@api_bp.post("/signals/<int:signal_id>/approve")
+def signal_approve(signal_id):
+    signal = db.get_or_404(ProspectSignal, signal_id)
+    if signal.opportunity_id:
+        return jsonify(signal.to_dict())
+    company = Company.query.filter_by(name=signal.company_name).first()
+    if not company:
+        company = Company(name=signal.company_name, sector="Por validar", origin_country="Paraguay")
+        db.session.add(company)
+    project = Project(company=company, name=signal.title, city=signal.city or "Por validar", department=signal.department or "Por validar", stage="Prospección automática")
+    opportunity = Opportunity(project=project, event_type=signal.event_type, score=signal.score, level=signal.level, products=signal.products or [], evidence=signal.summary, source_name=signal.source_name, source_url=signal.source_url)
+    db.session.add(opportunity)
+    db.session.flush()
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="AUTOMATIC_DISCOVERY", description=f"Señal aprobada desde {signal.source_name}"))
+    signal.status, signal.opportunity_id = "APPROVED", opportunity.id
+    db.session.commit()
+    return jsonify(opportunity=opportunity.to_dict(), signal=signal.to_dict()), 201
+
+
+@api_bp.post("/signals/<int:signal_id>/discard")
+def signal_discard(signal_id):
+    signal = db.get_or_404(ProspectSignal, signal_id)
+    signal.status = "DISCARDED"
+    db.session.commit()
+    return jsonify(signal.to_dict())
 
 
 @api_bp.get("/health")
