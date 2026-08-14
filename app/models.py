@@ -52,10 +52,10 @@ class Opportunity(db.Model):
 
     def to_dict(self):
         return {
-            "id": self.id, "company": self.project.company.name, "sector": self.project.company.sector or "Não informado",
-            "origin": self.project.company.origin_country or "Não informado", "project": self.project.name,
-            "city": self.project.city, "department": self.project.department, "stage": self.project.stage or "Não informado",
-            "investment": self.project.investment or "Não divulgado", "event": self.event_type, "score": self.score,
+            "id": self.id, "company": self.project.company.name, "sector": self.project.company.sector or "No informado",
+            "origin": self.project.company.origin_country or "No informado", "project": self.project.name,
+            "city": self.project.city, "department": self.project.department, "stage": self.project.stage or "No informado",
+            "investment": self.project.investment or "No divulgado", "event": self.event_type, "score": self.score,
             "level": self.level, "status": self.status, "products": self.products or [], "evidence": self.evidence,
             "sourceName": self.source_name, "sourceUrl": self.source_url,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
