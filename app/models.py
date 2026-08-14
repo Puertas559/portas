@@ -52,10 +52,16 @@ class Opportunity(db.Model):
     source_url = db.Column(db.String(1000))
     contact_verified = db.Column(db.Boolean, nullable=False, default=False)
     next_action_at = db.Column(db.DateTime(timezone=True), default=lambda: utcnow() + timedelta(days=2), index=True)
+    owner_name = db.Column(db.String(160), nullable=False, default="Equipo comercial", index=True)
+    estimated_value = db.Column(db.Float, nullable=False, default=0)
+    probability = db.Column(db.Integer, nullable=False, default=20)
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     project = db.relationship("Project", back_populates="opportunities")
     timeline = db.relationship("TimelineEvent", back_populates="opportunity", cascade="all, delete-orphan")
+    tasks = db.relationship("SalesTask", back_populates="opportunity", cascade="all, delete-orphan")
+    visits = db.relationship("VisitRecord", back_populates="opportunity", cascade="all, delete-orphan")
+    proposals = db.relationship("Proposal", back_populates="opportunity", cascade="all, delete-orphan")
 
     def to_dict(self):
         sector = self.project.company.sector or "No informado"
@@ -78,6 +84,8 @@ class Opportunity(db.Model):
             "email": self.project.company.email, "linkedin": self.project.company.linkedin_url,
             "painPoints": pains, "contactVerified": self.contact_verified,
             "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
+            "owner": self.owner_name, "estimatedValue": self.estimated_value,
+            "probability": self.probability,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }
 
@@ -90,6 +98,53 @@ class TimelineEvent(db.Model):
     description = db.Column(db.Text, nullable=False)
     occurred_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     opportunity = db.relationship("Opportunity", back_populates="timeline")
+
+
+class SalesTask(db.Model):
+    __tablename__ = "sales_tasks"
+    id = db.Column(db.Integer, primary_key=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = db.Column(db.String(300), nullable=False)
+    channel = db.Column(db.String(40), nullable=False, default="GENERAL", index=True)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default="PENDING", index=True)
+    sequence_step = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    completed_at = db.Column(db.DateTime(timezone=True))
+    opportunity = db.relationship("Opportunity", back_populates="tasks")
+
+    def to_dict(self):
+        return {"id": self.id, "opportunityId": self.opportunity_id, "company": self.opportunity.project.company.name,
+                "title": self.title, "channel": self.channel, "status": self.status, "step": self.sequence_step,
+                "dueAt": self.due_at.isoformat(), "owner": self.opportunity.owner_name}
+
+
+class VisitRecord(db.Model):
+    __tablename__ = "visit_records"
+    id = db.Column(db.Integer, primary_key=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    visited_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    measurements = db.Column(db.Text)
+    needs = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    next_step = db.Column(db.Text)
+    photos = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    opportunity = db.relationship("Opportunity", back_populates="visits")
+
+
+class Proposal(db.Model):
+    __tablename__ = "proposals"
+    id = db.Column(db.Integer, primary_key=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    number = db.Column(db.String(60), unique=True, nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False, default=0)
+    validity_days = db.Column(db.Integer, nullable=False, default=15)
+    scope = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="DRAFT", index=True)
+    pdf_filename = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    opportunity = db.relationship("Opportunity", back_populates="proposals")
 
 
 class ProspectSignal(db.Model):
