@@ -4,6 +4,10 @@ let level = "ALL";
 let selectedChannel = "whatsapp";
 const visitSelection = new Set();
 let discoveredCompanies = [];
+const pipelineStages = [
+  ["NOVO", "NUEVO"], ["QUALIFICADO", "CALIFICADO"], ["CONTATO_REALIZADO", "CONTACTADO"],
+  ["RESPONDEU", "RESPONDIÓ"], ["VISITA", "VISITA"], ["ORCAMENTO", "PRESUPUESTO"], ["NEGOCIACAO", "NEGOCIACIÓN"],
+];
 
 const $ = (id) => document.getElementById(id);
 
@@ -73,6 +77,20 @@ function render() {
     });
   });
   renderCrm();
+  renderKanban();
+}
+
+function money(value) {
+  return new Intl.NumberFormat("es-PY", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value) || 0);
+}
+
+function renderKanban() {
+  const board = $("kanbanBoard");
+  if (!board) return;
+  board.innerHTML = pipelineStages.map(([status, label]) => {
+    const rows = leads.filter((lead) => lead.status === status);
+    return `<section class="kanban-column" data-status="${status}"><header>${label}<span>${rows.length}</span></header>${rows.map((lead) => `<article class="kanban-card" data-id="${escapeHtml(lead.id)}"><h4>${escapeHtml(lead.company)}</h4><p>${escapeHtml(lead.project)}</p><b>${money(lead.estimatedValue)} · ${Number(lead.probability) || 0}%</b><select class="kanban-status">${pipelineStages.map(([value, text]) => `<option value="${value}" ${value === lead.status ? "selected" : ""}>${text}</option>`).join("")}<option value="GANHO">GANADO</option><option value="PERDIDO">PERDIDO</option></select></article>`).join("")}</section>`;
+  }).join("");
 }
 
 function contactMessage(lead, channel = selectedChannel) {
@@ -131,6 +149,9 @@ function selectLead(lead) {
   $("status").value = lead.status || "NOVO";
   $("contactVerified").checked = Boolean(lead.contactVerified);
   $("followUpDate").value = lead.nextActionAt ? String(lead.nextActionAt).slice(0, 10) : "";
+  $("dealOwner").value = lead.owner || "Equipo comercial";
+  $("dealValue").value = Number(lead.estimatedValue) || 0;
+  $("dealProbability").value = Number(lead.probability) || 20;
   $("approach").value = contactMessage(lead);
   updateChannelAction();
   render();
@@ -247,6 +268,26 @@ $("scheduleFollowUp").addEventListener("click", async () => {
   selected.nextActionAt = data.nextActionAt;
   renderCrm();
   toast("Seguimiento programado en el CRM");
+});
+
+$("saveDealData").addEventListener("click", async () => {
+  if (!selected || selected.demo) return toast("Seleccione una oportunidad real");
+  const payload = { owner: $("dealOwner").value, estimatedValue: $("dealValue").value, probability: $("dealProbability").value };
+  const response = await fetch(`/api/opportunities/${selected.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await response.json();
+  if (!response.ok) return toast(data.error || "No se pudieron guardar los datos");
+  Object.assign(selected, data); render(); toast("Datos comerciales guardados");
+});
+
+$("kanbanBoard").addEventListener("change", async (event) => {
+  if (!event.target.matches(".kanban-status")) return;
+  const card = event.target.closest(".kanban-card");
+  const lead = leads.find((item) => String(item.id) === card.dataset.id);
+  if (!lead || lead.demo) return toast("Los datos demostrativos no se pueden mover");
+  const oldStatus = lead.status;
+  const response = await fetch(`/api/opportunities/${lead.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: event.target.value }) });
+  if (!response.ok) { event.target.value = oldStatus; return toast("No se pudo mover la oportunidad"); }
+  lead.status = event.target.value; render(); toast("Oportunidad movida en el pipeline");
 });
 
 $("copyApproach").addEventListener("click", async () => {
@@ -559,5 +600,71 @@ $("siteAnalysisResults").addEventListener("click", async (event) => {
   }
 });
 
+async function loadToday() {
+  try {
+    await fetch("/api/tasks/ensure", { method: "POST" });
+    const [todayResponse, metricsResponse] = await Promise.all([fetch("/api/dashboard/today"), fetch("/api/metrics")]);
+    const today = await todayResponse.json();
+    const metrics = await metricsResponse.json();
+    const metricValues = [today.dueToday, today.overdue, money(metrics.pipelineValue), `${metrics.responseRate}%`, metrics.won];
+    document.querySelectorAll("#salesMetrics article b").forEach((element, index) => { element.textContent = metricValues[index]; });
+    $("dailyFocus").textContent = today.overdue ? `${today.overdue} tareas atrasadas requieren atención inmediata.` : "No hay atrasos. Avance con los contactos previstos para hoy.";
+    $("todayTasks").innerHTML = (today.tasks || []).map((task) => {
+      const due = new Date(task.dueAt);
+      const overdue = due < new Date();
+      const icon = { WHATSAPP: "whatsapp", CALL: "telephone", EMAIL: "envelope", VISIT: "geo-alt", FOLLOW_UP: "arrow-repeat" }[task.channel] || "check2-square";
+      return `<article class="task-item ${overdue ? "overdue" : ""}" data-task-id="${task.id}" data-opportunity-id="${task.opportunityId}"><i class="bi bi-${icon}"></i><div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.company)} · ${escapeHtml(task.owner)} · ${due.toLocaleDateString("es-PY")}</span></div><button class="complete-task"><i class="bi bi-check-lg"></i> Hecho</button></article>`;
+    }).join("") || '<div class="empty-signals"><strong>Agenda al día.</strong><span>No hay tareas vencidas ni programadas para hoy.</span></div>';
+  } catch (_error) {
+    $("todayTasks").innerHTML = "<p>No se pudo cargar la agenda comercial.</p>";
+  }
+}
+
+$("refreshToday").addEventListener("click", loadToday);
+$("todayTasks").addEventListener("click", async (event) => {
+  const button = event.target.closest(".complete-task");
+  if (!button) return;
+  const task = button.closest(".task-item");
+  const response = await fetch(`/api/tasks/${task.dataset.taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "DONE" }) });
+  if (!response.ok) return toast("No se pudo completar la tarea");
+  task.remove(); toast("Tarea completada"); loadToday();
+});
+
+const visitDialog = $("visitDialog");
+const proposalDialog = $("proposalDialog");
+$("registerVisit").addEventListener("click", () => {
+  if (!selected || selected.demo) return toast("Seleccione una oportunidad real");
+  $("visitOpportunityId").value = selected.id; $("visitCompany").textContent = selected.company; visitDialog.showModal();
+});
+$("createProposal").addEventListener("click", () => {
+  if (!selected || selected.demo) return toast("Seleccione una oportunidad real");
+  $("proposalCompany").textContent = selected.company;
+  $("proposalForm").elements.amount.value = Number(selected.estimatedValue) || 0;
+  $("proposalForm").elements.scope.value = `Suministro e instalación de ${(selected.products || []).join(", ") || "soluciones de accesos industriales"}. Incluye relevamiento técnico, puesta en marcha y orientación operativa.`;
+  proposalDialog.showModal();
+});
+document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
+
+$("visitForm").addEventListener("submit", async (event) => {
+  event.preventDefault(); $("visitMessage").textContent = "Guardando visita y fotografías...";
+  const response = await fetch("/api/visits", { method: "POST", body: new FormData(event.target) });
+  const data = await response.json();
+  if (!response.ok) return $("visitMessage").textContent = data.error || "No se pudo guardar la visita";
+  selected.status = "VISITA"; selected.probability = Math.max(Number(selected.probability) || 0, 50); render();
+  event.target.reset(); visitDialog.close(); toast("Visita registrada en la cronología"); loadToday();
+});
+
+$("proposalForm").addEventListener("submit", async (event) => {
+  event.preventDefault(); $("proposalMessage").textContent = "Generando propuesta PDF...";
+  const payload = Object.fromEntries(new FormData(event.target));
+  const response = await fetch(`/api/proposals/${selected.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await response.json();
+  if (!response.ok) return $("proposalMessage").textContent = data.error || "No se pudo generar la propuesta";
+  selected.status = "ORCAMENTO"; selected.estimatedValue = Number(payload.amount); selected.probability = Math.max(Number(selected.probability) || 0, 60); render();
+  const download = document.createElement("a"); download.href = data.downloadUrl; download.download = ""; document.body.appendChild(download); download.click(); download.remove();
+  proposalDialog.close(); toast(`Propuesta ${data.number} generada`); loadToday();
+});
+
 render();
 if (selected) selectLead(selected);
+loadToday();
