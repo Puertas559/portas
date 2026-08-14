@@ -19,7 +19,7 @@ def start_scheduler(app):
             return
         _scheduler_started = True
 
-    interval = max(30, int(os.getenv("COLLECTOR_INTERVAL_MINUTES", "360")))
+    interval = max(5, int(os.getenv("COLLECTOR_INTERVAL_MINUTES", "5")))
 
     def loop():
         time.sleep(20)
@@ -32,6 +32,6 @@ def start_scheduler(app):
                         run_collector()
             except Exception:
                 app.logger.exception("Error en el programador de captación automática")
-            time.sleep(300)
+            time.sleep(60)
 
     threading.Thread(target=loop, name="prospecting-collector", daemon=True).start()
