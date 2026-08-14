@@ -42,71 +42,60 @@ def _backfill_intelligence():
             "SELECT id FROM sources WHERE tenant_id=:tenant_id AND name=:name AND domain=:domain"
         ), {"tenant_id": row["tenant_id"], "name": source_name, "domain": domain}).scalar()
         if not source_id:
-            result = connection.execute(sa.text("""
+            source_id = connection.execute(sa.text("""
                 INSERT INTO sources (tenant_id,name,source_type,base_url,domain,reliability,status,created_at,updated_at)
                 VALUES (:tenant_id,:name,'LEGACY',:base_url,:domain,50,'ACTIVE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                RETURNING id
             """), {"tenant_id": row["tenant_id"], "name": source_name, "base_url": f"https://{domain}", "domain": domain})
-            source_id = result.lastrowid
-            if not source_id:
-                source_id = connection.execute(sa.text(
-                    "SELECT id FROM sources WHERE tenant_id=:tenant_id AND name=:name AND domain=:domain"
-                ), {"tenant_id": row["tenant_id"], "name": source_name, "domain": domain}).scalar()
+            source_id = source_id.scalar_one()
         url_hash = hashlib.sha256(source_url.encode("utf-8")).hexdigest()
         document_id = connection.execute(sa.text(
             "SELECT id FROM source_documents WHERE tenant_id=:tenant_id AND url_hash=:url_hash"
         ), {"tenant_id": row["tenant_id"], "url_hash": url_hash}).scalar()
         if not document_id:
-            result = connection.execute(sa.text("""
+            document_id = connection.execute(sa.text("""
                 INSERT INTO source_documents
                 (tenant_id,source_id,url,canonical_url,url_hash,content_hash,title,excerpt,confidence,document_metadata,fetched_at)
                 VALUES (:tenant_id,:source_id,:url,:url,:url_hash,:content_hash,:title,:excerpt,50,'{}',CURRENT_TIMESTAMP)
+                RETURNING id
             """), {
                 "tenant_id": row["tenant_id"], "source_id": source_id, "url": source_url, "url_hash": url_hash,
                 "content_hash": hashlib.sha256((row["evidence"] or "").encode("utf-8")).hexdigest(),
                 "title": row["project_name"], "excerpt": row["evidence"],
             })
-            document_id = result.lastrowid
-            if not document_id:
-                document_id = connection.execute(sa.text(
-                    "SELECT id FROM source_documents WHERE tenant_id=:tenant_id AND url_hash=:url_hash"
-                ), {"tenant_id": row["tenant_id"], "url_hash": url_hash}).scalar()
+            document_id = document_id.scalar_one()
         fingerprint = hashlib.sha256(f"legacy|{row['opportunity_id']}|{url_hash}".encode("utf-8")).hexdigest()
-        result = connection.execute(sa.text("""
+        signal_id = connection.execute(sa.text("""
             INSERT INTO signals
             (tenant_id,company_id,project_id,source_document_id,signal_type,title,summary,city,department,country,
              confidence,freshness,relevance,fingerprint,status,detected_at,updated_at)
             VALUES (:tenant_id,:company_id,:project_id,:document_id,:signal_type,:title,:summary,:city,:department,:country,
                     50,100,70,:fingerprint,'MIGRATED',:detected_at,CURRENT_TIMESTAMP)
+            RETURNING id
         """), {
             "tenant_id": row["tenant_id"], "company_id": row["company_id"], "project_id": row["project_id"],
             "document_id": document_id, "signal_type": row["event_type"], "title": row["project_name"],
             "summary": row["evidence"], "city": row["city"], "department": row["department"],
             "country": row["country"], "fingerprint": fingerprint, "detected_at": row["discovered_at"],
         })
-        signal_id = result.lastrowid
-        if not signal_id:
-            signal_id = connection.execute(sa.text(
-                "SELECT id FROM signals WHERE tenant_id=:tenant_id AND fingerprint=:fingerprint"
-            ), {"tenant_id": row["tenant_id"], "fingerprint": fingerprint}).scalar()
-        result = connection.execute(sa.text("""
+        signal_id = signal_id.scalar_one()
+        evidence_id = connection.execute(sa.text("""
             INSERT INTO evidences
             (tenant_id,project_id,signal_id,source_document_id,evidence_type,classification,claim,excerpt,confidence,created_at)
             VALUES (:tenant_id,:project_id,:signal_id,:document_id,'SOURCE_CLAIM','FACT',:claim,:claim,50,CURRENT_TIMESTAMP)
+            RETURNING id
         """), {"tenant_id": row["tenant_id"], "project_id": row["project_id"], "signal_id": signal_id, "document_id": document_id, "claim": row["evidence"]})
-        evidence_id = result.lastrowid
-        if not evidence_id:
-            evidence_id = connection.execute(sa.text("SELECT max(id) FROM evidences")).scalar()
+        evidence_id = evidence_id.scalar_one()
         connection.execute(sa.text("""
             INSERT INTO opportunity_evidences (opportunity_id,evidence_id,relevance,created_at)
             VALUES (:opportunity_id,:evidence_id,100,CURRENT_TIMESTAMP)
         """), {"opportunity_id": row["opportunity_id"], "evidence_id": evidence_id})
-        result = connection.execute(sa.text("""
+        score_id = connection.execute(sa.text("""
             INSERT INTO opportunity_scores (tenant_id,opportunity_id,total_score,model_version,is_current,calculated_at)
             VALUES (:tenant_id,:opportunity_id,:score,'legacy-v1',true,CURRENT_TIMESTAMP)
+            RETURNING id
         """), {"tenant_id": row["tenant_id"], "opportunity_id": row["opportunity_id"], "score": row["score"]})
-        score_id = result.lastrowid
-        if not score_id:
-            score_id = connection.execute(sa.text("SELECT max(id) FROM opportunity_scores")).scalar()
+        score_id = score_id.scalar_one()
         for code, weight in weights.items():
             connection.execute(sa.text("""
                 INSERT INTO score_factors (score_id,factor_code,raw_value,weight,points,explanation)
