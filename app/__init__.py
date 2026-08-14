@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import click
 from flask import Flask
 from .extensions import db, migrate
 
@@ -33,4 +34,15 @@ def create_app(test_config=None):
     from .routes.web import web_bp
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp)
+
+    @app.cli.command("collect")
+    def collect_command():
+        """Ejecuta una captación automática una sola vez."""
+        from .services.collector import run_collector
+        run = run_collector()
+        click.echo(f"Captación finalizada: {run.items_scanned} elementos, {run.signals_created} señales nuevas")
+
+    if not app.config.get("TESTING"):
+        from .services.scheduler import start_scheduler
+        start_scheduler(app)
     return app
