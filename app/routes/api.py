@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 from ..extensions import db
-from ..models import CollectorRun, Company, Opportunity, Project, ProspectSignal, TimelineEvent
+from ..models import CollectorRun, Company, Opportunity, Project, ProspectSignal, TimelineEvent, WebsiteAnalysis
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
@@ -70,7 +70,7 @@ def collector_status():
 def collector_run():
     from datetime import datetime, timedelta, timezone
     recent = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
-    if recent and recent.started_at and recent.started_at > datetime.now(timezone.utc) - timedelta(minutes=5):
+    if recent and recent.started_at and recent.started_at > datetime.now(timezone.utc) - timedelta(minutes=1):
         return jsonify(error="La captación ya fue ejecutada recientemente", run=recent.to_dict()), 429
     from ..services.collector import run_collector
     run = run_collector()
@@ -102,6 +102,28 @@ def signal_discard(signal_id):
     signal.status = "DISCARDED"
     db.session.commit()
     return jsonify(signal.to_dict())
+
+
+@api_bp.post("/website-analysis")
+def website_analysis_create():
+    data = request.get_json(silent=True) or {}
+    if not data.get("url"):
+        return jsonify(error="Ingrese el sitio web de la empresa"), 400
+    try:
+        from ..services.site_analyzer import analyze_website
+        analysis = analyze_website(data["url"])
+        return jsonify(analysis.to_dict()), 201
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        db.session.rollback()
+        return jsonify(error="No se pudo analizar el sitio. Verifique que sea público y esté disponible."), 502
+
+
+@api_bp.get("/website-analysis")
+def website_analysis_list():
+    rows = WebsiteAnalysis.query.order_by(WebsiteAnalysis.created_at.desc()).limit(30).all()
+    return jsonify([row.to_dict() for row in rows])
 
 
 @api_bp.get("/health")
