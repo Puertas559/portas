@@ -61,7 +61,7 @@ function render() {
       </span>
       <span>›</span>
     </button>
-  `).join("") || "<p>Nenhuma oportunidade encontrada.</p>";
+  `).join("") || "<p>No se encontraron oportunidades.</p>";
 
   document.querySelectorAll(".lead").forEach((button) => {
     button.addEventListener("click", () => {
@@ -279,6 +279,48 @@ document.querySelectorAll(".discard-signal").forEach((button) => {
       toast("Señal descartada");
     } else toast("No se pudo descartar la señal");
   });
+});
+
+function renderWebsiteAnalysis(analysis) {
+  const list = (values, fallback = "No encontrado") => Array.isArray(values) && values.length ? values.map(escapeHtml).join(", ") : fallback;
+  return `
+    <article class="analysis-card">
+      <div class="analysis-score"><strong>${Number(analysis.score) || 0}</strong><small>${escapeHtml(analysis.level)}</small></div>
+      <div class="analysis-main"><span class="source-type">${Number(analysis.pagesAnalyzed) || 0} PÁGINAS ANALIZADAS</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
+      <div class="analysis-grid">
+        <div><b>Contacto</b><span>${list(analysis.emails)}</span><span>${list(analysis.phones)}</span>${analysis.whatsapp ? `<span>WhatsApp: ${escapeHtml(analysis.whatsapp)}</span>` : ""}</div>
+        <div><b>Dirección y responsables</b><span>${escapeHtml(analysis.address || "No encontrado")}</span><span>${list(analysis.contacts, "No identificado")}</span></div>
+        <div><b>Productos probables</b><span>${list(analysis.products, "Requiere validación")}</span></div>
+        <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
+      </div>
+      <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+    </article>`;
+}
+
+$("siteAnalysisForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button");
+  const url = $("companyWebsite").value.trim();
+  button.disabled = true;
+  button.textContent = "Analizando páginas y contactos...";
+  $("siteAnalysisMessage").textContent = "Revisando información pública, responsables, contactos, infraestructura y afinidad comercial.";
+  try {
+    const response = await fetch("/api/website-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo analizar el sitio");
+    $("siteAnalysisResults").insertAdjacentHTML("afterbegin", renderWebsiteAnalysis(data));
+    $("siteAnalysisMessage").textContent = `Análisis completado: potencial ${data.level} con ${data.score} puntos.`;
+    toast("Empresa analizada y guardada en PostgreSQL");
+  } catch (error) {
+    $("siteAnalysisMessage").textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "◉ Analizar empresa";
+  }
 });
 
 render();
