@@ -2,7 +2,7 @@
 set -e
 
 if [ -z "$DATABASE_URL" ]; then
-  echo "ERRO: DATABASE_URL não configurada."
+  echo "ERROR: DATABASE_URL no está configurada."
   exit 1
 fi
 
