@@ -11,8 +11,9 @@ from xml.etree import ElementTree
 
 from ..extensions import db
 from ..models import CollectorRun, ProspectSignal
+from ..tenant import current_tenant
 
-USER_AGENT = "PuertasBrasilPY-ProspectingRadar/1.0 (+https://portas-production.up.railway.app)"
+USER_AGENT = os.getenv("RADAR_USER_AGENT", "IndustrialRevenueRadar/1.0")
 MIN_SIGNAL_SCORE = int(os.getenv("COLLECTOR_MIN_SCORE", "60"))
 
 DEFAULT_FEEDS = [
@@ -208,8 +209,9 @@ def _is_older_than(value, cutoff):
 
 
 def requalify_pending_signals():
+    tenant = current_tenant()
     cutoff = datetime.now(timezone.utc) - timedelta(days=120)
-    rows = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").all()
+    rows = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").all()
     for signal in rows:
         if signal.source_name == "DNCP Datos Abiertos" and "/licitaciones/convocatoria/" in signal.source_url:
             signal.source_url = "https://www.contrataciones.gov.py/buscador/licitaciones.html?" + urlencode({"nro_nombre_licitacion": signal.title})
@@ -227,7 +229,8 @@ def requalify_pending_signals():
 
 
 def run_collector():
-    run = CollectorRun()
+    tenant = current_tenant()
+    run = CollectorRun(tenant_id=tenant.id)
     db.session.add(run)
     db.session.commit()
     requalify_pending_signals()
@@ -251,7 +254,7 @@ def run_collector():
             if _is_older_than(item.get("published_at"), datetime.now(timezone.utc) - timedelta(days=120)):
                 continue
             fingerprint = _fingerprint(item)
-            if ProspectSignal.query.filter_by(fingerprint=fingerprint).first():
+            if ProspectSignal.query.filter_by(tenant_id=tenant.id, fingerprint=fingerprint).first():
                 continue
             score, level, event_type, products, reasons = analyze(item)
             if score < MIN_SIGNAL_SCORE:
@@ -259,6 +262,7 @@ def run_collector():
             text = f"{item['title']} {item.get('summary', '')}"
             department = next((name for name in DEPARTMENTS if name.lower() in text.lower()), None)
             db.session.add(ProspectSignal(
+                tenant_id=tenant.id,
                 fingerprint=fingerprint, company_name=item["company"], title=item["title"], summary=item.get("summary") or item["title"],
                 source_name=item["source"]["name"], source_url=item["url"], source_type=item["source"]["type"],
                 source_reliability=item["source"]["reliability"], published_at=item.get("published_at"), department=department,
