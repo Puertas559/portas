@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import CollectorRun, Opportunity, ProspectSignal, WebsiteAnalysis
+from ..tenant import current_tenant
 
 web_bp = Blueprint("web", __name__)
 
@@ -13,20 +14,21 @@ DEMO = [
 
 @web_bp.get("/")
 def index():
+    tenant = current_tenant()
     try:
-        rows = Opportunity.query.order_by(Opportunity.score.desc()).limit(100).all()
+        rows = Opportunity.query.filter_by(tenant_id=tenant.id).order_by(Opportunity.score.desc()).limit(100).all()
         leads = [row.to_dict() for row in rows]
     except SQLAlchemyError:
         leads = []
     try:
-        prospect_signals = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").order_by(ProspectSignal.score.desc(), ProspectSignal.discovered_at.desc()).limit(30).all()
-        last_collector_run = CollectorRun.query.order_by(CollectorRun.started_at.desc()).first()
-        prospect_total = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").count()
+        prospect_signals = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").order_by(ProspectSignal.score.desc(), ProspectSignal.discovered_at.desc()).limit(30).all()
+        last_collector_run = CollectorRun.query.filter_by(tenant_id=tenant.id).order_by(CollectorRun.started_at.desc()).first()
+        prospect_total = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").count()
     except SQLAlchemyError:
         prospect_signals, last_collector_run, prospect_total = [], None, 0
     try:
-        website_analyses = WebsiteAnalysis.query.order_by(WebsiteAnalysis.created_at.desc()).limit(12).all()
+        website_analyses = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id).order_by(WebsiteAnalysis.created_at.desc()).limit(12).all()
     except SQLAlchemyError:
         website_analyses = []
     demo_mode = not leads
-    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses)
+    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {})
