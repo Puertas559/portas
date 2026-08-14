@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 from ..extensions import db
@@ -11,6 +13,59 @@ STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "
 def opportunities_list():
     rows = Opportunity.query.order_by(Opportunity.score.desc()).limit(500).all()
     return jsonify([row.to_dict() for row in rows])
+
+
+@api_bp.get("/company-search")
+def company_search():
+    try:
+        from ..services.company_search import search_companies
+        rows = search_companies(
+            query=request.args.get("q", ""), city=request.args.get("city", ""),
+            region=request.args.get("region", ""), industry=request.args.get("industry", ""),
+        )
+        return jsonify(results=rows, count=len(rows))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        return jsonify(error="No se pudo consultar el buscador público. Intente nuevamente."), 502
+
+
+@api_bp.post("/company-search/add")
+def company_search_add():
+    data = request.get_json(silent=True) or {}
+    if not data.get("company"):
+        return jsonify(error="Falta el nombre de la empresa"), 400
+    company = Company.query.filter_by(name=data["company"].strip()).first()
+    if not company:
+        company = Company(name=data["company"].strip(), origin_country="Paraguay")
+        db.session.add(company)
+    company.sector = data.get("sector") or company.sector or "Por validar"
+    company.website = data.get("website") or company.website
+    company.address = data.get("address") or company.address
+    company.phone = data.get("phone") or company.phone
+    company.whatsapp = data.get("phone") or company.whatsapp
+    company.email = data.get("email") or company.email
+    company.linkedin_url = data.get("linkedin") or company.linkedin_url
+    project = Project(
+        company=company, name="Empresa identificada por búsqueda geográfica",
+        city=data.get("city") or "Por validar", department=data.get("region") or "Por validar",
+        stage="Prospección geográfica",
+    )
+    try:
+        score = max(0, min(100, int(data.get("score", 55))))
+    except (TypeError, ValueError):
+        score = 55
+    opportunity = Opportunity(
+        project=project, event_type="COMPANY_DISCOVERY", score=score,
+        level="HIGH" if score >= 75 else "MEDIUM", status="NOVO",
+        products=[], evidence=f"Empresa identificada por fuente pública en {data.get('city') or 'Paraguay'}.",
+        source_name=data.get("source") or "Buscador empresarial", source_url=data.get("website"),
+    )
+    db.session.add(opportunity)
+    db.session.flush()
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="GEOGRAPHIC_DISCOVERY", description="Empresa añadida desde la búsqueda por región e industria"))
+    db.session.commit()
+    return jsonify(opportunity.to_dict()), 201
 
 
 @api_bp.post("/opportunities")
@@ -40,10 +95,24 @@ def opportunity_update(opportunity_id):
     opportunity = db.get_or_404(Opportunity, opportunity_id)
     data = request.get_json(silent=True) or {}
     status = data.get("status")
-    if status not in STATUSES:
+    if status is not None and status not in STATUSES:
         return jsonify(error="Estado inválido"), 400
-    opportunity.status = status
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_STATUS", description=f"Estado actualizado a {status}"))
+    changes = []
+    if status is not None:
+        opportunity.status = status
+        changes.append(f"Estado actualizado a {status}")
+    if "contactVerified" in data:
+        opportunity.contact_verified = bool(data["contactVerified"])
+        changes.append("Contacto validado" if opportunity.contact_verified else "Contacto pendiente de validación")
+    if data.get("nextActionAt"):
+        try:
+            opportunity.next_action_at = datetime.fromisoformat(data["nextActionAt"].replace("Z", "+00:00"))
+            changes.append("Próxima acción comercial programada")
+        except ValueError:
+            return jsonify(error="Fecha de seguimiento inválida"), 400
+    if not changes:
+        return jsonify(error="No se recibió ningún cambio"), 400
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_UPDATE", description=" · ".join(changes)))
     db.session.commit()
     return jsonify(opportunity.to_dict())
 
@@ -169,6 +238,11 @@ def website_analysis_qualify(analysis_id):
     else:
         company.website = company.website or analysis.url
         company.sector = company.sector or analysis.sector
+    company.address = company.address or analysis.address
+    company.phone = company.phone or (analysis.phones[0] if analysis.phones else None)
+    company.whatsapp = company.whatsapp or analysis.whatsapp
+    company.email = company.email or (analysis.emails[0] if analysis.emails else None)
+    company.linkedin_url = company.linkedin_url or (analysis.social_links or {}).get("linkedin")
     project = Project(
         company=company, name=f"Calificación comercial desde {analysis.url}",
         city=(analysis.address or "Por validar")[:120], department="Por validar",
