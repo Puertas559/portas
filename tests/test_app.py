@@ -42,6 +42,10 @@ class RadarTestCase(unittest.TestCase):
         updated = self.client.patch(f"/api/opportunities/{opportunity_id}", json={"status": "QUALIFICADO"})
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json["status"], "QUALIFICADO")
+        follow_up = self.client.patch(f"/api/opportunities/{opportunity_id}", json={"contactVerified": True, "nextActionAt": "2026-08-20T12:00:00"})
+        self.assertEqual(follow_up.status_code, 200)
+        self.assertTrue(follow_up.json["contactVerified"])
+        self.assertTrue(follow_up.json["nextActionAt"].startswith("2026-08-20"))
         timeline = self.client.get(f"/api/timeline/{opportunity_id}")
         self.assertEqual(timeline.status_code, 200)
         self.assertGreaterEqual(len(timeline.json), 2)
@@ -116,6 +120,8 @@ class RadarTestCase(unittest.TestCase):
         self.assertIsNotNone(payload["opportunityId"])
         self.assertIn("Frío Demo Paraguay", payload["whatsappMessage"])
         self.assertIn("Puertas Brasil PY", payload["emailBody"])
+        self.assertEqual(qualified.json["opportunity"]["email"], "ventas@friodemo.com.py")
+        self.assertEqual(qualified.json["opportunity"]["whatsapp"], "+595981123456")
 
         repeated = self.client.post(f"/api/website-analysis/{analysis_id}/qualify")
         self.assertEqual(repeated.status_code, 200)
@@ -138,6 +144,27 @@ class RadarTestCase(unittest.TestCase):
         response = self.client.post(f"/api/website-analysis/{analysis_id}/disqualify")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["decision"], "DISQUALIFIED")
+
+    def test_geographic_company_search_and_crm_add(self):
+        discovered = [{
+            "sourceId": "osm-node-10", "company": "Industria Regional", "sector": "manufactura",
+            "city": "Capiatá", "region": "Central", "address": "Ruta 2, Capiatá, Paraguay",
+            "website": "https://industria.example", "phone": "+595 981 222 333",
+            "email": "compras@industria.example", "linkedin": None, "score": 80,
+            "source": "OpenStreetMap",
+        }]
+        with patch("app.services.company_search.search_companies", return_value=discovered):
+            response = self.client.get("/api/company-search?city=Capiata&industry=manufactura")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["count"], 1)
+
+        created = self.client.post("/api/company-search/add", json=discovered[0])
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json["company"], "Industria Regional")
+        self.assertEqual(created.json["status"], "NOVO")
+        self.assertEqual(created.json["phone"], "+595 981 222 333")
+        self.assertEqual(created.json["email"], "compras@industria.example")
+        self.assertTrue(created.json["painPoints"])
 
 
 if __name__ == "__main__":
