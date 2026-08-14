@@ -1,4 +1,5 @@
 const leads = Array.isArray(window.RADAR_LEADS) ? window.RADAR_LEADS : [];
+const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Industrial Revenue Radar";
 let selected = leads[0] || null;
 let level = "ALL";
 let selectedChannel = "whatsapp";
@@ -95,10 +96,10 @@ function renderKanban() {
 
 function contactMessage(lead, channel = selectedChannel) {
   const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos";
-  if (channel === "email") return `Asunto: Soluciones de accesos industriales para ${lead.company}\n\nEstimado equipo de ${lead.company}:\n\nIdentificamos una posible aplicación de ${products} para su operación en ${lead.city}. Puertas Brasil PY puede realizar una evaluación técnica y proponer una solución a medida.\n\n¿Podemos coordinar una breve conversación con la persona responsable de mantenimiento, operaciones o compras?\n\nAtentamente,\nEquipo comercial de Puertas Brasil PY`;
-  if (channel === "call") return `GUION DE LLAMADA\n\nPresentarse como Puertas Brasil PY. Confirmar la actividad de ${lead.company} y preguntar por el responsable de mantenimiento, operaciones o compras. Validar necesidades de ${products}, próximos proyectos y disponibilidad para una visita técnica.`;
-  if (channel === "linkedin") return `Hola. Soy parte del equipo comercial de Puertas Brasil PY. Conocimos la operación de ${lead.company} y nos gustaría conectar con la persona responsable de mantenimiento, operaciones o compras para presentar soluciones de accesos industriales.`;
-  return `¡Hola! Soy parte del equipo comercial de Puertas Brasil PY. Identificamos que ${lead.company} opera en ${lead.city} y puede tener aplicación para ${products}. ¿Con quién podríamos coordinar una breve conversación técnica?`;
+  if (channel === "email") return `Asunto: Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company}:\n\nIdentificamos una posible aplicación de ${products} para su operación en ${lead.city}. ${brandName} puede realizar una evaluación técnica y proponer una solución a medida.\n\n¿Podemos coordinar una breve conversación con la persona responsable de mantenimiento, operaciones o compras?\n\nAtentamente,\nEquipo comercial de ${brandName}`;
+  if (channel === "call") return `GUION DE LLAMADA\n\nPresentarse como ${brandName}. Confirmar la actividad de ${lead.company} y preguntar por el responsable de mantenimiento, operaciones o compras. Validar necesidades de ${products}, próximos proyectos y disponibilidad para una visita técnica.`;
+  if (channel === "linkedin") return `Hola. Soy parte del equipo comercial de ${brandName}. Conocimos la operación de ${lead.company} y nos gustaría conectar con la persona responsable de mantenimiento, operaciones o compras para presentar soluciones industriales.`;
+  return `¡Hola! Soy parte del equipo comercial de ${brandName}. Identificamos que ${lead.company} opera en ${lead.city} y puede tener aplicación para ${products}. ¿Con quién podríamos coordinar una breve conversación técnica?`;
 }
 
 function renderCrm() {
@@ -603,11 +604,14 @@ $("siteAnalysisResults").addEventListener("click", async (event) => {
 async function loadToday() {
   try {
     await fetch("/api/tasks/ensure", { method: "POST" });
-    const [todayResponse, metricsResponse] = await Promise.all([fetch("/api/dashboard/today"), fetch("/api/metrics")]);
+    const [todayResponse, metricsResponse, intelligenceResponse] = await Promise.all([fetch("/api/dashboard/today"), fetch("/api/metrics"), fetch("/api/dashboard/revenue-intelligence")]);
     const today = await todayResponse.json();
     const metrics = await metricsResponse.json();
+    const intelligence = await intelligenceResponse.json();
     const metricValues = [today.dueToday, today.overdue, money(metrics.pipelineValue), `${metrics.responseRate}%`, metrics.won];
     document.querySelectorAll("#salesMetrics article b").forEach((element, index) => { element.textContent = metricValues[index]; });
+    const intelligenceValues = [intelligence.companies, intelligence.projects, intelligence.signals, intelligence.evidence, intelligence.sources, money(intelligence.expectedRevenue)];
+    document.querySelectorAll("#intelligenceMetrics article b").forEach((element, index) => { element.textContent = intelligenceValues[index]; });
     $("dailyFocus").textContent = today.overdue ? `${today.overdue} tareas atrasadas requieren atención inmediata.` : "No hay atrasos. Avance con los contactos previstos para hoy.";
     $("todayTasks").innerHTML = (today.tasks || []).map((task) => {
       const due = new Date(task.dueAt);
