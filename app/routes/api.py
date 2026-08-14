@@ -19,7 +19,7 @@ def opportunities_create():
     required = ("company", "project", "city", "department", "event", "evidence")
     missing = [key for key in required if not data.get(key)]
     if missing:
-        return jsonify(error="Campos obrigatórios ausentes", fields=missing), 400
+        return jsonify(error="Faltan campos obligatorios", fields=missing), 400
     score = max(0, min(100, int(data.get("score", 0))))
     level = "HOT" if score >= 90 else "HIGH" if score >= 75 else "MEDIUM" if score >= 55 else "LOW" if score >= 30 else "VERY_LOW"
     company = Company.query.filter_by(name=data["company"].strip()).first()
@@ -30,7 +30,7 @@ def opportunities_create():
     opportunity = Opportunity(project=project, event_type=data["event"], score=score, level=level, products=data.get("products") or [], evidence=data["evidence"], source_name=data.get("sourceName"), source_url=data.get("sourceUrl"))
     db.session.add(opportunity)
     db.session.flush()
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="DISCOVERY", description="Oportunidade cadastrada no radar"))
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="DISCOVERY", description="Oportunidad registrada en el radar"))
     db.session.commit()
     return jsonify(opportunity.to_dict()), 201
 
@@ -41,9 +41,9 @@ def opportunity_update(opportunity_id):
     data = request.get_json(silent=True) or {}
     status = data.get("status")
     if status not in STATUSES:
-        return jsonify(error="Status inválido"), 400
+        return jsonify(error="Estado inválido"), 400
     opportunity.status = status
-    db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_STATUS", description=f"Status alterado para {status}"))
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="CRM_STATUS", description=f"Estado actualizado a {status}"))
     db.session.commit()
     return jsonify(opportunity.to_dict())
 
