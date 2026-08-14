@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ingresar · Industrial Revenue Radar</title>
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#063F2D;color:#17352B;font:16px system-ui,sans-serif}
+    main{width:min(430px,calc(100% - 40px));background:#fff;border-radius:18px;padding:34px;box-shadow:0 24px 80px #0008}
+    h1{margin:0 0 8px;font-size:28px}p{color:#6E7F78}label{display:grid;gap:7px;margin:18px 0;font-weight:700}
+    input{font:inherit;padding:13px;border:1px solid #cbd5e1;border-radius:10px}button{width:100%;padding:14px;border:0;border-radius:10px;background:#0A7A45;color:#fff;font:700 16px system-ui;cursor:pointer}
+    .error{padding:10px;border-radius:8px;background:#fee2e2;color:#991b1b}
+  </style>
+</head>
+<body><main><h1>Industrial Revenue Radar</h1><p>Acceso seguro al espacio comercial.</p>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form method="post"><label>Workspace<input name="workspace" value="{{ default_workspace }}" autocomplete="organization" required></label><label>Correo<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><button>Ingresar</button></form>
+</main></body></html>
