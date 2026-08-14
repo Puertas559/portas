@@ -13,17 +13,17 @@ from ..extensions import db
 from ..models import CollectorRun, ProspectSignal
 
 USER_AGENT = "PuertasBrasilPY-ProspectingRadar/1.0 (+https://portas-production.up.railway.app)"
-MIN_SIGNAL_SCORE = int(os.getenv("COLLECTOR_MIN_SCORE", "45"))
+MIN_SIGNAL_SCORE = int(os.getenv("COLLECTOR_MIN_SCORE", "60"))
 
 DEFAULT_FEEDS = [
     {"name": "MIC Paraguay", "url": "https://www.mic.gov.py/feed/", "type": "OFFICIAL", "reliability": 95},
-    {"name": "Noticias industriales Paraguay", "url": "https://news.google.com/rss/search?q=" + quote('("nueva fábrica" OR "ampliación industrial" OR "centro logístico" OR maquila OR frigorífico OR "nave industrial") Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 60},
-    {"name": "Inversiones Paraguay", "url": "https://news.google.com/rss/search?q=" + quote('(inversión OR planta OR depósito OR construcción) (empresa OR industria) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 58},
-    {"name": "Parques y logística Paraguay", "url": "https://news.google.com/rss/search?q=" + quote('("parque industrial" OR "zona franca" OR "centro de distribución" OR logística) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 58},
-    {"name": "Agroindustria Paraguay", "url": "https://news.google.com/rss/search?q=" + quote('(agroindustria OR frigorífico OR silo OR molino OR alimentos) (inversión OR planta OR ampliación) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 58},
+    {"name": "Proyectos industriales concretos", "url": "https://news.google.com/rss/search?q=" + quote('("nueva fábrica" OR "ampliación de planta" OR "nuevo frigorífico" OR "nave industrial") (construye OR inaugura OR instala OR amplía) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 65},
+    {"name": "Logística y centros de distribución", "url": "https://news.google.com/rss/search?q=" + quote('("centro de distribución" OR "centro logístico" OR "nuevo depósito" OR "muelles de carga") (empresa OR operador) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 65},
+    {"name": "Cadena de frío y alimentos", "url": "https://news.google.com/rss/search?q=" + quote('(frigorífico OR "cámara frigorífica" OR "planta de alimentos" OR "cadena de frío") (ampliación OR construcción OR inauguración) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 65},
+    {"name": "Hangares y grandes accesos", "url": "https://news.google.com/rss/search?q=" + quote('(hangar OR aeropuerto OR "gran formato") (construcción OR ampliación OR nuevo) Paraguay') + "&hl=es-419&gl=PY&ceid=PY:es-419", "type": "AGGREGATOR", "reliability": 62},
 ]
 
-DNCP_TERMS = ["construcción", "planta industrial", "depósito", "centro logístico", "mantenimiento industrial"]
+DNCP_TERMS = ["puertas automáticas", "portones", "muelle de carga", "hangar", "cámara frigorífica"]
 
 KEYWORDS = {
     "NEW_FACTORY": [("nueva fábrica", 30), ("nueva planta", 28), ("instalación industrial", 24), ("industria", 8)],
@@ -35,8 +35,22 @@ KEYWORDS = {
 
 NEGATIVE_TERMS = {
     "vivienda": -18, "ruta": -12, "empedrado": -15, "alcantarillado": -15,
-    "plaza": -12, "escuela": -10, "consultoría": -12, "medicamentos": -18,
+    "plaza": -20, "escuela": -18, "consultoría": -22, "medicamentos": -25,
+    "puente": -25, "carretera": -25, "agua potable": -25, "hospital": -18,
 }
+
+CONCRETE_EVENTS = [
+    "construye", "construcción", "construccion", "inaugura", "instala", "instalación", "instalacion",
+    "amplía", "amplia", "ampliación", "ampliacion", "abre", "licitación", "licitacion", "adjudica",
+    "nueva planta", "nueva fábrica", "nuevo depósito", "nuevo centro", "remodelación", "modernización",
+]
+
+DOOR_USE_CASES = [
+    "puerta", "portón", "porton", "muelle", "doca", "hangar", "frigorífico", "frigorifico",
+    "cámara fría", "camara fria", "centro logístico", "centro logistico", "centro de distribución",
+    "depósito", "deposito", "galpón", "galpon", "nave industrial", "planta industrial", "fábrica", "fabrica",
+    "carga y descarga", "alto flujo", "automatización de acceso",
+]
 
 DEPARTMENTS = ["Alto Paraná", "Central", "Itapúa", "Caaguazú", "Presidente Hayes", "Amambay", "Concepción", "Paraguarí", "Cordillera"]
 
@@ -108,7 +122,7 @@ def collect_dncp():
                 "company": _plain(buyer.get("name")) or "Entidad por validar",
                 "title": title,
                 "summary": _plain(tender.get("mainProcurementCategoryDetails") or tender.get("procurementMethodDetails")),
-                "url": f"https://www.contrataciones.gov.py/licitaciones/convocatoria/{tender.get('id')}" if tender.get("id") else url,
+                "url": "https://www.contrataciones.gov.py/buscador/licitaciones.html?" + urlencode({"nro_nombre_licitacion": title}),
                 "published_at": _parse_date(release.get("date")), "source": source, "external_id": ocid,
             })
     return items
@@ -130,6 +144,8 @@ def infer_company(title):
 
 def analyze(item):
     text = f"{item['title']} {item.get('summary', '')}".lower()
+    has_concrete_event = any(term in text for term in CONCRETE_EVENTS)
+    has_door_use = any(term in text for term in DOOR_USE_CASES)
     score = round(item["source"]["reliability"] * 0.2)
     reasons = [f"Fuente con confianza {item['source']['reliability']}%"]
     event_type = "MARKET_SIGNAL"
@@ -140,7 +156,16 @@ def analyze(item):
             event_type, best_event_points = candidate, event_points
     score += min(best_event_points, 40)
     if best_event_points:
-        reasons.append("Evento compatible con expansión, inversión u obra")
+        reasons.append("Evento concreto de obra, instalación o ampliación")
+    if has_concrete_event:
+        score += 15
+        reasons.append("Acción empresarial verificable identificada")
+    if has_door_use:
+        score += 25
+        reasons.append("Infraestructura compatible con puertas automáticas")
+    if not (has_concrete_event and has_door_use):
+        score = min(score, 35)
+        reasons.append("Sin evidencia suficiente de necesidad concreta")
     if "paraguay" in text or any(department.lower() in text for department in DEPARTMENTS):
         score += 12
         reasons.append("Ubicación compatible con el mercado paraguayo")
