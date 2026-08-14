@@ -3,7 +3,7 @@ import html
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -192,10 +192,38 @@ def _fingerprint(item):
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+def _is_older_than(value, cutoff):
+    if not value:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value < cutoff
+
+
+def requalify_pending_signals():
+    cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+    rows = ProspectSignal.query.filter_by(status="PENDING_VALIDATION").all()
+    for signal in rows:
+        if signal.source_name == "DNCP Datos Abiertos" and "/licitaciones/convocatoria/" in signal.source_url:
+            signal.source_url = "https://www.contrataciones.gov.py/buscador/licitaciones.html?" + urlencode({"nro_nombre_licitacion": signal.title})
+        item = {
+            "company": signal.company_name, "title": signal.title, "summary": signal.summary,
+            "source": {"name": signal.source_name, "type": signal.source_type, "reliability": signal.source_reliability},
+        }
+        score, level, event_type, products, reasons = analyze(item)
+        too_old = _is_older_than(signal.published_at, cutoff)
+        if score < MIN_SIGNAL_SCORE or too_old:
+            signal.status = "DISCARDED"
+            continue
+        signal.score, signal.level, signal.event_type = score, level, event_type
+        signal.products, signal.reasons = products, reasons
+
+
 def run_collector():
     run = CollectorRun()
     db.session.add(run)
     db.session.commit()
+    requalify_pending_signals()
     errors, scanned, created, sources_scanned = [], 0, 0, 0
     sources = DEFAULT_FEEDS + _extra_feeds()
     batches = []
@@ -213,6 +241,8 @@ def run_collector():
     for batch in batches:
         for item in batch:
             scanned += 1
+            if _is_older_than(item.get("published_at"), datetime.now(timezone.utc) - timedelta(days=120)):
+                continue
             fingerprint = _fingerprint(item)
             if ProspectSignal.query.filter_by(fingerprint=fingerprint).first():
                 continue
