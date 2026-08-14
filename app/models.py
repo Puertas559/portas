@@ -127,3 +127,39 @@ class CollectorRun(db.Model):
             "sourcesScanned": self.sources_scanned, "itemsScanned": self.items_scanned,
             "signalsCreated": self.signals_created, "errors": self.errors or [],
         }
+
+
+class WebsiteAnalysis(db.Model):
+    __tablename__ = "website_analyses"
+    id = db.Column(db.Integer, primary_key=True)
+    url = db.Column(db.String(1200), nullable=False)
+    company_name = db.Column(db.String(240), nullable=False, default="Empresa por validar")
+    sector = db.Column(db.String(160), nullable=False, default="Por validar")
+    address = db.Column(db.Text)
+    phones = db.Column(db.JSON, default=list, nullable=False)
+    whatsapp = db.Column(db.String(120))
+    emails = db.Column(db.JSON, default=list, nullable=False)
+    contacts = db.Column(db.JSON, default=list, nullable=False)
+    social_links = db.Column(db.JSON, default=dict, nullable=False)
+    company_size = db.Column(db.String(80), nullable=False, default="No determinado")
+    potential_score = db.Column(db.Integer, nullable=False, default=0, index=True)
+    potential_level = db.Column(db.String(30), nullable=False, default="BAJO", index=True)
+    products = db.Column(db.JSON, default=list, nullable=False)
+    services = db.Column(db.JSON, default=list, nullable=False)
+    reasons = db.Column(db.JSON, default=list, nullable=False)
+    pages_analyzed = db.Column(db.Integer, nullable=False, default=0)
+    summary = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default="COMPLETED", index=True)
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "url": self.url, "company": self.company_name, "sector": self.sector,
+            "address": self.address, "phones": self.phones or [], "whatsapp": self.whatsapp,
+            "emails": self.emails or [], "contacts": self.contacts or [], "socialLinks": self.social_links or {},
+            "companySize": self.company_size, "score": self.potential_score, "level": self.potential_level,
+            "products": self.products or [], "services": self.services or [], "reasons": self.reasons or [],
+            "pagesAnalyzed": self.pages_analyzed, "summary": self.summary, "status": self.status,
+            "error": self.error, "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
