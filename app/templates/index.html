@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="es-PY">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Radar de oportunidades comerciais industriais da Puertas Brasil PY">
-  <title>Industrial Sales Radar PY</title>
+  <meta name="description" content="Radar de oportunidades comerciales industriales de Puertas Brasil PY">
+  <title>Radar Comercial Industrial PY</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
@@ -12,67 +12,67 @@
   <aside class="sidebar">
     <a class="brand" href="/"><span class="door"><i></i></span><span><b>PUERTAS</b><small>BRASIL <em>PY</em></small></span></a>
     <nav>
-      <p>INTELIGÊNCIA</p><a class="active" href="#radar">⌁ <span>Radar comercial</span></a><a href="#prioridades">◎ <span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#empresas">▣ <span>Empresas</span></a><a href="#projetos">◇ <span>Projetos</span></a>
-      <p>OPERAÇÃO</p><a href="#crm">▥ <span>CRM</span></a><a href="#timeline">◴ <span>Timeline</span></a><a href="#alertas">◌ <span>Alertas</span></a>
-      <p>FERRAMENTAS</p><a href="#pesquisas">⌕ <span>Pesquisas salvas</span></a><a href="/api/exports/status">⇩ <span>Exportações</span></a>
+      <p>INTELIGENCIA</p><a class="active" href="#radar">⌁ <span>Radar comercial</span></a><a href="#prioridades">◎ <span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#empresas">▣ <span>Empresas</span></a><a href="#projetos">◇ <span>Proyectos</span></a>
+      <p>OPERACIÓN</p><a href="#crm">▥ <span>CRM</span></a><a href="#timeline">◴ <span>Cronología</span></a><a href="#alertas">◌ <span>Alertas</span></a>
+      <p>HERRAMIENTAS</p><a href="#pesquisas">⌕ <span>Búsquedas guardadas</span></a><a href="/api/exports/status">⇩ <span>Exportaciones</span></a>
     </nav>
-    <div class="radar-status"><i></i><span><b>Radar ativo</b><small>Flask · PostgreSQL</small></span></div>
+    <div class="radar-status"><i></i><span><b>Radar activo</b><small>Flask · PostgreSQL</small></span></div>
   </aside>
 
   <main class="content">
     <header class="topbar">
-      <label class="search">⌕ <input id="search" placeholder="Pesquisar empresa, cidade, projeto..." autocomplete="off"></label>
+      <label class="search">⌕ <input id="search" placeholder="Buscar empresa, ciudad o proyecto..." autocomplete="off"></label>
       <a class="health" href="/health" target="_blank">● Sistema</a>
-      <button class="primary" id="newLead">＋ Nova oportunidade</button>
+      <button class="primary" id="newLead">＋ Nueva oportunidad</button>
     </header>
 
     <section class="intro">
-      <div><p class="eyebrow">INTELIGÊNCIA COMERCIAL INDUSTRIAL</p><h1>Bom dia, <em>Comercial.</em></h1><p>O radar prioriza acontecimentos que podem virar negócio para a Puertas Brasil PY.</p></div>
-      {% if demo_mode %}<span class="demo-badge">DEMO DATA <small>Dados ilustrativos</small></span>{% else %}<span class="live-badge">DADOS PERSISTENTES</span>{% endif %}
+      <div><p class="eyebrow">INTELIGENCIA COMERCIAL INDUSTRIAL</p><h1>Buenos días, <em>Equipo comercial.</em></h1><p>El radar prioriza acontecimientos que pueden convertirse en negocios para Puertas Brasil PY.</p></div>
+      {% if demo_mode %}<span class="demo-badge">DATOS DEMO <small>Datos ilustrativos</small></span>{% else %}<span class="live-badge">DATOS PERSISTENTES</span>{% endif %}
     </section>
 
     <section class="metrics">
-      <article><i class="red">↗</i><span><small>OPORTUNIDADES</small><strong>{{ leads|length }}</strong><em>No radar</em></span></article>
-      <article><i class="hot">◆</i><span><small>HOT</small><strong>{{ leads|selectattr('level','equalto','HOT')|list|length }}</strong><em>Ação imediata</em></span></article>
-      <article><i class="amber">▲</i><span><small>HIGH</small><strong>{{ leads|selectattr('level','equalto','HIGH')|list|length }}</strong><em>Alta prioridade</em></span></article>
-      <article><i class="blue">⌁</i><span><small>BASE</small><strong>PY</strong><em>Todo o Paraguai</em></span></article>
+      <article><i class="red">↗</i><span><small>OPORTUNIDADES</small><strong>{{ leads|length }}</strong><em>En el radar</em></span></article>
+      <article><i class="hot">◆</i><span><small>URGENTES</small><strong>{{ leads|selectattr('level','equalto','HOT')|list|length }}</strong><em>Acción inmediata</em></span></article>
+      <article><i class="amber">▲</i><span><small>ALTAS</small><strong>{{ leads|selectattr('level','equalto','HIGH')|list|length }}</strong><em>Alta prioridad</em></span></article>
+      <article><i class="blue">⌁</i><span><small>COBERTURA</small><strong>PY</strong><em>Todo Paraguay</em></span></article>
     </section>
 
     <section class="workspace" id="prioridades">
       <div class="priorities">
-        <div class="section-head"><div><p class="eyebrow">FOCO COMERCIAL</p><h2>Prioridades de hoje</h2></div><span id="resultCount">{{ leads|length }} resultados</span></div>
-        <div class="filters"><button class="active" data-level="ALL">Todas</button><button data-level="HOT">HOT</button><button data-level="HIGH">HIGH</button><button data-level="MEDIUM">MEDIUM</button></div>
+        <div class="section-head"><div><p class="eyebrow">FOCO COMERCIAL</p><h2>Prioridades de hoy</h2></div><span id="resultCount">{{ leads|length }} resultados</span></div>
+        <div class="filters"><button class="active" data-level="ALL">Todas</button><button data-level="HOT">Urgentes</button><button data-level="HIGH">Altas</button><button data-level="MEDIUM">Medias</button></div>
         <div id="leadList" class="lead-list"></div>
       </div>
       <aside class="map-card" id="radar">
-        <div class="section-head"><div><p class="eyebrow">VISÃO GEOGRÁFICA</p><h2>Radar Paraguai</h2></div><span>⛶</span></div>
+        <div class="section-head"><div><p class="eyebrow">VISIÓN GEOGRÁFICA</p><h2>Radar Paraguay</h2></div><span>⛶</span></div>
         <div class="map"><span class="ring one"></span><span class="ring two"></span><div class="country"><i></i><i></i><i></i></div><button class="pin p1">94</button><button class="pin p2">89</button><button class="pin p3">86</button><b class="alto">ALTO PARANÁ</b><b class="central">CENTRAL</b></div>
-        <div class="legend"><span><i class="hot-dot"></i>HOT</span><span><i class="high-dot"></i>HIGH</span><span><i class="medium-dot"></i>MEDIUM</span></div>
+        <div class="legend"><span><i class="hot-dot"></i>URGENTE</span><span><i class="high-dot"></i>ALTA</span><span><i class="medium-dot"></i>MEDIA</span></div>
       </aside>
     </section>
 
-    <section class="signals" id="alertas"><div class="section-head"><div><p class="eyebrow">MOVIMENTO DO MERCADO</p><h2>Sinais monitorados</h2></div><span>Últimos 30 dias</span></div><div class="signal-grid"><article>▤ <span><small>Novas fábricas</small><b>06</b></span></article><article>▰ <span><small>Obras & naves</small><b>11</b></span></article><article>↗ <span><small>Investimentos</small><b>08</b></span></article><article>⇥ <span><small>Empresas chegando</small><b>05</b></span></article><article>▣ <span><small>Ativos industriais</small><b>14</b></span></article></div></section>
+    <section class="signals" id="alertas"><div class="section-head"><div><p class="eyebrow">MOVIMIENTO DEL MERCADO</p><h2>Señales monitoreadas</h2></div><span>Últimos 30 días</span></div><div class="signal-grid"><article>▤ <span><small>Nuevas fábricas</small><b>06</b></span></article><article>▰ <span><small>Obras y naves</small><b>11</b></span></article><article>↗ <span><small>Inversiones</small><b>08</b></span></article><article>⇥ <span><small>Empresas entrantes</small><b>05</b></span></article><article>▣ <span><small>Activos industriales</small><b>14</b></span></article></div></section>
   </main>
 
   <aside class="drawer" id="drawer">
     <div class="drawer-top"><span id="drawerLevel" class="level hot">HOT · 94</span><button id="drawerMenu">•••</button></div>
     <div class="company"><span id="initials">LG</span><div><h2 id="companyName"></h2><p id="companyMeta"></p><small id="companyPlace"></small></div></div>
-    <div class="tabs"><button class="active" data-tab="overview">Visão geral</button><button data-tab="evidence">Evidências</button><button data-tab="timeline">Timeline</button></div>
+    <div class="tabs"><button class="active" data-tab="overview">Vista general</button><button data-tab="evidence">Evidencias</button><button data-tab="timeline">Cronología</button></div>
     <div class="drawer-body" id="overviewPanel">
-      <div class="why"><p>POR QUE É UM PROSPECTO?</p><strong id="whyText"></strong><small>Inferência comercial — requer validação</small></div>
-      <dl><div><dt>EVENTO</dt><dd id="eventType"></dd></div><div><dt>ESTÁGIO</dt><dd id="stage"></dd></div><div><dt>INVESTIMENTO</dt><dd id="investment"></dd></div></dl>
-      <div class="products"><p>PRODUTOS PROVÁVEIS</p><div id="productList"></div><small>Possibilidade estimada; não é uma necessidade confirmada.</small></div>
-      <div class="next"><p>PRÓXIMA AÇÃO RECOMENDADA</p><strong>Identificar o responsável pelo projeto e verificar se os fornecedores de portas industriais já foram definidos.</strong></div>
-      <div class="channels"><button class="active">WhatsApp</button><button>Email</button><button>Ligação</button><button>LinkedIn</button></div>
-      <textarea id="approach" readonly></textarea><button class="copy" id="copyApproach">Copiar abordagem</button>
-      <label class="crm">STATUS NO CRM<select id="status"><option>NOVO</option><option>QUALIFICADO</option><option value="CONTATO_REALIZADO">CONTATO REALIZADO</option><option>RESPONDEU</option><option>VISITA</option><option value="ORCAMENTO">ORÇAMENTO</option><option value="NEGOCIACAO">NEGOCIAÇÃO</option><option>GANHO</option><option>PERDIDO</option><option>MONITORAMENTO</option><option>DESCARTADO</option></select></label>
+      <div class="why"><p>¿POR QUÉ ES UN PROSPECTO?</p><strong id="whyText"></strong><small>Inferencia comercial — requiere validación</small></div>
+      <dl><div><dt>EVENTO</dt><dd id="eventType"></dd></div><div><dt>ETAPA</dt><dd id="stage"></dd></div><div><dt>INVERSIÓN</dt><dd id="investment"></dd></div></dl>
+      <div class="products"><p>PRODUCTOS PROBABLES</p><div id="productList"></div><small>Posibilidad estimada; no es una necesidad confirmada.</small></div>
+      <div class="next"><p>PRÓXIMA ACCIÓN RECOMENDADA</p><strong>Identificar al responsable del proyecto y verificar si los proveedores de puertas industriales ya fueron definidos.</strong></div>
+      <div class="channels"><button class="active">WhatsApp</button><button>Correo</button><button>Llamada</button><button>LinkedIn</button></div>
+      <textarea id="approach" readonly></textarea><button class="copy" id="copyApproach">Copiar mensaje</button>
+      <label class="crm">ESTADO EN EL CRM<select id="status"><option value="NOVO">NUEVO</option><option value="QUALIFICADO">CALIFICADO</option><option value="CONTATO_REALIZADO">CONTACTO REALIZADO</option><option value="RESPONDEU">RESPONDIÓ</option><option>VISITA</option><option value="ORCAMENTO">PRESUPUESTO</option><option value="NEGOCIACAO">NEGOCIACIÓN</option><option value="GANHO">GANADO</option><option value="PERDIDO">PERDIDO</option><option value="MONITORAMENTO">SEGUIMIENTO</option><option value="DESCARTADO">DESCARTADO</option></select></label>
     </div>
-    <div class="drawer-body hidden" id="evidencePanel"><p>FATO</p><blockquote id="evidenceText"></blockquote><p>INFERÊNCIA</p><strong>O evento é compatível com possível demanda por soluções de acesso industrial.</strong><p>RECOMENDAÇÃO</p><strong>Validar o estágio e identificar o decisor empresarial responsável.</strong></div>
-    <div class="drawer-body hidden timeline" id="timelinePanel"><div id="timelineList"><article><i></i><small>DESCOBERTA</small><strong>Evento identificado pelo radar</strong></article></div></div>
+    <div class="drawer-body hidden" id="evidencePanel"><p>HECHO</p><blockquote id="evidenceText"></blockquote><p>INFERENCIA</p><strong>El evento es compatible con una posible demanda de soluciones de acceso industrial.</strong><p>RECOMENDACIÓN</p><strong>Validar la etapa e identificar al responsable empresarial de la decisión.</strong></div>
+    <div class="drawer-body hidden timeline" id="timelinePanel"><div id="timelineList"><article><i></i><small>DESCUBRIMIENTO</small><strong>Evento identificado por el radar</strong></article></div></div>
   </aside>
 </div>
 
-<dialog id="leadDialog"><form id="leadForm"><div class="modal-head"><div><p class="eyebrow">NOVO REGISTRO</p><h2>Cadastrar oportunidade</h2></div><button type="button" id="closeDialog">×</button></div><div class="form-grid"><label>Empresa*<input name="company" required></label><label>Setor<input name="sector"></label><label>Projeto*<input name="project" required></label><label>Evento*<select name="event"><option>NEW_FACTORY</option><option>NEW_LOGISTICS_CENTER</option><option>EXPANSION</option><option>INVESTMENT</option><option>BUYING_INTENT</option><option>NEW_COMPANY</option></select></label><label>Cidade*<input name="city" required></label><label>Departamento*<input name="department" required></label><label>Score<input name="score" type="number" min="0" max="100" value="75"></label><label>Estágio<input name="stage"></label><label class="wide">Evidência*<textarea name="evidence" required></textarea></label><label>Fonte<input name="sourceName"></label><label>URL da fonte<input name="sourceUrl" type="url"></label></div><button class="primary submit">Salvar oportunidade</button><p id="formMessage"></p></form></dialog>
+<dialog id="leadDialog"><form id="leadForm"><div class="modal-head"><div><p class="eyebrow">NUEVO REGISTRO</p><h2>Registrar oportunidad</h2></div><button type="button" id="closeDialog">×</button></div><div class="form-grid"><label>Empresa*<input name="company" required></label><label>Sector<input name="sector"></label><label>Proyecto*<input name="project" required></label><label>Evento*<select name="event"><option value="NEW_FACTORY">NUEVA FÁBRICA</option><option value="NEW_LOGISTICS_CENTER">NUEVO CENTRO LOGÍSTICO</option><option value="EXPANSION">EXPANSIÓN</option><option value="INVESTMENT">INVERSIÓN</option><option value="BUYING_INTENT">INTENCIÓN DE COMPRA</option><option value="NEW_COMPANY">NUEVA EMPRESA</option></select></label><label>Ciudad*<input name="city" required></label><label>Departamento*<input name="department" required></label><label>Puntuación<input name="score" type="number" min="0" max="100" value="75"></label><label>Etapa<input name="stage"></label><label class="wide">Evidencia*<textarea name="evidence" required></textarea></label><label>Fuente<input name="sourceName"></label><label>URL de la fuente<input name="sourceUrl" type="url"></label></div><button class="primary submit">Guardar oportunidad</button><p id="formMessage"></p></form></dialog>
 
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }};</script>
