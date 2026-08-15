@@ -72,3 +72,49 @@ dialog{border-radius:16px;box-shadow:0 28px 90px rgba(6,67,35,.26)}dialog::backd
 @media(max-width:1080px){.content{margin-right:0}.drawer{position:relative;margin-left:246px;width:calc(100% - 246px);border-top:1px solid var(--line)}.company-result-grid,.crm-grid{grid-template-columns:1fr}.visit-planner,.today-grid{grid-template-columns:1fr}.sales-metrics{grid-template-columns:repeat(3,1fr)}.intelligence-metrics{grid-template-columns:repeat(3,1fr)}.command-grid{grid-template-columns:1fr}.analysis-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:780px){.sidebar{width:70px}.sidebar .brand span:last-child,.sidebar nav span,.sidebar nav p,.radar-status span{display:none}.content{margin-left:70px}.drawer{margin-left:70px;width:calc(100% - 70px)}.company-finder{grid-template-columns:1fr 1fr}.company-finder label,.company-finder button{grid-column:1/-1}.workspace{grid-template-columns:1fr}.priorities{border-right:0;border-bottom:1px solid var(--line)}.command-metrics{grid-template-columns:repeat(2,1fr)}.outreach-drafts{grid-template-columns:1fr}}
 @media(max-width:560px){.content{margin-left:0}.sidebar{display:none}.drawer{margin-left:0;width:100%}.topbar{position:relative;padding:12px}.company-finder{grid-template-columns:1fr}.company-finder>*{grid-column:1!important;grid-row:auto!important}.health{display:none}.workspace,.signals,.site-triage,.capture,.crm-hub,.visit-planner,.search-results,.today-hub,.pipeline-hub,.command-center{margin:0 10px 14px;padding:18px 14px}.sales-metrics,.intelligence-metrics,.command-metrics{grid-template-columns:1fr 1fr}.analysis-card{grid-template-columns:64px 1fr}.analysis-score{width:60px;height:60px}.analysis-grid{grid-template-columns:1fr}.contact-actions{grid-template-columns:1fr}.intro{padding:24px 16px}.intro h1{font-size:28px}}
+
+/* =========================================================
+   TESTE VISUAL DE CORES — PUERTAS BRASIL
+   Somente paleta. Nenhuma alteração de layout ou lógica.
+   ========================================================= */
+:root{
+  --navy:#005F36;
+  --ink:#143B2A;
+  --red:#008C45;
+  --blue:#008C45;
+  --green:#008C45;
+  --green-2:#00A651;
+  --green-dark:#005F36;
+  --green-soft:#EAF8F0;
+  --yellow:#FFD500;
+  --yellow-soft:#FFF8C7;
+  --muted:#64756C;
+  --line:#DCE9E1;
+  --paper:#FFFFFF;
+  --white:#FFFFFF;
+}
+body{background:#FFFFFF!important;color:var(--ink)!important}
+.sidebar{background:#008C45!important}
+.sidebar nav a:hover{background:rgba(255,255,255,.14)!important;color:#fff!important}
+.sidebar nav a.active{background:#FFD500!important;color:#143B2A!important;box-shadow:none!important}
+.sidebar nav a.active i,.sidebar nav a.active span{color:#143B2A!important}
+.sidebar nav a b{background:#FFD500!important;color:#143B2A!important}
+.door i{background:#FFD500!important}
+.brand em{color:#FFD500!important}
+.radar-status>i{background:#FFD500!important}
+.topbar{background:#FFFFFF!important;border-bottom:3px solid #FFD500!important}
+.primary{background:#FFD500!important;color:#143B2A!important;box-shadow:0 8px 18px rgba(255,213,0,.22)!important}
+.primary:not(:disabled):hover{background:#F2C900!important;color:#143B2A!important}
+.task-item button,.prospect-actions .approve-signal,.analysis-decision .qualify-analysis,.outreach-drafts button,.follow-up button,.deal-data button{background:#008C45!important;color:#FFFFFF!important}
+.live-badge{background:#EAF8F0!important;color:#006B3C!important;border-color:#BFE8D0!important}
+.demo-badge{background:#FFF8C7!important;color:#6B5900!important;border-color:#F4DC5C!important}
+.metrics article:nth-child(2)>i,.metrics article:nth-child(3)>i{background:#FFF8C7!important;color:#6B5900!important}
+.command-center:before{background:linear-gradient(#008C45,#FFD500)!important}
+.command-metrics article:nth-child(2),.command-metrics article:nth-child(4){background:#FFF8C7!important}
+.intelligence-metrics article{border-top-color:#008C45!important}
+.intelligence-metrics article:nth-child(even){border-top-color:#FFD500!important}
+.daily-guide,.why{background:#FFF8C7!important;border-color:#F1DA64!important}
+.tabs button.active{border-color:#FFD500!important;color:#006B3C!important}
+.products span,.radar-badges b,.prospect-score{background:#EAF8F0!important;color:#006B3C!important}
+.prospect-tags span,.radar-badges em{background:#FFF8C7!important;color:#6B5900!important}
+.toast{background:#005F36!important;color:#fff!important}
