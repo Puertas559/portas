@@ -39,3 +39,21 @@ html{scroll-behavior:smooth}body{font-size:15px;background:var(--paper)}
 .radar-row:hover{border-color:#c8d2dd;box-shadow:0 8px 22px rgba(15,29,50,.08);transform:translateY(-1px)}
 .radar-row>div:first-child{display:flex;flex-direction:column;gap:3px}.radar-row span,.radar-row small{font-size:12px;color:var(--muted);opacity:1}.radar-row p{font-size:12px;line-height:1.45;margin:9px 0 5px;color:var(--ink)}.radar-badges{display:flex;gap:6px;align-items:center;margin-top:7px}.radar-badges b,.radar-badges em{font-style:normal;font-size:11px;padding:4px 7px;border-radius:999px;background:#edf2f7;color:var(--ink)}
 @media(max-width:1000px){.command-grid{grid-template-columns:1fr}.command-metrics{grid-template-columns:repeat(2,1fr)}}
+/* TESTE PUERTAS - ARQUIVO REAL */
+body {
+  background: #ffffff !important;
+}
+
+.sidebar {
+  background: #008C45 !important;
+}
+
+.sidebar nav a.active {
+  background: #FFD500 !important;
+  color: #143B2A !important;
+}
+
+.primary {
+  background: #FFD500 !important;
+  color: #143B2A !important;
+}
