@@ -12,30 +12,64 @@ from ..extensions import db
 from ..models import WebsiteAnalysis
 from ..tenant import current_tenant
 
-USER_AGENT = os.getenv("RADAR_USER_AGENT", "IndustrialRevenueRadar/1.0")
-MAX_BYTES = 1_500_000
-MAX_PAGES = 6
+USER_AGENT = os.getenv("RADAR_USER_AGENT", "PuertasBrasilRevenueRadar/2.1")
+MAX_BYTES = 2_000_000
+MAX_PAGES = 18
+MAX_SITEMAP_URLS = 80
 
 SECTORS = {
-    "Logística y distribución": ["logística", "logistica", "distribución", "distribucion", "depósito", "deposito", "almacén", "almacen", "transportadora"],
-    "Alimentos y bebidas": ["alimentos", "bebidas", "lácteos", "lacteos", "molino", "panificadora", "supermercado", "producción alimentaria"],
+    "Logística y distribución": ["logística", "logistica", "distribución", "distribucion", "depósito", "deposito", "almacén", "almacen", "transportadora", "centro de distribución", "cross docking", "cross-docking"],
+    "Alimentos y bebidas": ["alimentos", "bebidas", "lácteos", "lacteos", "molino", "panificadora", "supermercado", "producción alimentaria", "procesamiento de alimentos"],
     "Frigorífico y cadena de frío": ["frigorífico", "frigorifico", "frigorífica", "frigorifica", "refrigerado", "cámara fría", "cámaras frías", "camara fria", "camaras frias", "congelados", "cadena de frío"],
-    "Industria y manufactura": ["industria", "industrial", "fábrica", "fabrica", "manufactura", "producción", "produccion", "metalúrgica", "metalurgica"],
-    "Agronegocio": ["agro", "semillas", "granos", "silo", "cooperativa", "agricultura", "fertilizantes"],
-    "Aeronáutico": ["aeronáutica", "aeronautica", "aeronave", "hangar", "aviación", "aviacion"],
-    "Comercio de gran porte": ["shopping", "centro comercial", "retail", "hipermercado", "tienda", "importadora"],
-    "Construcción e ingeniería": ["constructora", "construcción", "construccion", "ingeniería", "ingenieria", "arquitectura"],
+    "Industria y manufactura": ["industria", "industrial", "fábrica", "fabrica", "manufactura", "producción", "produccion", "metalúrgica", "metalurgica", "planta productiva"],
+    "Agronegocio": ["agro", "semillas", "granos", "silo", "cooperativa", "agricultura", "fertilizantes", "acopio", "agroindustrial"],
+    "Aeronáutico": ["aeronáutica", "aeronautica", "aeronave", "hangar", "aviación", "aviacion", "aeropuerto"],
+    "Comercio de gran porte": ["shopping", "centro comercial", "retail", "hipermercado", "tienda", "importadora", "estacionamiento"],
+    "Construcción e ingeniería": ["constructora", "construcción", "construccion", "ingeniería", "ingenieria", "arquitectura", "obra industrial", "estructura metálica"],
 }
 
 PRODUCT_RULES = [
-    (["muelle", "carga y descarga", "camiones", "centro de distribución", "logística", "depósito"], ["Puertas seccionales", "Niveladoras de docas", "Abrigos/sellos de docas"]),
+    (["muelle", "dársena", "darsena", "carga y descarga", "camiones", "centro de distribución", "cross docking", "logística", "depósito"], ["Puertas seccionales", "Niveladoras de docas", "Abrigos/sellos de docas"]),
     (["frigorífico", "frigorífica", "refrigerado", "cámara fría", "cámaras frías", "congelados", "cadena de frío"], ["Puertas rápidas frigoríficas", "Abrigos/sellos de docas", "Puertas seccionales"]),
-    (["alto flujo", "línea de producción", "linea de produccion", "higiene", "alimentos", "farmacéutica"], ["Puertas rápidas de lona enrollables"]),
-    (["hangar", "aeronave", "aviación", "gran formato"], ["Puertas de gran formato para hangares", "Puertas rápidas plegables"]),
-    (["galpón", "galpon", "nave industrial", "fábrica", "fabrica", "planta industrial"], ["Puertas seccionales", "Puertas de acero enrollables", "Puertas rápidas plegables"]),
-    (["seguridad contra incendios", "protección contra incendios", "cortafuego"], ["Puertas cortafuego bajo proyecto"]),
-    (["shopping", "comercio", "local comercial", "estacionamiento"], ["Puertas de acero enrollables", "Automatización de accesos"]),
+    (["alto flujo", "línea de producción", "linea de produccion", "higiene", "alimentos", "farmacéutica", "farmaceutica"], ["Puertas rápidas de lona enrollables"]),
+    (["hangar", "aeronave", "aviación", "gran formato", "aeropuerto"], ["Puertas de gran formato para hangares", "Puertas rápidas plegables"]),
+    (["galpón", "galpon", "nave industrial", "fábrica", "fabrica", "planta industrial", "centro industrial"], ["Puertas seccionales", "Puertas de acero enrollables", "Puertas rápidas plegables"]),
+    (["seguridad contra incendios", "protección contra incendios", "cortafuego", "corta fuego"], ["Puertas cortafuego bajo proyecto"]),
+    (["shopping", "comercio", "local comercial", "estacionamiento", "retail"], ["Puertas de acero enrollables", "Automatización de accesos"]),
 ]
+
+PROJECT_SIGNALS = {
+    "expansión": ["expansión", "expansion", "ampliación", "ampliacion", "ampliamos", "expandimos"],
+    "nueva planta": ["nueva planta", "nueva fábrica", "nueva fabrica", "planta industrial", "nuevas instalaciones"],
+    "obra/construcción": ["construcción", "construccion", "obra", "terraplenado", "estructura metálica", "estructura metalica"],
+    "inversión": ["inversión", "inversion", "invertirá", "invertira", "financiamiento", "financiación", "financiacion"],
+    "nuevo centro logístico": ["centro de distribución", "centro logistico", "centro logístico", "nuevo depósito", "nuevo deposito", "almacén logístico"],
+    "capacidad productiva": ["aumento de capacidad", "capacidad productiva", "nueva línea de producción", "nueva linea de produccion", "duplicar la producción", "triplicar la producción"],
+    "adquisición/terreno": ["adquisición de terreno", "adquisicion de terreno", "compra de terreno", "nuevo predio", "nuevo inmueble"],
+    "licencia/proyecto": ["licencia ambiental", "evaluación de impacto", "evaluacion de impacto", "proyecto ejecutivo", "proyecto industrial"],
+    "contratación": ["estamos contratando", "trabajá con nosotros", "trabaja con nosotros", "vacantes", "buscamos ingeniero", "buscamos gerente"],
+}
+
+ROLE_TERMS = (
+    "gerente", "director", "directora", "responsable", "jefe", "jefa", "encargado", "encargada",
+    "coordinador", "coordinadora", "supervisor", "supervisora"
+)
+ROLE_AREAS = (
+    "mantenimiento", "operaciones", "ingeniería", "ingenieria", "logística", "logistica", "proyectos",
+    "infraestructura", "compras", "abastecimiento", "industrial", "planta", "facilities"
+)
+
+PRIORITY_PATH_TERMS = {
+    "contact": 100, "contacto": 100, "contato": 100,
+    "proyecto": 96, "project": 96, "obra": 96, "expansion": 96, "expansión": 96,
+    "noticia": 92, "news": 92, "novedad": 92, "prensa": 92,
+    "infraestructura": 90, "instalacion": 90, "instalación": 90, "planta": 90,
+    "logistica": 88, "logística": 88, "deposito": 88, "depósito": 88, "frigor": 88,
+    "servicio": 82, "solucion": 82, "solución": 82, "producto": 82,
+    "empresa": 80, "nosotros": 80, "quienes": 80, "about": 80, "historia": 78,
+    "sucursal": 76, "ubicacion": 76, "ubicación": 76, "location": 76,
+    "trabaja": 72, "empleo": 72, "career": 72, "vacante": 72,
+}
 
 
 class PageParser(HTMLParser):
@@ -44,6 +78,7 @@ class PageParser(HTMLParser):
         self.text = []
         self.links = []
         self.title = ""
+        self.meta = []
         self._in_title = False
         self._skip = 0
 
@@ -54,7 +89,12 @@ class PageParser(HTMLParser):
         if tag == "title":
             self._in_title = True
         if tag == "a" and attrs.get("href"):
-            self.links.append((attrs.get("href"), attrs.get("aria-label", "") + " " + attrs.get("title", "")))
+            label = " ".join(filter(None, (attrs.get("aria-label"), attrs.get("title"))))
+            self.links.append((attrs.get("href"), label))
+        if tag == "meta" and attrs.get("content"):
+            key = (attrs.get("name") or attrs.get("property") or "").lower()
+            if key in {"description", "og:description", "og:title", "twitter:description", "twitter:title"}:
+                self.meta.append(attrs.get("content"))
 
     def handle_endtag(self, tag):
         if tag in {"script", "style", "noscript", "svg"} and self._skip:
@@ -90,32 +130,47 @@ def _normalize_url(value):
     return parsed._replace(fragment="").geturl()
 
 
-def _fetch_page(url):
-    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"})
-    with urlopen(request, timeout=18) as response:
-        content_type = response.headers.get("Content-Type", "")
-        if "html" not in content_type.lower():
-            raise ValueError("La dirección no contiene una página web")
+def _fetch_resource(url, accepted=("html", "xml", "text")):
+    request = Request(url, headers={
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml,text/xml,text/plain;q=0.9,*/*;q=0.1",
+    })
+    with urlopen(request, timeout=20) as response:
+        content_type = response.headers.get("Content-Type", "").lower()
+        if accepted and not any(kind in content_type for kind in accepted):
+            raise ValueError("El recurso no contiene contenido analizable")
         charset = response.headers.get_content_charset() or "utf-8"
-        return response.read(MAX_BYTES).decode(charset, errors="replace"), response.geturl()
+        return response.read(MAX_BYTES).decode(charset, errors="replace"), response.geturl(), content_type
+
+
+def _fetch_page(url):
+    raw, final_url, content_type = _fetch_resource(url, accepted=("html", "xhtml"))
+    return raw, final_url, content_type
 
 
 def _unique(values):
     return list(dict.fromkeys(value.strip() for value in values if value and value.strip()))
 
 
-def _best_company_name(titles, host):
+def _best_company_name(titles, host, structured_names=None):
+    for candidate in structured_names or []:
+        candidate = re.sub(r"\s+", " ", str(candidate)).strip()
+        if 2 < len(candidate) < 120:
+            return candidate
     for title in titles:
-        candidate = re.split(r"[|–—]", title)[0].strip(" -")
-        if 2 < len(candidate) < 100 and candidate.lower() not in {"inicio", "home", "contacto"}:
+        candidate = re.split(r"[|–—•]", title)[0].strip(" -")
+        if 2 < len(candidate) < 100 and candidate.lower() not in {"inicio", "home", "contacto", "bienvenidos"}:
             return candidate
     return host.removeprefix("www.").split(".")[0].replace("-", " ").title()
 
 
-def _extract_address(text):
+def _extract_address(text, structured_addresses=None):
+    for value in structured_addresses or []:
+        if value and len(value) >= 8:
+            return re.sub(r"\s+", " ", value).strip(" .,-")[:300]
     patterns = [
         r"(?:dirección|direccion|ubicación|ubicacion|domicilio)\s*[:\-]?\s*([^\n|]{8,180})",
-        r"((?:Av\.|Avenida|Ruta|Calle|Rúa|Rua)\s+[^\n|]{5,160})",
+        r"((?:Av\.|Avenida|Ruta|Calle|Rúa|Rua|Km\.?\s*\d+)[^\n|]{5,180})",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.I)
@@ -124,61 +179,199 @@ def _extract_address(text):
     return None
 
 
-def _estimate_size(text):
-    numeric = [int(value) for value in re.findall(r"(\d{2,5})\s+(?:empleados|colaboradores|funcionarios|trabajadores)", text, re.I)]
+def _estimate_size(text, structured_employees=None):
+    numeric = [int(value) for value in re.findall(r"(\d{2,6})\s+(?:empleados|colaboradores|funcionarios|trabajadores|personas)", text, re.I)]
+    for value in structured_employees or []:
+        try:
+            numeric.append(int(re.sub(r"\D", "", str(value))))
+        except ValueError:
+            pass
     if numeric:
         amount = max(numeric)
         return "Grande" if amount >= 250 else "Mediana" if amount >= 50 else "Pequeña"
-    if any(term in text.lower() for term in ["multinacional", "más de 500", "varias plantas", "sucursales en", "líder nacional"]):
+    lower = text.lower()
+    if any(term in lower for term in ["multinacional", "más de 500", "mas de 500", "varias plantas", "sucursales en", "líder nacional", "lider nacional", "exportamos a"]):
         return "Grande (estimación por presencia operativa)"
-    if any(term in text.lower() for term in ["planta industrial", "centro de distribución", "fábrica", "frigorífico", "exportamos"]):
+    if any(term in lower for term in ["planta industrial", "centro de distribución", "fábrica", "fabrica", "frigorífico", "frigorifico", "exportamos", "complejo industrial"]):
         return "Mediana o grande (estimación por infraestructura)"
     return "No determinado"
+
+
+def _link_priority(url, label=""):
+    parsed = urlparse(url)
+    haystack = f"{parsed.path} {parsed.query} {label}".lower()
+    score = max((weight for term, weight in PRIORITY_PATH_TERMS.items() if term in haystack), default=20)
+    depth_penalty = min(18, parsed.path.count("/") * 3)
+    return score - depth_penalty
+
+
+def _same_host(url, host):
+    candidate = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    expected = (host or "").lower().removeprefix("www.")
+    return candidate == expected
+
+
+def _sitemap_urls(base_url, host):
+    candidates = [urljoin(base_url, "/sitemap.xml"), urljoin(base_url, "/sitemap_index.xml")]
+    found = []
+    for sitemap_url in candidates:
+        try:
+            raw, _, _ = _fetch_resource(sitemap_url, accepted=("xml", "text"))
+        except Exception:
+            continue
+        for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>", raw, re.I | re.S):
+            clean = html.unescape(re.sub(r"\s+", "", loc))
+            if _same_host(clean, host) and clean not in found:
+                found.append(clean)
+            if len(found) >= MAX_SITEMAP_URLS:
+                return found
+        if found:
+            break
+    return found
+
+
+def _flatten_jsonld(value, bucket):
+    if isinstance(value, list):
+        for item in value:
+            _flatten_jsonld(item, bucket)
+        return
+    if not isinstance(value, dict):
+        return
+    kind = value.get("@type")
+    kinds = kind if isinstance(kind, list) else [kind]
+    if any(item in {"Organization", "Corporation", "LocalBusiness", "Store", "Factory", "Place"} for item in kinds):
+        if value.get("name"):
+            bucket["names"].append(str(value["name"]))
+        for key in ("email", "telephone"):
+            if value.get(key):
+                bucket[key].append(str(value[key]))
+        address = value.get("address")
+        if isinstance(address, dict):
+            pieces = [address.get(key) for key in ("streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry")]
+            formatted = ", ".join(str(piece) for piece in pieces if piece)
+            if formatted:
+                bucket["addresses"].append(formatted)
+        elif address:
+            bucket["addresses"].append(str(address))
+        employees = value.get("numberOfEmployees")
+        if isinstance(employees, dict):
+            employees = employees.get("value") or employees.get("minValue")
+        if employees:
+            bucket["employees"].append(str(employees))
+    for nested in value.values():
+        if isinstance(nested, (dict, list)):
+            _flatten_jsonld(nested, bucket)
+
+
+def _extract_jsonld(raw):
+    bucket = {"names": [], "email": [], "telephone": [], "addresses": [], "employees": []}
+    blocks = re.findall(r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", raw, re.I | re.S)
+    for block in blocks[:20]:
+        try:
+            _flatten_jsonld(json.loads(html.unescape(block).strip()), bucket)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return bucket
+
+
+def _project_signals(searchable):
+    detected = []
+    for label, terms in PROJECT_SIGNALS.items():
+        if any(term in searchable for term in terms):
+            detected.append(label)
+    return detected
+
+
+def _contact_names(text):
+    names = []
+    area_pattern = "|".join(map(re.escape, ROLE_AREAS))
+    role_pattern = "|".join(map(re.escape, ROLE_TERMS))
+    patterns = [
+        rf"(?:{role_pattern})\s+(?:de\s+)?(?:{area_pattern})\s*[:\-–|]?\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+){{1,3}})",
+        rf"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+){{1,3}})\s*[|–-]\s*(?:{role_pattern})\s+(?:de\s+)?(?:{area_pattern})",
+    ]
+    for pattern in patterns:
+        names.extend(match.group(1) for match in re.finditer(pattern, text, re.I))
+    return _unique(names)[:12]
+
+
+def _signal_excerpt(documents, terms):
+    snippets = []
+    for document in documents:
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", document)
+        for sentence in sentences:
+            lower = sentence.lower()
+            if 35 <= len(sentence) <= 320 and any(term in lower for term in terms):
+                snippets.append(re.sub(r"\s+", " ", sentence).strip())
+    return _unique(snippets)[:6]
 
 
 def analyze_website(url):
     normalized = _normalize_url(url)
     parsed = urlparse(normalized)
-    queue = [normalized]
-    seen, documents, titles, all_links = set(), [], [], []
-    useful_paths = ("contact", "contacto", "contato", "about", "nosotros", "empresa", "quienes", "ubicacion", "sucurs")
+    host = parsed.hostname
+    queue = [(1000, normalized)]
+    for candidate in _sitemap_urls(normalized, host):
+        queue.append((_link_priority(candidate), candidate))
+    seen, queued, documents, titles, all_links, raw_pages, meta_text = set(), {normalized}, [], [], [], [], []
+
     while queue and len(documents) < MAX_PAGES:
-        current = queue.pop(0)
+        queue.sort(key=lambda item: item[0], reverse=True)
+        _, current = queue.pop(0)
         if current in seen:
             continue
         seen.add(current)
         try:
-            raw, final_url = _fetch_page(current)
+            raw, final_url, _ = _fetch_page(current)
         except Exception:
             if not documents:
                 raise
             continue
+        if not _same_host(final_url, host):
+            continue
         parser = PageParser()
         parser.feed(raw)
-        page_text = "\n".join(parser.text)
-        documents.append(page_text)
+        visible = "\n".join(parser.text)
+        if visible.strip():
+            documents.append(visible)
+            raw_pages.append(raw)
         if parser.title.strip():
             titles.append(parser.title.strip())
+        meta_text.extend(parser.meta)
         for href, label in parser.links:
             absolute = urljoin(final_url, href)
             link_parsed = urlparse(absolute)
-            if link_parsed.hostname == parsed.hostname:
-                clean = link_parsed._replace(fragment="").geturl()
-                if any(token in (link_parsed.path + " " + label).lower() for token in useful_paths) and clean not in seen:
-                    queue.append(clean)
+            if link_parsed.scheme not in {"http", "https", "mailto", "tel"}:
+                continue
             all_links.append(absolute)
+            if link_parsed.scheme in {"http", "https"} and _same_host(absolute, host):
+                clean = link_parsed._replace(fragment="").geturl()
+                if clean not in seen and clean not in queued:
+                    priority = _link_priority(clean, label)
+                    if priority >= 55:
+                        queue.append((priority, clean)); queued.add(clean)
 
-    text = "\n".join(documents)
+    text = "\n".join(meta_text + documents)
     searchable = text.lower()
-    emails = _unique(re.findall(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", text, re.I))[:12]
-    phones = _unique(re.findall(r"(?:\+?595[\s().-]*)?(?:0?\d{2,4}[\s().-]*)?\d{3}[\s.-]*\d{3,4}", text))
-    phones = [re.sub(r"\s+", " ", phone).strip() for phone in phones if len(re.sub(r"\D", "", phone)) >= 7][:12]
-    whatsapp_links = [link for link in all_links if "wa.me/" in link or "api.whatsapp.com" in link]
+    structured = {"names": [], "email": [], "telephone": [], "addresses": [], "employees": []}
+    for raw in raw_pages:
+        data = _extract_jsonld(raw)
+        for key in structured:
+            structured[key].extend(data[key])
+
+    mailto = [urlparse(link).path for link in all_links if link.lower().startswith("mailto:")]
+    tel_links = [urlparse(link).path for link in all_links if link.lower().startswith("tel:")]
+    emails = _unique(structured["email"] + mailto + re.findall(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", text, re.I))[:16]
+    phones = _unique(structured["telephone"] + tel_links + re.findall(r"(?:\+?595[\s().-]*)?(?:0?\d{2,4}[\s().-]*)?\d{3}[\s.-]*\d{3,4}", text))
+    phones = [re.sub(r"\s+", " ", phone).strip() for phone in phones if len(re.sub(r"\D", "", phone)) >= 7][:16]
+
+    whatsapp_links = [link for link in all_links if "wa.me/" in link.lower() or "api.whatsapp.com" in link.lower() or "whatsapp.com/send" in link.lower()]
     whatsapp = None
     if whatsapp_links:
         number = re.search(r"(?:wa\.me/|phone=)(\+?\d+)", whatsapp_links[0])
         whatsapp = number.group(1) if number else whatsapp_links[0]
-    contacts = _unique(re.findall(r"(?:gerente|director(?:a)?|responsable|jefe|encargad[oa])(?:\s+(?:comercial|de compras|de mantenimiento|de operaciones|de ingeniería|de ingenieria|de logística|de logistica|de proyectos|de infraestructura|industrial))?\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+){1,3})", text, re.I))[:12]
+
+    contacts = _contact_names(text)
     social = {}
     for network in ["linkedin", "facebook", "instagram", "youtube"]:
         match = next((link for link in all_links if network + ".com" in link.lower()), None)
@@ -187,44 +380,82 @@ def analyze_website(url):
 
     sector_scores = {sector: sum(searchable.count(term) for term in terms) for sector, terms in SECTORS.items()}
     sector = max(sector_scores, key=sector_scores.get)
-    if not sector_scores[sector]:
+    sector_strength = sector_scores[sector]
+    if not sector_strength:
         sector = "Por validar"
+
     products = []
+    matched_product_groups = 0
     for terms, matches in PRODUCT_RULES:
         if any(term in searchable for term in terms):
-            products.extend(matches)
+            products.extend(matches); matched_product_groups += 1
     products = _unique(products)
+    project_signals = _project_signals(searchable)
+
+    operational_terms = ["planta", "fábrica", "fabrica", "depósito", "deposito", "galpón", "galpon", "muelle", "hangar", "frigorífico", "frigorifico", "centro de distribución", "logística", "industrial", "nave industrial", "cámara fría", "camara fria"]
+    operational_hits = sum(min(3, searchable.count(term)) for term in operational_terms)
 
     score, reasons = 0, []
-    operational = ["planta", "fábrica", "fabrica", "depósito", "deposito", "galpón", "galpon", "muelle", "hangar", "frigorífico", "frigorifico", "centro de distribución", "logística", "industrial"]
-    if any(term in searchable for term in operational):
-        score += 35; reasons.append("Infraestructura operativa compatible con puertas automáticas")
+    if operational_hits:
+        points = min(26, 10 + operational_hits * 2)
+        score += points; reasons.append(f"Infraestructura industrial detectada ({operational_hits} señales operativas)")
     if products:
-        score += min(28, 7 * len(products)); reasons.append("Aplicaciones concretas del portafolio identificadas")
-    project_signals = [term for term in ["adquisición de terreno", "licencia ambiental", "financiamiento", "expansión", "ampliación", "nueva planta", "construcción", "terraplenado", "proyecto", "crecimiento", "nuevas instalaciones", "centro de distribución", "nueva línea de producción"] if term in searchable]
+        points = min(24, 8 + matched_product_groups * 5)
+        score += points; reasons.append("Aplicaciones probables: " + ", ".join(products[:4]))
     if project_signals:
-        score += min(22, 10 + len(project_signals) * 3); reasons.append("Señales precursoras de proyecto: " + ", ".join(project_signals[:4]))
-    if emails or phones or whatsapp:
-        score += 12; reasons.append("Canales de contacto comercial encontrados")
+        points = min(26, 9 + len(project_signals) * 4)
+        score += points; reasons.append("Señales de movimiento: " + ", ".join(project_signals[:5]))
+    contact_channels = sum(bool(value) for value in (emails, phones, whatsapp))
+    if contact_channels:
+        score += 5 + contact_channels * 3; reasons.append(f"{contact_channels} tipo(s) de canal de contacto localizados")
     if contacts:
-        score += 6; reasons.append("Posible responsable identificado")
+        score += 8; reasons.append("Posible decisor o responsable funcional identificado")
+    if social.get("linkedin"):
+        score += 3; reasons.append("Presencia corporativa en LinkedIn localizada")
     if sector in {"Frigorífico y cadena de frío", "Logística y distribución", "Industria y manufactura", "Aeronáutico", "Alimentos y bebidas", "Agronegocio"}:
-        score += 10; reasons.append("Sector con alta afinidad para el portafolio")
+        score += min(12, 7 + sector_strength); reasons.append(f"Alta afinidad sectorial: {sector}")
+    if len(documents) >= 12:
+        score += 5; reasons.append("Cobertura web profunda: 12+ páginas relevantes revisadas")
+    elif len(documents) >= 6:
+        score += 3; reasons.append("Cobertura web ampliada: múltiples páginas relevantes revisadas")
+
     score = min(100, score)
     level = "MUY ALTO" if score >= 85 else "ALTO" if score >= 68 else "MEDIO" if score >= 45 else "BAJO"
     services = ["Visita técnica y relevamiento"] if score >= 45 else ["Validación comercial inicial"]
     if products:
         services.extend(["Proyecto y suministro a medida", "Instalación y puesta en marcha"])
-    if any(term in searchable for term in ["mantenimiento", "operación", "planta", "fábrica", "frigorífico"]):
+    if any(term in searchable for term in ["mantenimiento", "operación", "operacion", "planta", "fábrica", "fabrica", "frigorífico", "frigorifico"]):
         services.extend(["Mantenimiento preventivo y correctivo", "Repuestos multimarca y retrofit"])
+
+    signal_terms = [term for terms in PROJECT_SIGNALS.values() for term in terms] + operational_terms
+    excerpts = _signal_excerpt(documents, signal_terms)
+    summary_parts = []
+    if excerpts:
+        summary_parts.append("Señales relevantes: " + " | ".join(excerpts[:4]))
+    elif meta_text:
+        summary_parts.append(" ".join(meta_text[:3]))
+    summary_parts.append(f"Cobertura: {len(documents)} páginas relevantes analizadas de {len(seen)} URLs intentadas.")
+    summary = " ".join(summary_parts)[:2200]
 
     analysis = WebsiteAnalysis(
         tenant_id=current_tenant().id,
-        url=normalized, company_name=_best_company_name(titles, parsed.hostname), sector=sector,
-        address=_extract_address(text), phones=phones, whatsapp=whatsapp, emails=emails, contacts=contacts,
-        social_links=social, company_size=_estimate_size(text), potential_score=score, potential_level=level,
-        products=products, services=_unique(services), reasons=reasons, pages_analyzed=len(documents),
-        summary=(" ".join(text.split())[:1200] or "No se encontró texto visible en el sitio."),
+        url=normalized,
+        company_name=_best_company_name(titles, host, structured["names"]),
+        sector=sector,
+        address=_extract_address(text, structured["addresses"]),
+        phones=phones,
+        whatsapp=whatsapp,
+        emails=emails,
+        contacts=contacts,
+        social_links=social,
+        company_size=_estimate_size(text, structured["employees"]),
+        potential_score=score,
+        potential_level=level,
+        products=products,
+        services=_unique(services),
+        reasons=reasons,
+        pages_analyzed=len(documents),
+        summary=summary or "No se encontró texto público suficiente para una calificación profunda.",
     )
     db.session.add(analysis)
     db.session.commit()

@@ -314,34 +314,46 @@ def website_analysis_list():
 
 def _commercial_messages(analysis):
     brand = current_tenant().settings or {}
-    brand_name = brand.get("brand_name", "Puertas Brasil PY")
-    contact = analysis.contacts[0] if analysis.contacts else f"equipo de {analysis.company_name}"
-    products = analysis.products or ["soluciones de accesos automáticos"]
+    brand_name = brand.get("brand_name", "Puertas Brasil")
+    person = analysis.contacts[0] if analysis.contacts else None
+    greeting = f"Hola, {person}." if person else "Hola, buen día."
+    email_greeting = f"Estimado/a {person}," if person else "Estimados señores,"
+    products = analysis.products or ["soluciones de accesos automáticos industriales"]
     services = analysis.services or ["evaluación técnica y proyecto a medida"]
     product_text = ", ".join(products[:3])
     service_text = ", ".join(services[:2])
+    reason = (analysis.reasons or [f"actividad en el sector {analysis.sector}"])[0]
+    size_context = ""
+    if analysis.company_size and analysis.company_size != "No determinado":
+        size_context = f" y una operación de porte {analysis.company_size.lower()}"
+
     whatsapp = (
-        f"Hola, {contact}. Soy parte del equipo comercial de {brand_name}. "
-        f"Al conocer la actividad de {analysis.company_name} en el sector {analysis.sector}, "
-        f"identificamos una posible aplicación para {product_text}. "
-        f"Podemos realizar {service_text} para validar la solución adecuada. "
-        "¿Con quién podríamos coordinar una breve conversación técnica?"
+        f"{greeting} Soy David Granja, de {brand_name}. "
+        f"Estuve revisando la operación de {analysis.company_name} y encontré un punto que puede ser relevante para ustedes: "
+        f"{reason.lower()}. Por el perfil de la empresa, vemos posible aplicación de {product_text}{size_context}. "
+        "No quisiera enviarle una presentación genérica; prefiero entender primero si existe algún proyecto, ampliación, necesidad de mantenimiento o mejora de accesos en curso. "
+        "¿Me podría indicar quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos para conversar brevemente?"
     )
-    subject = f"Propuesta de soluciones de accesos automáticos para {analysis.company_name}"
-    email = (
-        f"Estimado/a {contact}:\n\n"
-        f"Es un gusto presentarle a {brand_name}, empresa especializada en soluciones "
-        "de cerramientos automáticos para los segmentos industrial, logístico, comercial y aeronáutico.\n\n"
-        f"A partir de la información pública de {analysis.company_name}, dedicada al sector {analysis.sector}, "
-        f"identificamos una posible oportunidad de mejora mediante {product_text}. Nuestra propuesta puede incluir "
-        f"{service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones, repuestos "
-        "multimarca y retrofit.\n\n"
-        "Nos gustaría conocer su operación y verificar, sin compromiso, si estas soluciones pueden aportar mayor "
-        "seguridad, eficiencia y continuidad operativa. Quedamos a disposición para coordinar una visita técnica "
-        "o una breve reunión con la persona responsable de mantenimiento, operaciones o compras.\n\n"
-        f"Atentamente,\nEquipo comercial de {brand_name}\n"
-        f"{brand.get('sales_phone', '')}\n{brand.get('sales_email', '')}\n{brand.get('website', '')}"
-    )
+
+    subject = f"{analysis.company_name} | Accesos industriales y soporte técnico"
+    email = f"""{email_greeting}
+
+Mi nombre es David Granja y formo parte del equipo comercial de {brand_name}.
+
+Antes de contactarlos revisamos información pública de {analysis.company_name}. El análisis indica {reason.lower()} y una posible afinidad con soluciones como {product_text}. Por ese motivo, nuestro contacto no busca enviar un catálogo de forma indiscriminada, sino identificar si existe actualmente alguna necesidad vinculada a nuevos accesos, ampliaciones, mantenimiento, retrofit o mejora de la operación.
+
+Podemos apoyar con {service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones especializadas y repuestos multimarca.
+
+Si fuera posible, agradecería el contacto de la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos. Con una breve conversación podemos entender el escenario y verificar si tiene sentido avanzar con una visita técnica o una propuesta específica.
+
+Quedo a disposición.
+
+Atentamente,
+David Granja
+{brand_name}
+{brand.get('sales_phone', '')}
+{brand.get('sales_email', '')}
+{brand.get('website', '')}"""
     return whatsapp, subject, email
 
 

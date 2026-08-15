@@ -25,7 +25,7 @@
   <main class="content">
     <header class="topbar" id="buscador">
       <div class="company-finder">
-        <label><i class="bi bi-search"></i><input id="search" placeholder="Empresa o actividad" autocomplete="off"></label>
+        <label><i class="bi bi-search"></i><input id="search" placeholder="Empresa o actividad · Enter para buscar" autocomplete="off"></label>
         <input id="searchCity" placeholder="Ciudad">
         <select id="searchRegion"><option value="">Toda región</option><option>Alto Paraná</option><option>Central</option><option>Itapúa</option><option>Caaguazú</option><option>Presidente Hayes</option><option>Amambay</option><option>Concepción</option><option>Paraguarí</option><option>Cordillera</option><option>San Pedro</option></select>
         <select id="searchIndustry"><option value="">Tipo de industria</option><option value="logistica">Logística y depósitos</option><option value="frigorifico">Frigoríficos y cadena de frío</option><option value="manufactura">Industria y manufactura</option><option value="alimentos">Alimentos y bebidas</option><option value="agro">Agronegocio</option><option value="construccion">Construcción e ingeniería</option><option value="retail">Comercio de gran porte</option><option value="aeronautica">Aeronáutica y hangares</option></select>
@@ -97,7 +97,7 @@
 
     <section class="site-triage" id="triage">
       <div class="capture-head"><div><p class="eyebrow">CALIFICACIÓN COMERCIAL MINUCIOSA</p><h2>Analizar el sitio de una empresa</h2><p>Obtiene datos públicos de contacto y estima el potencial según el portafolio configurado del workspace.</p></div></div>
-      <form id="siteAnalysisForm" class="site-form"><label for="companyWebsite">Sitio web de la empresa</label><div><input id="companyWebsite" name="url" type="text" inputmode="url" placeholder="empresa.com.py" required><button class="primary" type="submit">◉ Analizar empresa</button></div><small>Se revisan la página principal, contacto, empresa, ubicación y otras páginas públicas del mismo dominio.</small></form>
+      <form id="siteAnalysisForm" class="site-form"><label for="companyWebsite">Sitio web de la empresa</label><div><input id="companyWebsite" name="url" type="text" inputmode="url" placeholder="empresa.com.py · Enter para analizar" required><button class="primary" type="submit"><i class="bi bi-stars"></i> Analizar empresa</button></div><small>Análisis profundo: hasta 18 páginas relevantes, incluyendo proyectos, obras, noticias, infraestructura, plantas, servicios, ubicaciones, contactos y señales de expansión.</small></form>
       <p class="capture-message" id="siteAnalysisMessage">Ingrese un sitio para iniciar la investigación comercial.</p>
       <div id="siteAnalysisResults" class="analysis-list">
         {% for analysis in website_analyses %}
@@ -105,7 +105,7 @@
           <div class="analysis-score"><strong>{{ analysis.potential_score }}</strong><small>{{ analysis.potential_level }}</small></div>
           <div class="analysis-main"><span class="source-type">{{ analysis.pages_analyzed }} PÁGINAS ANALIZADAS · {{ 'CALIFICADA' if analysis.decision == 'QUALIFIED' else 'DESCALIFICADA' if analysis.decision == 'DISQUALIFIED' else 'PENDIENTE' }}</span><h3>{{ analysis.company_name }}</h3><p><b>Sector:</b> {{ analysis.sector }} · <b>Tamaño:</b> {{ analysis.company_size }}</p><a href="{{ analysis.url }}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
           <div class="analysis-grid"><div><b>Contacto</b><span>{{ analysis.emails|join(', ') or 'No encontrado' }}</span><span>{{ analysis.phones|join(', ') or 'No encontrado' }}</span>{% if analysis.whatsapp %}<span>WhatsApp: {{ analysis.whatsapp }}</span>{% endif %}</div><div><b>Dirección y responsables</b><span>{{ analysis.address or 'No encontrado' }}</span><span>{{ analysis.contacts|join(', ') or 'No identificado' }}</span></div><div><b>Productos probables</b><span>{{ analysis.products|join(', ') or 'Requiere validación' }}</span></div><div><b>Servicios recomendados</b><span>{{ analysis.services|join(', ') }}</span></div></div>
-          <div class="analysis-decision">
+          <div class="analysis-reasons"><b>Inteligencia comercial detectada</b><span>{{ analysis.reasons|join(' · ') or 'Sin evidencia suficiente' }}</span>{% if analysis.summary %}<p>{{ analysis.summary }}</p>{% endif %}</div><div class="analysis-decision">
             {% if analysis.decision == 'PENDING' %}<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>
             {% elif analysis.decision == 'QUALIFIED' %}<strong>✓ Empresa ingresada al CRM</strong>
             {% else %}<strong>Empresa desclasificada</strong>{% endif %}

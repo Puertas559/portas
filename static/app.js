@@ -95,11 +95,21 @@ function renderKanban() {
 }
 
 function contactMessage(lead, channel = selectedChannel) {
-  const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos";
-  if (channel === "email") return `Asunto: Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company}:\n\nIdentificamos una posible aplicación de ${products} para su operación en ${lead.city}. ${brandName} puede realizar una evaluación técnica y proponer una solución a medida.\n\n¿Podemos coordinar una breve conversación con la persona responsable de mantenimiento, operaciones o compras?\n\nAtentamente,\nEquipo comercial de ${brandName}`;
-  if (channel === "call") return `GUION DE LLAMADA\n\nPresentarse como ${brandName}. Confirmar la actividad de ${lead.company} y preguntar por el responsable de mantenimiento, operaciones o compras. Validar necesidades de ${products}, próximos proyectos y disponibilidad para una visita técnica.`;
-  if (channel === "linkedin") return `Hola. Soy parte del equipo comercial de ${brandName}. Conocimos la operación de ${lead.company} y nos gustaría conectar con la persona responsable de mantenimiento, operaciones o compras para presentar soluciones industriales.`;
-  return `¡Hola! Soy parte del equipo comercial de ${brandName}. Identificamos que ${lead.company} opera en ${lead.city} y puede tener aplicación para ${products}. ¿Con quién podríamos coordinar una breve conversación técnica?`;
+  const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos industriales";
+  const sector = lead.sector && lead.sector !== "Por validar" ? lead.sector : "su operación";
+  const location = [lead.city, lead.department].filter(Boolean).join(", ");
+  const project = lead.project && !String(lead.project).toLowerCase().includes("calificación comercial desde") ? lead.project : "su operación actual";
+  const why = (lead.whyNow || lead.evidence || "").replace(/\s+/g, " ").trim();
+  const context = why ? why.slice(0, 230).replace(/[.;,:\s]+$/, "") : `identificamos afinidad entre ${sector} y nuestro portafolio`;
+  const place = location ? ` en ${location}` : "";
+
+  if (channel === "email") return `Asunto: ${lead.company} | Accesos industriales y soporte técnico\n\nEstimados señores,\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}.\n\nAntes de entrar en contacto revisamos información pública de ${lead.company}. ${context}. Por el perfil de ${project}${place}, vemos posible aplicación de ${products}.\n\nNuestro objetivo no es enviar una presentación genérica, sino entender si existe actualmente algún proyecto, ampliación, necesidad de mantenimiento, retrofit o mejora de accesos en el que podamos aportar técnicamente.\n\n¿Podrían indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? Con una breve conversación podemos validar el escenario y, si tiene sentido, coordinar una visita técnica.\n\nQuedo a disposición.\n\nAtentamente,\nDavid Granja\n${brandName}`;
+
+  if (channel === "call") return `GUION EJECUTIVO DE LLAMADA\n\n1. Presentación: “Buenos días, habla David Granja, de ${brandName}.”\n\n2. Contexto: “Estamos haciendo un trabajo de prospección técnica en empresas del sector ${sector}${place} y revisamos la operación de ${lead.company}.”\n\n3. Motivo concreto: “${context}.”\n\n4. Validación: “Quisiera saber si tienen actualmente proyectos, ampliaciones, mantenimiento o mejoras de accesos industriales relacionados con ${products}.”\n\n5. Derivación: “¿Quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos con quien debería conversar?”\n\n6. CTA: solicitar contacto directo o una conversación de 10 minutos; no intentar cotizar en la primera llamada.`;
+
+  if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuve revisando la operación de ${lead.company}${place} y encontré una posible afinidad con ${products}. ${context}. Me gustaría conectar para entender quién lidera Mantenimiento, Ingeniería, Infraestructura u Operaciones y verificar si existe algún proyecto donde podamos aportar técnicamente.`;
+
+  return `Hola, buen día. Soy David Granja, de ${brandName}. Estuve revisando la operación de ${lead.company}${place} y encontré un punto que puede ser relevante: ${context}. Por el perfil de la empresa, vemos posible aplicación de ${products}. No quisiera enviarle una presentación genérica; prefiero entender primero si existe algún proyecto, ampliación, necesidad de mantenimiento o mejora de accesos en curso. ¿Me podría indicar quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos para conversar brevemente?`;
 }
 
 function renderCrm() {
@@ -533,7 +543,7 @@ function renderWebsiteAnalysis(analysis) {
         <div><b>Productos probables</b><span>${list(analysis.products, "Requiere validación")}</span></div>
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
-      <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+      <div class="analysis-reasons"><b>Inteligencia comercial detectada</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span>${analysis.summary ? `<p>${escapeHtml(analysis.summary)}</p>` : ""}</div>
       <div class="analysis-decision">${decisionActions}</div>
       ${drafts}
     </article>`;
@@ -699,6 +709,44 @@ $("refreshCommandCenter").addEventListener("click", loadCommandCenter);
   const lead = leads.find((item) => String(item.id) === row.dataset.opportunityId);
   if (lead) { selectLead(lead); $("drawer").scrollIntoView({ behavior: "smooth", block: "start" }); }
 }));
+
+
+// Productividad por teclado: Enter ejecuta la acción principal del contexto activo.
+function clickOnEnter(inputId, buttonId) {
+  const input = $(inputId);
+  const button = $(buttonId);
+  if (!input || !button) return;
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    if (!button.disabled) button.click();
+  });
+}
+
+["search", "searchCity"].forEach((id) => clickOnEnter(id, "findCompanies"));
+["searchRegion", "searchIndustry"].forEach((id) => {
+  const control = $(id);
+  if (!control) return;
+  control.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      $("findCompanies").click();
+    }
+  });
+});
+clickOnEnter("routeOrigin", "buildRoute");
+clickOnEnter("dealOwner", "saveDealData");
+clickOnEnter("dealValue", "saveDealData");
+clickOnEnter("dealProbability", "saveDealData");
+clickOnEnter("followUpDate", "scheduleFollowUp");
+
+// Ctrl/Cmd + Enter copia el mensaje comercial desde el panel lateral.
+$("approach").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    $("copyApproach").click();
+  }
+});
 
 render();
 if (selected) selectLead(selected);
