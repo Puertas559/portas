@@ -60,6 +60,7 @@ def _from_nominatim(row, industry, city, region):
         "region": result_region, "address": row.get("display_name"), "latitude": row.get("lat"),
         "longitude": row.get("lon"), "website": website, "phone": phone, "email": email,
         "linkedin": extra.get("contact:linkedin"), "score": min(score, 90), "source": "OpenStreetMap",
+        "sourceRole": "GEOGRAPHIC_DISCOVERY", "researchPriority": max(10, 100 - min(score, 90)),
     }
 
 
@@ -104,6 +105,7 @@ def _overpass_rows(city, region, industry, query):
             "address": address, "latitude": center.get("lat"), "longitude": center.get("lon"),
             "website": website, "phone": phone, "email": email, "linkedin": tags.get("contact:linkedin"),
             "score": min(score, 90), "source": "OpenStreetMap",
+            "sourceRole": "GEOGRAPHIC_DISCOVERY", "researchPriority": max(10, 100 - min(score, 90)),
         })
     return results
 
@@ -125,4 +127,4 @@ def search_companies(query="", city="", region="", industry=""):
         key = result["company"].strip().lower()
         if key and key not in unique:
             unique[key] = result
-    return sorted(unique.values(), key=lambda item: item["score"], reverse=True)[:40]
+    return sorted(unique.values(), key=lambda item: (item["score"], -item.get("researchPriority", 100)), reverse=True)[:40]

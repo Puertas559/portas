@@ -58,12 +58,21 @@ class Company(db.Model):
     linkedin_url = db.Column(db.String(700))
     registration_id = db.Column(db.String(120), index=True)
     identity_confidence = db.Column(db.Integer, nullable=False, default=50)
+    company_size = db.Column(db.String(80))
+    employee_estimate = db.Column(db.Integer)
+    facility_profile = db.Column(db.JSON, nullable=False, default=dict)
+    account_fit_score = db.Column(db.Integer, nullable=False, default=0)
+    accessibility_score = db.Column(db.Integer, nullable=False, default=0)
+    momentum_score = db.Column(db.Integer, nullable=False, default=0)
+    watch_status = db.Column(db.String(30), nullable=False, default="WATCH", index=True)
+    last_signal_at = db.Column(db.DateTime(timezone=True), index=True)
     status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
     deleted_at = db.Column(db.DateTime(timezone=True))
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     projects = db.relationship("Project", back_populates="company", cascade="all, delete-orphan")
     aliases = db.relationship("CompanyAlias", back_populates="company", cascade="all, delete-orphan")
+    contacts = db.relationship("Contact", back_populates="company", cascade="all, delete-orphan")
     tenant = db.relationship("Tenant")
     __table_args__ = (db.CheckConstraint("identity_confidence BETWEEN 0 AND 100", name="ck_company_identity_confidence"),)
 
@@ -81,6 +90,50 @@ class CompanyAlias(db.Model):
     __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_alias", "company_id", name="uq_company_alias"),)
 
 
+class Contact(db.Model):
+    __tablename__ = "contacts"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(220), nullable=False)
+    role = db.Column(db.String(180))
+    buying_role = db.Column(db.String(40), nullable=False, default="UNKNOWN", index=True)
+    influence_score = db.Column(db.Integer, nullable=False, default=50)
+    email = db.Column(db.String(320))
+    phone = db.Column(db.String(120))
+    whatsapp = db.Column(db.String(120))
+    linkedin_url = db.Column(db.String(700))
+    source_url = db.Column(db.String(1200))
+    confidence = db.Column(db.Integer, nullable=False, default=50)
+    verified_at = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    company = db.relationship("Company", back_populates="contacts")
+    __table_args__ = (
+        db.CheckConstraint("influence_score BETWEEN 0 AND 100", name="ck_contact_influence"),
+        db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_contact_confidence"),
+    )
+
+
+class Watchlist(db.Model):
+    __tablename__ = "watchlists"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority = db.Column(db.Integer, nullable=False, default=50)
+    reason = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    last_checked_at = db.Column(db.DateTime(timezone=True))
+    next_check_at = db.Column(db.DateTime(timezone=True), index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    company = db.relationship("Company")
+    __table_args__ = (
+        db.UniqueConstraint("tenant_id", "company_id", name="uq_watchlist_company"),
+        db.CheckConstraint("priority BETWEEN 0 AND 100", name="ck_watchlist_priority"),
+    )
+
+
 class Project(db.Model):
     __tablename__ = "projects"
     id = db.Column(db.Integer, primary_key=True)
@@ -93,6 +146,13 @@ class Project(db.Model):
     department = db.Column(db.String(120), nullable=False)
     country = db.Column(db.String(80), nullable=False, default="Paraguay", index=True)
     stage = db.Column(db.String(120))
+    lifecycle_stage = db.Column(db.String(50), nullable=False, default="DISCOVERED", index=True)
+    buying_window_score = db.Column(db.Integer, nullable=False, default=0)
+    demand_probability = db.Column(db.Integer, nullable=False, default=0)
+    momentum_score = db.Column(db.Integer, nullable=False, default=0)
+    estimated_deal_min = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    estimated_deal_max = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    stage_confidence = db.Column(db.Integer, nullable=False, default=0)
     investment = db.Column(db.String(120))
     investment_amount = db.Column(db.Numeric(18, 2))
     investment_currency = db.Column(db.String(3), default="USD")
@@ -135,6 +195,15 @@ class Opportunity(db.Model):
     estimated_value = db.Column(db.Float, nullable=False, default=0)
     probability = db.Column(db.Integer, nullable=False, default=20)
     buying_stage = db.Column(db.String(40), nullable=False, default="UNKNOWN", index=True)
+    lifecycle_stage = db.Column(db.String(50), nullable=False, default="SALES_READY", index=True)
+    buying_window_score = db.Column(db.Integer, nullable=False, default=0)
+    accessibility_score = db.Column(db.Integer, nullable=False, default=0)
+    momentum_score = db.Column(db.Integer, nullable=False, default=0)
+    confidence_score = db.Column(db.Integer, nullable=False, default=0)
+    why_now = db.Column(db.Text)
+    next_best_action = db.Column(db.Text)
+    deal_value_min = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    deal_value_max = db.Column(db.Numeric(18, 2), nullable=False, default=0)
     icp_fit_score = db.Column(db.Integer, nullable=False, default=0)
     intent_score = db.Column(db.Integer, nullable=False, default=0)
     data_confidence = db.Column(db.Integer, nullable=False, default=0)
@@ -183,7 +252,12 @@ class Opportunity(db.Model):
             "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
             "owner": self.owner_name, "estimatedValue": self.estimated_value,
             "probability": self.probability,
-            "buyingStage": self.buying_stage, "icpFit": self.icp_fit_score,
+            "buyingStage": self.buying_stage, "lifecycleStage": self.lifecycle_stage,
+            "buyingWindow": self.buying_window_score, "accessibility": self.accessibility_score,
+            "momentum": self.momentum_score, "confidenceScore": self.confidence_score,
+            "whyNow": self.why_now, "nextBestAction": self.next_best_action,
+            "dealValueMin": float(self.deal_value_min or 0), "dealValueMax": float(self.deal_value_max or 0),
+            "icpFit": self.icp_fit_score,
             "intent": self.intent_score, "dataConfidence": self.data_confidence,
             "potentialDealValue": float(self.potential_deal_value or 0),
             "expectedRevenue": float(self.expected_revenue or 0), "scoreVersion": self.score_version,
@@ -256,6 +330,11 @@ class Signal(db.Model):
     confidence = db.Column(db.Integer, nullable=False, default=50, index=True)
     freshness = db.Column(db.Integer, nullable=False, default=100)
     relevance = db.Column(db.Integer, nullable=False, default=50)
+    impact_score = db.Column(db.Integer, nullable=False, default=50)
+    buying_window_score = db.Column(db.Integer, nullable=False, default=0)
+    lifecycle_stage = db.Column(db.String(50), nullable=False, default="DISCOVERED", index=True)
+    causality = db.Column(db.JSON, nullable=False, default=list)
+    product_hypothesis = db.Column(db.JSON, nullable=False, default=list)
     fingerprint = db.Column(db.String(64), nullable=False)
     status = db.Column(db.String(40), nullable=False, default="DETECTED", index=True)
     detected_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
@@ -444,6 +523,14 @@ class ProspectSignal(db.Model):
     level = db.Column(db.String(20), nullable=False, index=True)
     products = db.Column(db.JSON, default=list, nullable=False)
     reasons = db.Column(db.JSON, default=list, nullable=False)
+    buying_window_score = db.Column(db.Integer, nullable=False, default=0)
+    lifecycle_stage = db.Column(db.String(50), nullable=False, default="DISCOVERED", index=True)
+    momentum_delta = db.Column(db.Integer, nullable=False, default=0)
+    demand_probability = db.Column(db.Integer, nullable=False, default=0)
+    causality = db.Column(db.JSON, default=list, nullable=False)
+    estimated_deal_min = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    estimated_deal_max = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    why_now = db.Column(db.Text)
     status = db.Column(db.String(40), nullable=False, default="PENDING_VALIDATION", index=True)
     opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
@@ -458,6 +545,10 @@ class ProspectSignal(db.Model):
             "reliability": self.source_reliability, "publishedAt": self.published_at.isoformat() if self.published_at else None,
             "city": self.city, "department": self.department, "event": self.event_type, "score": self.score,
             "level": self.level, "products": self.products or [], "reasons": self.reasons or [],
+            "buyingWindow": self.buying_window_score, "lifecycleStage": self.lifecycle_stage,
+            "momentumDelta": self.momentum_delta, "demandProbability": self.demand_probability,
+            "causality": self.causality or [], "estimatedDealMin": float(self.estimated_deal_min or 0),
+            "estimatedDealMax": float(self.estimated_deal_max or 0), "whyNow": self.why_now,
             "status": self.status, "opportunityId": self.opportunity_id,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }

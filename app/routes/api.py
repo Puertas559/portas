@@ -7,8 +7,8 @@ from sqlalchemy import text
 from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import (
-    AuditLog, CollectorRun, Company, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
-    ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, WebsiteAnalysis,
+    AuditLog, CollectorRun, Company, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
+    ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, Watchlist, WebsiteAnalysis,
 )
 from ..services.entity_resolution import resolve_company, resolve_project
 from ..services.intelligence import as_datetime, link_evidence_and_products, record_evidence, score_opportunity
@@ -268,7 +268,11 @@ def signal_approve(signal_id):
         "evidence": signal.summary, "sourceName": signal.source_name, "sourceUrl": signal.source_url,
         "sourceType": signal.source_type, "sourceReliability": signal.source_reliability,
         "publishedAt": signal.published_at, "evidenceClassification": "FACT",
-        "stage": "Prospección automática",
+        "stage": "Prospección automática", "buyingWindow": signal.buying_window_score,
+        "timing": signal.buying_window_score, "momentum": min(100, 45 + signal.momentum_delta),
+        "projectValueFit": min(100, 45 + int(float(signal.estimated_deal_max or 0) / 2500)),
+        "productFit": signal.demand_probability, "causality": signal.causality or [],
+        "potentialDealValue": (float(signal.estimated_deal_min or 0) + float(signal.estimated_deal_max or 0)) / 2,
     })
     signal.status, signal.opportunity_id = "APPROVED", opportunity.id
     db.session.commit()
@@ -562,6 +566,9 @@ def companies_list():
         "normalizedName": row.normalized_name, "sector": row.sector, "domain": row.domain,
         "city": row.city, "department": row.department, "country": row.country,
         "identityConfidence": row.identity_confidence, "projects": len(row.projects),
+        "accountFit": row.account_fit_score, "accessibility": row.accessibility_score,
+        "momentum": row.momentum_score, "watchStatus": row.watch_status,
+        "contacts": len(row.contacts), "lastSignalAt": row.last_signal_at.isoformat() if row.last_signal_at else None,
     } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
 
 
@@ -579,6 +586,9 @@ def projects_list():
         "department": row.department, "country": row.country, "stage": row.stage,
         "investmentAmount": float(row.investment_amount) if row.investment_amount is not None else None,
         "investmentCurrency": row.investment_currency, "signals": len(row.signals),
+        "lifecycleStage": row.lifecycle_stage, "buyingWindow": row.buying_window_score,
+        "demandProbability": row.demand_probability, "momentum": row.momentum_score,
+        "estimatedDealMin": float(row.estimated_deal_min or 0), "estimatedDealMax": float(row.estimated_deal_max or 0),
     } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
 
 
@@ -607,6 +617,9 @@ def intelligence_signals_list():
         "project": row.project.name if row.project else "UNKNOWN", "type": row.signal_type,
         "title": row.title, "summary": row.summary, "confidence": row.confidence,
         "freshness": row.freshness, "relevance": row.relevance, "status": row.status,
+        "impact": row.impact_score, "buyingWindow": row.buying_window_score,
+        "lifecycleStage": row.lifecycle_stage, "causality": row.causality or [],
+        "productHypothesis": row.product_hypothesis or [],
         "detectedAt": row.detected_at.isoformat(),
     } for row in pagination.items], page=page, perPage=per_page, total=pagination.total)
 
@@ -677,6 +690,103 @@ def revenue_intelligence_dashboard():
         expectedRevenue=sum(float(row.expected_revenue or 0) for row in active),
         evidence=Evidence.query.filter_by(tenant_id=tenant.id).count(),
     )
+
+
+@api_bp.get("/radar/command-center")
+def radar_command_center():
+    tenant = current_tenant()
+    active = Opportunity.query.filter(
+        Opportunity.tenant_id == tenant.id,
+        ~Opportunity.status.in_({"GANHO", "PERDIDO", "DESCARTADO"}),
+    ).all()
+    hot_now = sorted(active, key=lambda row: (row.score, row.buying_window_score, row.momentum_score), reverse=True)[:12]
+    momentum = sorted(active, key=lambda row: row.momentum_score, reverse=True)[:12]
+    watch = Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").filter(Company.watch_status.in_({"WATCH", "WARM", "HOT"})).order_by(Company.momentum_score.desc()).limit(20).all()
+    research_queue = Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").filter(
+        (Company.accessibility_score < 35) | (Company.identity_confidence < 65)
+    ).order_by(Company.account_fit_score.desc(), Company.momentum_score.desc()).limit(25).all()
+    return jsonify(
+        hotNow=[row.to_dict() for row in hot_now],
+        momentum=[row.to_dict() for row in momentum],
+        watchlist=[{
+            "id": row.id, "company": row.name, "city": row.city, "department": row.department,
+            "fit": row.account_fit_score, "accessibility": row.accessibility_score, "momentum": row.momentum_score,
+            "status": row.watch_status, "lastSignalAt": row.last_signal_at.isoformat() if row.last_signal_at else None,
+        } for row in watch],
+        researchQueue=[{
+            "id": row.id, "company": row.name, "fit": row.account_fit_score,
+            "accessibility": row.accessibility_score, "identityConfidence": row.identity_confidence,
+            "missing": [name for name, present in (("website", row.website), ("phone", row.phone_business or row.phone), ("email", row.email_business or row.email), ("decisionMaker", bool(row.contacts))) if not present],
+        } for row in research_queue],
+        summary={
+            "activeOpportunities": len(active), "hot": sum(1 for row in active if row.level == "HOT"),
+            "buyingWindow": sum(1 for row in active if row.buying_window_score >= 80),
+            "accelerating": sum(1 for row in active if row.momentum_score >= 65),
+            "pipelinePotential": round(sum(float(row.deal_value_max or row.potential_deal_value or 0) for row in active), 2),
+        },
+    )
+
+
+@api_bp.get("/companies/<int:company_id>/contacts")
+def company_contacts(company_id):
+    tenant = current_tenant()
+    Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    rows = Contact.query.filter_by(tenant_id=tenant.id, company_id=company_id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
+    return jsonify([{
+        "id": row.id, "name": row.name, "role": row.role, "buyingRole": row.buying_role,
+        "influence": row.influence_score, "email": row.email, "phone": row.phone, "whatsapp": row.whatsapp,
+        "linkedin": row.linkedin_url, "confidence": row.confidence,
+    } for row in rows])
+
+
+@api_bp.post("/companies/<int:company_id>/contacts")
+@require_permission("WRITE_CRM")
+def company_contact_create(company_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    if not data.get("name"):
+        return jsonify(error="Falta el nombre del contacto"), 400
+    contact = Contact(
+        tenant_id=tenant.id, company_id=company.id, name=str(data["name"]).strip(), role=data.get("role"),
+        buying_role=(data.get("buyingRole") or "UNKNOWN").upper(), influence_score=max(0, min(100, int(data.get("influence", 50)))),
+        email=data.get("email"), phone=data.get("phone"), whatsapp=data.get("whatsapp"),
+        linkedin_url=data.get("linkedin"), source_url=data.get("sourceUrl"), confidence=max(0, min(100, int(data.get("confidence", 60)))),
+    )
+    db.session.add(contact)
+    company.accessibility_score = min(100, (company.accessibility_score or 0) + 15)
+    db.session.commit()
+    return jsonify(id=contact.id, companyId=company.id), 201
+
+
+@api_bp.post("/companies/<int:company_id>/watch")
+@require_permission("WRITE_CRM")
+def company_watch(company_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    row = Watchlist.query.filter_by(tenant_id=tenant.id, company_id=company.id).first()
+    if not row:
+        row = Watchlist(tenant_id=tenant.id, company_id=company.id)
+        db.session.add(row)
+    row.priority = max(0, min(100, int(data.get("priority", max(company.account_fit_score or 50, company.momentum_score or 0)))))
+    row.reason = data.get("reason") or row.reason or "Cuenta estratégica para monitoreo de señales"
+    row.status = "ACTIVE"
+    row.next_check_at = datetime.now(timezone.utc) + timedelta(days=max(1, int(data.get("checkEveryDays", 7))))
+    company.watch_status = "HOT" if company.momentum_score >= 75 else "WARM" if company.momentum_score >= 50 else "WATCH"
+    db.session.commit()
+    return jsonify(id=row.id, company=company.name, status=company.watch_status, priority=row.priority), 201
+
+
+@api_bp.get("/watchlist")
+def watchlist_list():
+    tenant = current_tenant()
+    rows = Watchlist.query.filter_by(tenant_id=tenant.id, status="ACTIVE").order_by(Watchlist.priority.desc()).all()
+    return jsonify([{
+        "id": row.id, "companyId": row.company_id, "company": row.company.name, "priority": row.priority,
+        "reason": row.reason, "momentum": row.company.momentum_score, "fit": row.company.account_fit_score,
+        "nextCheckAt": row.next_check_at.isoformat() if row.next_check_at else None,
+    } for row in rows])
 
 
 @api_bp.get("/health")

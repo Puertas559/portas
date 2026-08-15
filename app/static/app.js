@@ -141,7 +141,7 @@ function selectLead(lead) {
   $("companyPlace").textContent = `⌖ ${lead.city || "Ciudad no informada"}, ${lead.department || ""}`;
   $("drawerLevel").className = `level ${(lead.level || "MEDIUM").toLowerCase()}`;
   $("drawerLevel").textContent = `${priorityLabel(lead.level)} · ${Number(lead.score) || 0}`;
-  $("whyText").textContent = `${lead.project || "El proyecto"} puede generar demanda de accesos industriales en áreas de operación, carga y circulación de vehículos.`;
+  $("whyText").textContent = lead.whyNow || `${lead.project || "El proyecto"} puede generar demanda de accesos industriales en áreas de operación, carga y circulación de vehículos.`;
   $("eventType").textContent = eventLabel(lead.event);
   $("stage").textContent = lead.stage || "Por validar";
   $("investment").textContent = lead.investment || "No divulgado";
@@ -676,6 +676,31 @@ $("proposalForm").addEventListener("submit", async (event) => {
   proposalDialog.close(); toast(`Propuesta ${data.number} generada`); loadToday();
 });
 
+async function loadCommandCenter() {
+  try {
+    const response = await fetch("/api/radar/command-center");
+    if (!response.ok) throw new Error("command center");
+    const data = await response.json();
+    const values = [data.summary.hot, data.summary.buyingWindow, data.summary.accelerating, money(data.summary.pipelinePotential)];
+    document.querySelectorAll("#commandMetrics article b").forEach((el, index) => { el.textContent = values[index]; });
+    const opportunityCard = (lead) => `<article class="radar-row" data-opportunity-id="${lead.id}"><div><strong>${escapeHtml(lead.company)}</strong><span>${escapeHtml(lead.project)} · ${escapeHtml(lead.department || "")}</span></div><div class="radar-badges"><b>${Number(lead.score) || 0}</b><em>BW ${Number(lead.buyingWindow) || 0}</em><em>↑ ${Number(lead.momentum) || 0}</em></div><p>${escapeHtml(lead.whyNow || "Señal comercial prioritaria")}</p><small>${escapeHtml(lead.nextBestAction || "Validar responsables y cronograma")}</small></article>`;
+    $("hotNowList").innerHTML = (data.hotNow || []).map(opportunityCard).join("") || '<p>No hay oportunidades HOT en este momento.</p>';
+    $("momentumList").innerHTML = (data.momentum || []).map(opportunityCard).join("") || '<p>No hay cuentas acelerando.</p>';
+    $("researchQueue").innerHTML = (data.researchQueue || []).map((row) => `<article class="radar-row"><div><strong>${escapeHtml(row.company)}</strong><span>Fit ${row.fit} · Acceso ${row.accessibility}</span></div><p>Falta: ${escapeHtml((row.missing || []).join(", ") || "enriquecimiento general")}</p></article>`).join("") || '<p>No hay cuentas pendientes de enriquecimiento.</p>';
+  } catch (_error) {
+    $("hotNowList").innerHTML = '<p>No se pudo cargar el Command Center.</p>';
+  }
+}
+
+$("refreshCommandCenter").addEventListener("click", loadCommandCenter);
+["hotNowList", "momentumList"].forEach((id) => $(id).addEventListener("click", (event) => {
+  const row = event.target.closest("[data-opportunity-id]");
+  if (!row) return;
+  const lead = leads.find((item) => String(item.id) === row.dataset.opportunityId);
+  if (lead) { selectLead(lead); $("drawer").scrollIntoView({ behavior: "smooth", block: "start" }); }
+}));
+
 render();
 if (selected) selectLead(selected);
 loadToday();
+loadCommandCenter();

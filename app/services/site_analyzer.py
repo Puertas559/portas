@@ -178,7 +178,7 @@ def analyze_website(url):
     if whatsapp_links:
         number = re.search(r"(?:wa\.me/|phone=)(\+?\d+)", whatsapp_links[0])
         whatsapp = number.group(1) if number else whatsapp_links[0]
-    contacts = _unique(re.findall(r"(?:gerente|director(?:a)?|responsable|jefe|encargad[oa])(?:\s+(?:comercial|de compras|de mantenimiento|de operaciones))?\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+){1,3})", text, re.I))[:8]
+    contacts = _unique(re.findall(r"(?:gerente|director(?:a)?|responsable|jefe|encargad[oa])(?:\s+(?:comercial|de compras|de mantenimiento|de operaciones|de ingeniería|de ingenieria|de logística|de logistica|de proyectos|de infraestructura|industrial))?\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]+){1,3})", text, re.I))[:12]
     social = {}
     for network in ["linkedin", "facebook", "instagram", "youtube"]:
         match = next((link for link in all_links if network + ".com" in link.lower()), None)
@@ -201,8 +201,9 @@ def analyze_website(url):
         score += 35; reasons.append("Infraestructura operativa compatible con puertas automáticas")
     if products:
         score += min(28, 7 * len(products)); reasons.append("Aplicaciones concretas del portafolio identificadas")
-    if any(term in searchable for term in ["expansión", "ampliación", "nueva planta", "construcción", "proyecto", "crecimiento"]):
-        score += 15; reasons.append("Indicio de obra, expansión o necesidad técnica")
+    project_signals = [term for term in ["adquisición de terreno", "licencia ambiental", "financiamiento", "expansión", "ampliación", "nueva planta", "construcción", "terraplenado", "proyecto", "crecimiento", "nuevas instalaciones", "centro de distribución", "nueva línea de producción"] if term in searchable]
+    if project_signals:
+        score += min(22, 10 + len(project_signals) * 3); reasons.append("Señales precursoras de proyecto: " + ", ".join(project_signals[:4]))
     if emails or phones or whatsapp:
         score += 12; reasons.append("Canales de contacto comercial encontrados")
     if contacts:
@@ -223,7 +224,7 @@ def analyze_website(url):
         address=_extract_address(text), phones=phones, whatsapp=whatsapp, emails=emails, contacts=contacts,
         social_links=social, company_size=_estimate_size(text), potential_score=score, potential_level=level,
         products=products, services=_unique(services), reasons=reasons, pages_analyzed=len(documents),
-        summary=(" ".join(text.split())[:700] or "No se encontró texto visible en el sitio."),
+        summary=(" ".join(text.split())[:1200] or "No se encontró texto visible en el sitio."),
     )
     db.session.add(analysis)
     db.session.commit()
