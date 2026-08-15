@@ -6,9 +6,9 @@
   <meta name="description" content="Revenue Intelligence B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Industrial Revenue Radar · {{ brand.get('brand_name', tenant.name) }}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=pb20260814-3">
-  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}?v=pb20260814-3">
-  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=pb20260814-3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}">
 </head>
 <body>
 <div class="app">
@@ -45,6 +45,12 @@
       <div class="sales-metrics" id="salesMetrics"><article><small>TAREAS DE HOY</small><b>—</b></article><article><small>ATRASADAS</small><b>—</b></article><article><small>VALOR DEL PIPELINE</small><b>—</b></article><article><small>TASA DE RESPUESTA</small><b>—</b></article><article><small>VENTAS GANADAS</small><b>—</b></article></div>
       <div class="intelligence-metrics" id="intelligenceMetrics"><article><small>EMPRESAS ÚNICAS</small><b>—</b></article><article><small>PROYECTOS</small><b>—</b></article><article><small>SEÑALES TRAZABLES</small><b>—</b></article><article><small>EVIDENCIAS</small><b>—</b></article><article><small>FUENTES</small><b>—</b></article><article><small>REVENUE ESPERADO</small><b>—</b></article></div>
       <div class="today-grid"><div><h3>Acciones prioritarias</h3><div class="task-list" id="todayTasks"><p>Cargando agenda comercial...</p></div></div><div class="daily-guide"><i class="bi bi-lightning-charge-fill"></i><h3>Regla del día</h3><p>Primero tareas atrasadas, después oportunidades urgentes y finalmente prospección nueva.</p><strong id="dailyFocus">Preparando prioridades...</strong></div></div>
+    </section>
+
+    <section class="command-center" id="commandCenter">
+      <div class="section-head"><div><p class="eyebrow">RADAR DE INTENCIÓN DE COMPRA</p><h2>Command Center</h2><p>Quién puede comprar, por qué ahora, en qué ventana y cuál es la próxima acción.</p></div><button class="primary" id="refreshCommandCenter"><i class="bi bi-activity"></i> Recalcular foco</button></div>
+      <div class="command-metrics" id="commandMetrics"><article><small>HOT NOW</small><b>—</b></article><article><small>BUYING WINDOW</small><b>—</b></article><article><small>ACELERANDO</small><b>—</b></article><article><small>POTENCIAL MÁX.</small><b>—</b></article></div>
+      <div class="command-grid"><div><h3>🔥 Hot now</h3><div id="hotNowList" class="radar-list"><p>Cargando oportunidades...</p></div></div><div><h3>⚡ Momentum</h3><div id="momentumList" class="radar-list"><p>Cargando señales...</p></div></div><div><h3>🔎 Research queue</h3><div id="researchQueue" class="radar-list"><p>Cargando cuentas incompletas...</p></div></div></div>
     </section>
 
     <section class="search-results hidden" id="companySearchResults">
