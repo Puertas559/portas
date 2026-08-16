@@ -789,6 +789,98 @@ def watchlist_list():
     } for row in rows])
 
 
+@api_bp.get("/prospecting-map/config")
+def prospecting_map_config():
+    import os
+    return jsonify(
+        enabled=bool(os.getenv("GOOGLE_PLACES_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY")),
+        browserKey=os.getenv("GOOGLE_MAPS_BROWSER_KEY") or "",
+    )
+
+
+@api_bp.get("/prospecting-map/search")
+def prospecting_map_search():
+    from ..services.google_places import search_places
+    tenant = current_tenant()
+    try:
+        payload = search_places(
+            query=request.args.get("q", ""),
+            city=request.args.get("city", ""),
+            region=request.args.get("region", ""),
+            industry=request.args.get("industry", ""),
+            depth=request.args.get("depth", "deep"),
+        )
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 502
+
+    place_ids = [f"gplace:{row['placeId']}" for row in payload["results"] if row.get("placeId")]
+    crm_by_place = {}
+    if place_ids:
+        for company in Company.query.filter(Company.tenant_id == tenant.id, Company.registration_id.in_(place_ids)).all():
+            crm_by_place[company.registration_id.removeprefix("gplace:")] = company.id
+    for row in payload["results"]:
+        company_id = crm_by_place.get(row.get("placeId"))
+        row["inCrm"] = bool(company_id)
+        row["crmCompanyId"] = company_id
+    return jsonify(payload)
+
+
+@api_bp.post("/prospecting-map/import")
+@require_permission("WRITE_CRM")
+def prospecting_map_import():
+    data = request.get_json(silent=True) or {}
+    rows = data.get("places") or []
+    if not isinstance(rows, list) or not rows:
+        return jsonify(error="Seleccione al menos una empresa"), 400
+    if len(rows) > 100:
+        return jsonify(error="Importe como máximo 100 empresas por lote"), 400
+
+    created, existing, errors = [], [], []
+    for row in rows:
+        if not row.get("company") or not row.get("placeId"):
+            continue
+        payload = {
+            "company": row.get("company"),
+            "project": "Empresa identificada en mapa de prospección",
+            "event": "GOOGLE_PLACES_DISCOVERY",
+            "projectType": "TERRITORIAL_PROSPECTING",
+            "stage": "Prospección territorial",
+            "city": data.get("city") or "Por validar",
+            "department": data.get("region") or "Por validar",
+            "country": "Paraguay",
+            "sector": row.get("primaryType") or data.get("industry") or "Industria y manufactura",
+            "website": row.get("website"),
+            "phone": row.get("phone"),
+            "whatsapp": row.get("phone"),
+            "address": row.get("address"),
+            "registrationId": f"gplace:{row.get('placeId')}",
+            "sourceName": "Google Places",
+            "sourceUrl": row.get("mapsUrl") or row.get("website"),
+            "sourceTitle": row.get("company"),
+            "evidence": f"Empresa identificada por Google Places durante barrido territorial. Coincidencia: {row.get('matchedTerm') or 'búsqueda empresarial'}.",
+            "evidenceClassification": "FACT",
+            "dataConfidence": 72 if row.get("website") or row.get("phone") else 60,
+            "icpFit": 65,
+            "intent": 25,
+            "probability": 10,
+            "products": [],
+        }
+        try:
+            opportunity, was_created = _create_intelligence_opportunity(payload)
+            db.session.commit()
+            if was_created:
+                created.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
+            else:
+                existing.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
+        except Exception as exc:
+            db.session.rollback()
+            errors.append({"company": row.get("company"), "error": str(exc)[:180]})
+            continue
+    return jsonify(created=created, existing=existing, errors=errors, imported=len(created), skipped=len(existing))
+
+
 @api_bp.get("/health")
 def api_health():
     return _health()
