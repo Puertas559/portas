@@ -1,0 +1,1661 @@
+MASTER COMMAND — ARCHITECTURAL AUDIT, COMMERCIAL INTELLIGENCE & REVENUE EVOLUTION
+VERSÃO REVISADA
+
+Você está trabalhando no projeto atualmente existente neste repositório.
+
+==================================================
+VISÃO DO PRODUTO
+==================================================
+
+OBJETIVO DE LONGO PRAZO:
+
+Evoluir o sistema atual para uma plataforma profissional, moderna, escalável e futuramente replicável de:
+
+B2B SALES INTELLIGENCE
++
+INTENT INTELLIGENCE
++
+OPPORTUNITY INTELLIGENCE
++
+REVENUE INTELLIGENCE
+
+O primeiro caso de uso REAL e PRIORITÁRIO é a prospecção comercial da:
+
+PUERTAS BRASIL PY — PARAGUAI.
+
+IMPORTANTE:
+
+A arquitetura não deve impedir futura expansão para outras empresas, setores, produtos, países ou modelos comerciais.
+
+PORÉM:
+
+NÃO construir agora infraestrutura complexa apenas para um futuro hipotético.
+
+Primeiro provar o motor comercial com a Puertas Brasil PY.
+
+O sistema precisa resolver muito bem o fluxo real do vendedor:
+
+DESCOBRIR
+→ ENTENDER
+→ QUALIFICAR
+→ PRIORIZAR
+→ ABORDAR
+→ ACOMPANHAR
+→ CONVERTER
+→ MEDIR
+
+==================================================
+PRINCÍPIO Nº 1 — FUNCIONAR NO MUNDO REAL
+==================================================
+
+Não otimize o sistema para parecer impressionante em demonstrações.
+
+Otimize para:
+
+- velocidade de trabalho;
+- qualidade de dados;
+- redução de pesquisa manual;
+- clareza comercial;
+- confiança;
+- conversão;
+- acompanhamento;
+- receita.
+
+O fluxo operacional atual da Puertas Brasil deve ser preservado e melhorado:
+
+GOOGLE MAPS / FONTE EXTERNA
+↓
+COPIAR SITE
+↓
+QUALIFICADOR
+↓
+CLASSIFICAR
+↓
+ABRIR AUTOMATICAMENTE ACCOUNT 360 / FICHA 360
+↓
+MENSAGENS
+↓
+EMAIL / WHATSAPP / LIGAÇÃO
+↓
+REGISTRAR INTERAÇÃO
+↓
+FOLLOW-UP
+↓
+PIPELINE
+↓
+VENDA
+
+Esse fluxo é P0.
+
+Não introduza arquitetura ou telas que tornem esse fluxo mais lento.
+
+==================================================
+REGRA MAIS IMPORTANTE
+==================================================
+
+NÃO comece criando novas funcionalidades.
+NÃO reescreva o projeto inteiro.
+NÃO apague migrations indiscriminadamente.
+NÃO substitua tecnologias existentes sem justificativa.
+NÃO crie código duplicado.
+NÃO crie uma nova estrutura se já existir algo equivalente.
+NÃO implemente todas as capacidades futuras deste documento automaticamente.
+
+PRIMEIRO faça uma AUDITORIA COMPLETA do projeto atual.
+Somente depois apresente um plano.
+E SOMENTE implemente após aprovação explícita.
+
+==================================================
+COMO INTERPRETAR ESTE DOCUMENTO
+==================================================
+
+Este documento contém três tipos diferentes de instruções:
+
+A) PRINCÍPIOS ARQUITETURAIS
+Devem orientar todas as decisões.
+
+B) CAPACIDADES DE PRODUTO
+Devem ser comparadas com o que já existe.
+
+C) VISÃO FUTURA
+Não deve ser implementada automaticamente.
+
+Não trate cada seção como uma feature obrigatória imediata.
+
+Antes de criar qualquer coisa, pergunte:
+
+"Isso é necessário agora para melhorar aquisição, qualificação,
+abordagem, acompanhamento, conversão ou receita?"
+
+Se NÃO:
+DEFER.
+
+==================================================
+HORIZONTES DE EVOLUÇÃO
+==================================================
+
+HORIZONTE 1 — OPERAÇÃO COMERCIAL PUERTAS BRASIL
+PRIORIDADE ATUAL
+
+Foco:
+
+- qualificação de empresas;
+- identificação empresarial;
+- Account 360;
+- contatos;
+- múltiplos emails;
+- WhatsApp;
+- mensagens contextuais;
+- CRM;
+- interações;
+- follow-up;
+- pipeline;
+- projetos;
+- sinais;
+- ICP;
+- intent;
+- opportunity score;
+- why now;
+- next best action;
+- fontes;
+- evidências;
+- qualidade dos dados;
+- produtividade comercial.
+
+Este horizonte deve funcionar muito bem antes da expansão arquitetural.
+
+HORIZONTE 2 — COMMERCIAL INTELLIGENCE ENGINE
+
+Depois que o Horizon 1 estiver estável e sendo utilizado no mundo real:
+
+- Signal Engine;
+- Intent Engine;
+- Entity Resolution avançada;
+- Product Match;
+- Source Intelligence;
+- Freshness;
+- Opportunity Intelligence;
+- Daily Revenue Brief;
+- Conversion Intelligence;
+- feedback de resultados;
+- automação de pesquisas;
+- melhoria de scoring baseada em dados reais.
+
+HORIZONTE 3 — PLATAFORMA SaaS REPLICÁVEL
+
+Somente após o motor comercial estar comprovado:
+
+- multi-tenant;
+- workspaces;
+- branding por tenant;
+- múltiplos países;
+- múltiplos setores;
+- múltiplos catálogos;
+- multilíngue completo;
+- ICP configurável por tenant;
+- pipelines configuráveis;
+- permissões avançadas;
+- integrações externas;
+- observabilidade avançada;
+- infraestrutura para volumes massivos.
+
+Arquitetura atual não deve bloquear esse futuro.
+Mas também não deve superdimensionar o presente.
+
+==================================================
+FASE 1 — AUDITORIA COMPLETA
+==================================================
+
+Inspecione todo o repositório.
+
+Analise:
+
+- backend;
+- frontend;
+- models;
+- schemas;
+- migrations;
+- routes;
+- services;
+- repositories;
+- database;
+- collectors;
+- search;
+- entity resolution;
+- intelligence;
+- scoring;
+- prospecting;
+- CRM;
+- scheduler;
+- site analyzer;
+- diagnostics;
+- dashboards;
+- authentication;
+- authorization;
+- configuration;
+- integrations;
+- tests;
+- environment configuration;
+- arquivos duplicados;
+- diretórios duplicados;
+- código morto;
+- funcionalidades antigas ainda renderizadas;
+- fontes de verdade concorrentes.
+
+Não faça análise superficial.
+
+Mapeie como os dados REALMENTE percorrem o sistema.
+
+Produza relatório técnico contendo:
+
+1. Arquitetura atual.
+2. Stack tecnológica.
+3. Banco de dados atual.
+4. Principais entidades.
+5. Fluxo de dados.
+6. Fluxo de prospecção.
+7. Fluxo de scoring.
+8. Fluxo de coleta.
+9. Fluxo de CRM.
+10. Fluxo de inteligência.
+11. Funcionalidades existentes.
+12. Funcionalidades parcialmente implementadas.
+13. Funcionalidades duplicadas.
+14. Arquivos e diretórios duplicados.
+15. Tabelas redundantes.
+16. Services redundantes.
+17. Migrations conflitantes ou excessivas.
+18. Problemas de normalização.
+19. Problemas de performance.
+20. Problemas de segurança.
+21. Problemas de escalabilidade.
+22. Problemas de UX.
+23. Problemas de arquitetura.
+24. Dívida técnica.
+25. Pontos fortes.
+26. O que deve ser preservado.
+27. O que deve ser refatorado.
+28. O que deve ser consolidado.
+29. O que deve ser removido.
+30. O que ainda falta.
+31. O que deve ser DEFERIDO.
+
+==================================================
+FASE 2 — MAPA CONCEITUAL
+==================================================
+
+A plataforma deve ser entendida conceitualmente como:
+
+DATA
+↓
+SIGNALS
+↓
+ENTITIES
+↓
+INTENT
+↓
+ICP
+↓
+OPPORTUNITY
+↓
+RECOMMENDATION
+↓
+OUTREACH
+↓
+CRM
+↓
+PIPELINE
+↓
+SALE
+↓
+REVENUE
+
+IMPORTANTE:
+
+Não tratar "empresa encontrada" como sinônimo de "lead qualificado".
+
+Conceitos diferentes:
+
+ACCOUNT
+PROSPECT
+SIGNAL
+INTENT
+ICP
+OPPORTUNITY
+CONTACT
+ACTIVITY
+DEAL
+REVENUE
+
+==================================================
+PRINCÍPIO CRÍTICO — ICP ≠ INTENT ≠ OPPORTUNITY
+==================================================
+
+Manter conceitos separados.
+
+ICP:
+"Essa empresa é um bom tipo de cliente?"
+
+INTENT:
+"Existe alguma evidência de que algo relevante esteja acontecendo agora?"
+
+OPPORTUNITY:
+"Existe uma situação comercial concreta que merece ação?"
+
+Exemplo:
+
+Empresa A:
+ICP = 95
+Intent = 20
+
+Empresa B:
+ICP = 72
+Intent = 94
+
+Empresa B pode merecer prioridade imediata.
+
+Não misturar esses conceitos em um único score opaco.
+
+==================================================
+FASE 3 — ARQUITETURA DE DADOS
+==================================================
+
+Revise principalmente:
+
+companies
+projects
+opportunities
+signals
+prospect_signals
+sources
+timeline
+contacts
+activities
+scoring
+CRM
+website qualification
+digital presence
+prospecting
+sales workspace
+users
+roles
+permissions
+
+Identifique estruturas representando o mesmo conceito.
+
+Não manter duas fontes de verdade sem justificativa.
+
+Exemplo:
+
+signals
+e
+prospect_signals
+
+Determinar se:
+
+A) uma é ingestão;
+B) uma é staging;
+C) uma é entidade final;
+D) existe duplicação desnecessária.
+
+Fazer o mesmo para todas as estruturas semelhantes.
+
+==================================================
+MODELO DE DADOS ALVO
+==================================================
+
+Proponha o modelo alvo.
+
+Entidades FUTURAMENTE relevantes podem incluir:
+
+TENANTS
+USERS
+WORKSPACES
+COMPANIES
+COMPANY_ALIASES
+CONTACTS
+PROJECTS
+ASSETS
+SIGNALS
+SOURCES
+SOURCE_DOCUMENTS
+INTENTS
+OPPORTUNITIES
+OPPORTUNITY_SCORES
+SCORE_FACTORS
+PRODUCTS
+PRODUCT_MATCHES
+OUTREACH
+ACTIVITIES
+TASKS
+PIPELINE_STAGES
+DEALS
+ALERTS
+SAVED_SEARCHES
+AUDIT_LOGS
+INTEGRATIONS
+
+IMPORTANTE:
+
+NÃO criar todas essas tabelas automaticamente.
+
+Para cada entidade proposta, classificar:
+
+EXISTING
+KEEP
+REFACTOR
+MERGE
+BUILD_NOW
+BUILD_LATER
+DEFER
+
+==================================================
+EVIDENCE-FIRST
+==================================================
+
+Toda inteligência relevante deve ter evidência.
+
+Classificar informação como:
+
+FACT
+INFERENCE
+PREDICTION
+UNKNOWN
+
+Nunca transformar inferência em fato.
+
+Nunca inventar:
+
+- empresa;
+- razão social;
+- RUC;
+- investimento;
+- projeto;
+- contato;
+- telefone;
+- email;
+- URL;
+- intenção;
+- obra;
+- compra.
+
+Quando não houver informação confiável:
+
+UNKNOWN
+ou
+POR VERIFICAR.
+
+Sempre que possível guardar:
+
+fonte
+URL
+data de descoberta
+data da informação
+confiança
+evidência
+última verificação
+
+==================================================
+IDENTIFICAÇÃO EMPRESARIAL
+==================================================
+
+O nome da empresa não deve depender cegamente do title da página.
+
+Uma URL pode ser:
+
+/contacto
+/nuestra-historia
+/productos
+/sucursales
+
+e o title não representa necessariamente o nome da empresa.
+
+Priorizar quando disponíveis:
+
+1. structured data / Organization;
+2. identidade institucional recorrente;
+3. og:site_name;
+4. branding/logo/header;
+5. razão social;
+6. domínio como fallback.
+
+Nunca transformar o título da página em nome empresarial sem validação.
+
+Criar suporte a aliases.
+
+Exemplo:
+
+ABC S.A.
+ABC SA
+ABC Paraguay
+ABC Industrial Paraguay
+
+podem representar a mesma entidade.
+
+Mas nunca fundir apenas por semelhança de nome.
+
+==================================================
+ACCOUNT 360 / FICHA 360
+==================================================
+
+Cada empresa deve concentrar tudo em uma única visão.
+
+Campos quando disponíveis:
+
+Nombre comercial
+Razón social
+RUC
+Estado de verificación
+Sector
+Descripción
+País
+Ciudad
+Dirección
+Website
+Dominios alternativos
+Teléfonos
+WhatsApp
+Emails
+Contactos
+Cargos
+Comité de compra
+Proyectos
+Señales
+Oportunidades
+Productos relevantes
+Historial
+Actividades
+Follow-ups
+Pipeline
+Fuentes
+Evidencias
+Notas
+Data freshness
+Data completeness
+ICP
+Intent
+Opportunity Score
+Why now
+Next best action
+
+Não obrigar todos os campos.
+
+Não inventar campos desconhecidos.
+
+==================================================
+OUTREACH — FLUXO P0
+==================================================
+
+Depois que uma empresa for classificada:
+
+ABRIR AUTOMATICAMENTE:
+
+ACCOUNT 360
+→ ABA MENSAJES
+
+Sem tela intermediária antiga ou genérica.
+
+Dentro de MENSAJES:
+
+Mostrar explicitamente:
+
+DESTINATARIO
+ÁREA PROBABLE
+CANAL
+ASUNTO
+MENSAJE
+ADJUNTO RECOMENDADO
+BOTÕES DE COPIAR
+REGISTRAR INTERAÇÃO
+
+Se houver múltiplos emails:
+
+cada email deve ser uma opção individual.
+
+Exemplos:
+
+ventas@ → Ventas / Comercial
+compras@ → Compras / Abastecimiento
+mantenimiento@ → Mantenimiento
+ingenieria@ → Ingeniería
+marketing@ → Marketing / Comunicación
+gerencia@ → Gerencia / Dirección
+info@ → Correo general
+
+Mensagens devem mudar conforme destinatário.
+
+Se não houver email:
+
+priorizar WhatsApp.
+
+Se não houver WhatsApp:
+
+mostrar ligação / contato alternativo.
+
+==================================================
+OUTREACH CONTEXTUAL
+==================================================
+
+Nunca gerar abordagem que afirme necessidade inexistente.
+
+Basear a mensagem em:
+
+empresa
+setor
+destinatário
+cargo
+projeto
+sinal
+histórico
+localização
+produto potencial
+
+Quando houver sinal real:
+
+utilizar o sinal.
+
+Quando não houver:
+
+usar apresentação institucional neutra.
+
+Tipos:
+
+Email
+WhatsApp
+LinkedIn
+Call opening
+Follow-up
+
+No estágio atual:
+
+NÃO depender de API de IA paga.
+
+Utilizar templates determinísticos e regras claras.
+
+==================================================
+SIGNAL ENGINE
+==================================================
+
+Capacidade do Horizon 2.
+
+Categorias relevantes:
+
+BUYING_INTENT
+SEARCH_INTENT
+SUPPLIER_SEARCH
+RFQ
+RFP
+PROCUREMENT
+NEW_COMPANY
+NEW_PLANT
+NEW_FACTORY
+NEW_WAREHOUSE
+NEW_NAVE
+NEW_LOGISTICS_CENTER
+INDUSTRIAL_PARK
+EXPANSION
+INVESTMENT
+CONSTRUCTION
+PROJECT_APPROVAL
+CONSTRUCTION_START
+NEW_OPERATION
+NEW_MARKET_ENTRY
+MAQUILA
+RELOCATION
+PROPERTY_FOR_SALE
+PROPERTY_FOR_RENT
+FACTORY_FOR_SALE
+FACTORY_FOR_RENT
+WAREHOUSE_FOR_SALE
+WAREHOUSE_FOR_RENT
+LAND_FOR_SALE
+LAND_FOR_RENT
+HIRING_SPIKE
+CAPACITY_EXPANSION
+OTHER
+
+Cada sinal deve guardar quando possível:
+
+tipo
+empresa
+projeto
+data
+data de descoberta
+fonte
+evidência
+confiança
+relevância
+recência
+localização
+produto relacionado
+status
+
+==================================================
+INTENT ENGINE
+==================================================
+
+Intent Score configurável e explicável.
+
+Considerar:
+
+- intenção explícita;
+- busca de fornecedor;
+- procurement;
+- investimento;
+- projeto;
+- obra;
+- expansão;
+- compra de ativo;
+- múltiplos sinais;
+- recência;
+- relevância;
+- confiança.
+
+Não misturar com ICP.
+
+==================================================
+ICP ENGINE
+==================================================
+
+No Horizon 1:
+
+ICP específico da Puertas Brasil.
+
+Deve poder considerar:
+
+setores
+cidades
+regiões
+tipo de operação
+tamanho
+infraestrutura
+uso provável de acessos industriais
+projetos
+produtos compatíveis
+
+Gerar:
+
+ICP FIT SCORE
+0–100
+
+Com fatores explicáveis.
+
+No Horizon 3:
+
+tornar configurável por tenant/workspace.
+
+==================================================
+OPPORTUNITY SCORE
+==================================================
+
+Não armazenar apenas um número.
+
+Exemplo:
+
+ICP FIT = 92
+INTENT = 88
+TIMING = 96
+PRODUCT FIT = 91
+DATA CONFIDENCE = 90
+RECENCY = 98
+
+OPPORTUNITY SCORE = 94
+
+Cada fator precisa ser auditável.
+
+Evitar magic numbers espalhados no código.
+
+Centralizar pesos/configuração.
+
+==================================================
+REVENUE POTENTIAL
+==================================================
+
+Estrutura FUTURA/GRADUAL.
+
+Potential Deal Value
+Probability
+Expected Revenue
+
+EXPECTED REVENUE =
+POTENTIAL DEAL VALUE × PROBABILITY
+
+Sempre marcar como:
+
+ESTIMATED
+
+Nunca apresentar estimativa como venda garantida.
+
+==================================================
+PRODUCT MATCH
+==================================================
+
+Inicialmente para Puertas Brasil:
+
+- puertas seccionales;
+- puertas enrollables;
+- puertas rápidas;
+- puertas automáticas;
+- motores;
+- automatizadores;
+- accesorios;
+- niveladoras de doca;
+- abrigos/sellos de doca;
+- mantenimiento;
+- instalación;
+- retrofit;
+- soluciones industriales.
+
+Para cada match:
+
+FIT SCORE
+REASON
+CONFIDENCE
+
+No futuro:
+
+configurável por tenant.
+
+==================================================
+SOURCE INTELLIGENCE
+==================================================
+
+Toda informação relevante deve voltar à fonte.
+
+Estrutura conceitual:
+
+SOURCE
+↓
+DOCUMENT
+↓
+EXTRACTED SIGNAL
+↓
+ENTITY
+↓
+OPPORTUNITY
+
+Permitir múltiplas fontes.
+
+Não limitar oportunidade a uma única source_url.
+
+==================================================
+FRESHNESS
+==================================================
+
+Implementar gradualmente:
+
+NEW SIGNAL
+UPDATED SIGNAL
+STALE SIGNAL
+ACTIVE PROJECT
+COMPLETED PROJECT
+UNKNOWN
+
+Sinais antigos perdem peso.
+
+Mas não desaparecem automaticamente se o projeto continuar ativo.
+
+==================================================
+SALES ACTIVATION
+==================================================
+
+Toda oportunidade relevante deve responder:
+
+WHY THIS ACCOUNT?
+WHY NOW?
+WHAT CHANGED?
+WHAT PRODUCT?
+WHO TO CONTACT?
+WHAT TO SAY?
+NEXT BEST ACTION
+
+O objetivo é reduzir pesquisa manual.
+
+==================================================
+CRM
+==================================================
+
+Estados comerciais recomendados:
+
+NEW
+QUALIFIED
+CONTACTED
+RESPONDED
+MEETING
+QUOTE
+NEGOTIATION
+WON
+LOST
+MONITORING
+DISQUALIFIED
+
+Preservar compatibilidade com estados atuais quando necessário.
+
+Registrar atividades:
+
+Llamada
+Correo enviado
+WhatsApp
+Reunión
+Visita
+Propuesta enviada
+Respuesta recibida
+Seguimiento
+Nota
+Actualización de datos
+
+==================================================
+EXCLUSÃO E ARQUIVAMENTO
+==================================================
+
+Evitar exclusão acidental.
+
+Usuário comercial:
+
+ARCHIVAR.
+
+Administrador:
+
+ARCHIVAR
+ELIMINAR DEFINITIVAMENTE
+
+Eliminação exige confirmação explícita.
+
+Preservar histórico sempre que possível.
+
+==================================================
+USUÁRIOS E ADMINISTRAÇÃO
+==================================================
+
+Horizon 1:
+
+criar estrutura simples e segura para:
+
+ADMINISTRADOR
+GERENTE
+COMERCIAL
+SOLO CONSULTA
+
+Administrador pode:
+
+- criar usuários;
+- ativar/desativar;
+- gerenciar funções;
+- visualizar operações;
+- excluir definitivamente quando permitido.
+
+Cada atividade deve registrar:
+
+created_by
+responsible_user
+timestamps relevantes
+
+Não criar RBAC excessivamente complexo agora.
+
+Preparar para evolução futura.
+
+==================================================
+CONVERSION INTELLIGENCE
+==================================================
+
+Medir progressivamente:
+
+SIGNAL → CONTACT
+CONTACT → RESPONSE
+RESPONSE → MEETING
+MEETING → QUOTE
+QUOTE → WON
+WON → REVENUE
+
+Analisar por:
+
+empresa
+setor
+cidade
+produto
+sinal
+fonte
+vendedor
+projeto
+oportunidade
+
+==================================================
+FEEDBACK LOOP
+==================================================
+
+Permitir feedback operacional:
+
+RELEVANT
+NOT_RELEVANT
+CONTACTED
+RESPONDED
+MEETING
+QUOTE
+WON
+LOST
+WRONG_PERSON
+NO_NEED
+TOO_EARLY
+TOO_LATE
+
+Esses dados devem melhorar futuras regras.
+
+NÃO implementar machine learning complexo antes de existir volume e qualidade de dados suficientes.
+
+Primeiro criar dados de qualidade.
+
+==================================================
+DAILY REVENUE BRIEF
+==================================================
+
+Objetivo futuro importante.
+
+Tela diária deve ajudar o vendedor a agir.
+
+Mostrar:
+
+HOT OPPORTUNITIES
+NEW BUYING INTENT
+NEW INDUSTRIAL PROJECTS
+NEW INVESTMENTS
+NEW COMPANIES
+NEW ASSETS
+SCORE CHANGES
+FOLLOW-UPS
+TOP ACTIONS
+
+Para cada item responder:
+
+WHO
+WHY
+WHY NOW
+WHAT TO DO
+
+Não criar dashboard apenas por estética.
+
+==================================================
+DASHBOARD
+==================================================
+
+Priorizar métricas comerciais úteis:
+
+PIPELINE VALUE
+EXPECTED REVENUE
+NEW OPPORTUNITIES
+HOT OPPORTUNITIES
+MEETINGS
+QUOTES
+WINS
+REVENUE
+CONVERSION RATE
+TOP SOURCES
+TOP SIGNALS
+TOP PRODUCTS
+TOP MARKETS
+
+No estágio inicial:
+
+priorizar tarefas e ações sobre gráficos.
+
+==================================================
+INTERFACE
+==================================================
+
+Experiência SaaS B2B internacional.
+
+Características:
+
+- moderna;
+- premium;
+- tecnológica;
+- limpa;
+- rápida;
+- profissional;
+- alta densidade de informação;
+- excelente hierarquia;
+- responsiva.
+
+Evitar:
+
+- excesso de gradientes;
+- excesso de cards;
+- dashboards infantis;
+- animações sem função;
+- elementos decorativos que atrapalhem trabalho;
+- textos minúsculos;
+- baixo contraste;
+- duplicação de telas.
+
+Transmitir:
+
+INTELLIGENCE
+PRECISION
+CONTROL
+REVENUE
+
+==================================================
+LOGIN / EXPERIÊNCIA DE ENTRADA
+==================================================
+
+Login pode ser visualmente premium.
+
+Puertas Brasil PY
+
+Radar Comercial
+Inteligencia industrial para prospección
+
+Ao entrar:
+
+Buenos días / Buenas tardes, [NOMBRE]
+
+Priorizar imediatamente:
+
+- empresas para contactar;
+- follow-ups;
+- oportunidades;
+- qualificador.
+
+Não transformar a home em um dashboard ornamental.
+
+==================================================
+MULTI-TENANT
+==================================================
+
+HORIZONTE 3.
+
+NÃO hardcode decisões arquiteturais que impossibilitem futuro multi-tenant.
+
+Mas NÃO construir infraestrutura multi-tenant completa agora sem necessidade.
+
+Preparar conceito futuro para:
+
+Tenant
+Workspace
+Brand
+Logo
+Products
+Markets
+Countries
+ICP
+Signals
+Scoring
+Pipeline
+Templates
+Users
+Roles
+Permissions
+
+Classificar inicialmente como DEFER, salvo quando necessário para decisões estruturais.
+
+==================================================
+INTERNATIONALIZATION
+==================================================
+
+Interface atual:
+
+ESPANHOL.
+
+Arquitetura futura:
+
+Português
+Espanhol
+Inglês
+
+Evitar espalhar textos hardcoded quando uma pequena camada de tradução for justificável.
+
+Não fazer refatoração gigantesca de i18n antes da hora.
+
+==================================================
+IA — DECISÃO ATUAL
+==================================================
+
+IA NÃO é requisito do Horizon 1.
+
+Não adicionar dependência de:
+
+OpenAI API
+LLM pago
+embeddings pagos
+vector database
+
+apenas para dizer que o produto possui IA.
+
+A inteligência inicial deve utilizar:
+
+regras
+heurísticas
+scoring
+templates
+matching
+entity resolution
+dados
+evidências
+histórico
+
+No futuro, IA pode ser adicionada como camada opcional para:
+
+resumo
+extração
+classificação
+assistência comercial
+
+Somente quando houver benefício claro.
+
+==================================================
+SEGURANÇA
+==================================================
+
+Revisar:
+
+authentication
+authorization
+RBAC proporcional
+input validation
+rate limiting
+secure secrets
+audit logs
+database constraints
+safe error handling
+
+Não expor credenciais no frontend.
+
+Não colocar senhas em código/GitHub.
+
+Não coletar indiscriminadamente dados pessoais.
+
+Usar fontes legítimas.
+
+Não contornar:
+
+login
+paywall
+CAPTCHA
+mecanismos de proteção
+
+Integrações com email corporativo não devem exigir senha principal quando puderem ser evitadas.
+
+No fluxo atual:
+
+preferir preparação manual de outreach, mantendo o usuário no controle do envio.
+
+==================================================
+OBSERVABILITY
+==================================================
+
+Implementar proporcionalmente à maturidade.
+
+Agora:
+
+structured logging básico
+erros claros
+diagnóstico de site
+falhas de job
+timestamps
+health checks essenciais
+
+Futuro:
+
+error tracking
+job monitoring
+source health
+ingestion metrics
+API latency
+database performance
+alerts
+
+Não instalar uma stack complexa de observabilidade sem necessidade atual.
+
+==================================================
+TESTES
+==================================================
+
+Prioridade alta para:
+
+entity resolution
+deduplication
+signal extraction
+scoring
+freshness
+permissions
+opportunity creation
+source ingestion
+CRM
+pipeline
+
+Se multi-tenant ainda não estiver implementado:
+
+não criar testes artificiais de tenant isolation.
+
+Criar quando existir.
+
+==================================================
+PERFORMANCE
+==================================================
+
+Primeiro garantir excelente funcionamento para o volume real.
+
+Identificar:
+
+N+1 queries
+queries lentas
+índices ausentes
+duplicação de processamento
+jobs síncronos
+operações caras no frontend
+análises repetidas
+falta de cache
+
+Arquitetura deve permitir crescimento.
+
+Mas NÃO exigir agora otimização prematura para 1.000.000+ registros.
+
+Objetivos progressivos:
+
+FASE A:
+centenas / poucos milhares
+
+FASE B:
+10.000+
+
+FASE C:
+100.000+
+
+FASE D:
+1.000.000+
+
+Cada salto deve ser sustentado por métricas reais e profiling.
+
+==================================================
+MIGRATIONS
+==================================================
+
+Mapear todas antes de criar novas.
+
+Identificar:
+
+duplicadas
+obsoletas
+contraditórias
+dependências
+tabelas abandonadas
+
+NÃO apagar histórico indiscriminadamente.
+
+Se houver dados reais:
+
+preservar.
+
+Se banco ainda for desenvolvimento e houver segurança:
+
+pode propor estratégia de squashing.
+
+Nunca executar squashing sem aprovação.
+
+==================================================
+NÃO CRIAR UM FRANKENSTEIN
+==================================================
+
+Antes de criar:
+
+tabela
+service
+endpoint
+component
+model
+migration
+arquivo JS
+CSS
+template
+
+pergunte:
+
+"Já existe algo que resolve isso?"
+
+Se existe:
+
+REUTILIZE.
+
+Se existe parcialmente:
+
+REFATORE.
+
+Se está duplicado:
+
+CONSOLIDE.
+
+Se é antigo e não usado:
+
+REMOVA com segurança.
+
+Só crie novo quando necessário.
+
+==================================================
+ROADMAP
+==================================================
+
+Depois da auditoria, classifique tudo em:
+
+KEEP
+REFACTOR
+MERGE
+REMOVE
+BUILD_NOW
+BUILD_LATER
+DEFER
+
+Prioridades:
+
+P0 = crítico para operação atual
+P1 = necessário para consolidar o produto
+P2 = inteligência de alto impacto
+P3 = expansão futura/SaaS
+
+==================================================
+PRIORIDADES SUGERIDAS
+==================================================
+
+P0:
+
+- estabilidade;
+- eliminar duplicações;
+- fluxo Qualificar → Classificar → Account 360 → Mensajes;
+- identificação correta de empresa;
+- contatos;
+- email/WhatsApp;
+- CRM;
+- atividades;
+- follow-up;
+- arquivamento;
+- usuários básicos;
+- segurança essencial;
+- dados confiáveis;
+- fontes/evidências.
+
+P1:
+
+- ICP explicado;
+- signals consolidados;
+- intent;
+- opportunity score;
+- why now;
+- product match;
+- next best action;
+- search/enrichment;
+- Daily Action Queue;
+- qualidade/completude.
+
+P2:
+
+- Signal Engine amplo;
+- Source Intelligence;
+- Asset Intelligence;
+- Conversion Intelligence;
+- Revenue Potential;
+- Daily Revenue Brief;
+- automações;
+- analytics avançado.
+
+P3:
+
+- multi-tenant completo;
+- multiworkspace;
+- white-label;
+- internacionalização completa;
+- APIs externas extensas;
+- IA opcional;
+- escala massiva.
+
+==================================================
+PRIMEIRO RESULTADO OBRIGATÓRIO
+==================================================
+
+ANTES DE ALTERAR O CÓDIGO, entregar:
+
+1. Architecture Map
+2. Current Data Model
+3. Current Feature Map
+4. Data Flow
+5. Prospecting Flow
+6. CRM Flow
+7. Scoring Flow
+8. Intelligence Flow
+9. Technical Debt
+10. Duplicate Components
+11. Duplicate Files/Directories
+12. Migration Analysis
+13. Security Analysis
+14. Performance Analysis
+15. Scalability Analysis
+16. UX Analysis
+17. Target Architecture
+18. Target Data Model
+19. Recommended Refactors
+20. Recommended Merges
+21. Recommended Deletions
+22. Recommended New Components
+23. Items to Defer
+24. Roadmap P0/P1/P2/P3
+25. Risks
+26. Implementation Plan
+
+NÃO IMPLEMENTE AINDA.
+
+ESPERE APROVAÇÃO.
+
+==================================================
+CRITÉRIO DE SUCESSO
+==================================================
+
+O sistema final deve conseguir representar situações como:
+
+"Uma empresa anunciou investimento para construir uma nova planta em Minga Guazú."
+
+Representar de forma auditável:
+
+EMPRESA
+↓
+PROJETO
+↓
+FONTE
+↓
+SINAL
+↓
+INTENT
+↓
+ICP
+↓
+PRODUCT MATCH
+↓
+OPPORTUNITY
+↓
+SCORE
+↓
+WHY NOW
+↓
+CONTACT
+↓
+OUTREACH
+↓
+CRM
+↓
+MEETING
+↓
+QUOTE
+↓
+SALE
+↓
+REVENUE
+
+Mas esse é o destino.
+
+Não é uma ordem para criar todas essas camadas imediatamente.
+
+==================================================
+PERGUNTAS QUE O PRODUTO DEVE RESPONDER
+==================================================
+
+Quem pode comprar?
+Por que essa empresa é relevante?
+O que aconteceu?
+Por que agora?
+Qual é a evidência?
+O que sabemos como fato?
+O que é inferência?
+Qual produto pode atender?
+Quem devemos procurar?
+Qual mensagem devemos enviar?
+Qual a próxima ação?
+Qual é o potencial comercial estimado?
+Qual foi o resultado?
+Virou reunião?
+Virou proposta?
+Virou venda?
+Quanto de receita gerou?
+
+==================================================
+VISÃO FINAL
+==================================================
+
+Não construa um sistema que apenas encontre empresas.
+
+Construa progressivamente uma máquina de inteligência comercial.
+
+DISCOVER
+→ UNDERSTAND
+→ PRIORITIZE
+→ ACT
+→ CONVERT
+→ MEASURE
+→ LEARN
+→ REVENUE
+
+Mas respeite a ordem:
+
+1. ENTENDER O SISTEMA ATUAL.
+2. CONSOLIDAR O QUE JÁ EXISTE.
+3. FAZER O FLUXO COMERCIAL FUNCIONAR MUITO BEM.
+4. COLETAR DADOS REAIS DE USO.
+5. ADICIONAR INTELIGÊNCIA.
+6. PROVAR RESULTADO.
+7. ESCALAR.
+8. TRANSFORMAR EM PLATAFORMA.
+
+Pense sempre em:
+
+data quality
+explainability
+security
+conversion
+revenue
+replicability
+maintainability
+simplicity
+
+Não superdimensione.
+Não improvise.
+Não duplique.
+Não invente.
+Não implemente por vaidade técnica.
+
+Construa o mínimo necessário para gerar o máximo de valor comercial,
+sem bloquear a evolução futura.
