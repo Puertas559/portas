@@ -519,7 +519,7 @@ function renderWebsiteAnalysis(analysis) {
   const decision = analysis.decision || "PENDING";
   const decisionLabel = { QUALIFIED: "CALIFICADA", DISQUALIFIED: "DESCALIFICADA", PENDING: "PENDIENTE" }[decision];
   const scanMode = analysis.scanMode || (analysis.status === "QUICK" ? "quick" : "deep");
-  const scanLabel = scanMode === "quick" ? "QUICK SCAN" : (analysis.cached ? "CACHE RECIENTE" : "ANÁLISIS PROFUNDO");
+  const scanLabel = scanMode === "quick" ? "ANÁLISIS RÁPIDO" : (analysis.cached ? "RESULTADO EN CACHÉ" : "ANÁLISIS PROFUNDO");
   const decisionActions = decision === "PENDING"
     ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
     : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
@@ -540,9 +540,56 @@ function renderWebsiteAnalysis(analysis) {
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
       <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+      ${analysis.enrichment && Object.keys(analysis.enrichment).length ? `<div class="analysis-autofill"><div><b><i class="bi bi-magic"></i> Datos preparados para la ficha 360°</b><span>El radar completará automáticamente los campos seguros al ingresar la empresa al CRM.</span></div><div class="autofill-grid"><span><small>Razón social</small><strong>${escapeHtml(analysis.enrichment.legalName || 'Por validar')}</strong></span><span><small>RUC</small><strong>${escapeHtml(analysis.enrichment.ruc || 'Por validar')}</strong></span><span><small>Fundación</small><strong>${escapeHtml(analysis.enrichment.foundedYear || 'Por validar')}</strong></span><span><small>Plantas / unidades</small><strong>${Number((analysis.enrichment.operationPlants||[]).length)}</strong></span><span><small>Redes detectadas</small><strong>${Number(Object.keys(analysis.enrichment.socialLinks||{}).length)}</strong></span><span><small>Revisión manual</small><strong>${Number((analysis.enrichment.reviewRequired||[]).length)} campo(s)</strong></span></div></div>` : ''}
+      ${Array.isArray(analysis.alternativeSites) && analysis.alternativeSites.length ? `<div class="site-alternative-notice"><div><b>Presencia digital relacionada detectada</b><span>${analysis.alternativeSites.length} sitio(s) alternativo(s) o redirección(es) vinculados al dominio analizado.</span></div><button class="show-site-alternatives">Ver sitios relacionados</button></div>` : ''}
       <div class="analysis-decision">${deepAction}${decisionActions}</div>
       ${drafts}
     </article>`;
+}
+
+function siteErrorText(details={}) {
+  return {
+    INVALID_URL:"Dirección web no válida", DNS_ERROR:"Dominio no localizado", TIMEOUT:"Tiempo de espera agotado",
+    ACCESS_BLOCKED:"Acceso bloqueado por el sitio", SSL_ERROR:"Problema de seguridad HTTPS", NOT_FOUND:"Sitio no encontrado",
+    REMOTE_SERVER_ERROR:"Servidor temporalmente indisponible", CONNECTION_ERROR:"No fue posible conectar", HTTP_ERROR:"Respuesta HTTP con error",
+    SITE_VALIDATION_ERROR:"No fue posible validar el sitio", UNKNOWN_ERROR:"Error técnico del analizador"
+  }[details.category] || details.title || "No fue posible analizar el sitio";
+}
+
+function renderAlternativeSites(alternatives=[]) {
+  if (!alternatives.length) return '<div class="diagnostic-empty">No se encontró otra dirección accesible relacionada automáticamente. Puede verificar el nombre de la empresa en una búsqueda externa y pegar el nuevo sitio en el calificador.</div>';
+  return alternatives.map((alt,index)=>`<article class="alternative-site-row" data-alt-url="${escapeHtml(alt.url)}">
+    <div class="alternative-confidence"><b>${Number(alt.confidence)||0}%</b><small>confianza</small></div>
+    <div><strong>${escapeHtml(alt.title || alt.host || alt.url)}</strong><a href="${escapeHtml(alt.url)}" target="_blank" rel="noopener">${escapeHtml(alt.url)}</a><p>${escapeHtml(alt.reason || 'Sitio relacionado detectado')}</p></div>
+    <div class="alternative-actions"><button class="analyze-alternative primary">Analizar</button><button class="use-alternative">Usar como sitio principal</button><button class="open-alternative">Abrir</button></div>
+  </article>`).join('');
+}
+
+function openSiteDiagnostic(data={}, requestedUrl="") {
+  const details=data.errorDetails || {};
+  const dialog=$("siteDiagnosticDialog");
+  if (!dialog) return;
+  $("diagnosticTitle").textContent=siteErrorText(details);
+  $("diagnosticMessage").textContent=details.message || data.error || "No fue posible completar el análisis.";
+  $("diagnosticAction").textContent=details.action || "Revise la dirección y vuelva a intentar.";
+  const technical=details.technical || {};
+  $("diagnosticCode").textContent=details.code || details.category || "ANALYZER_ERROR";
+  $("diagnosticRequestedUrl").textContent=technical.requestedUrl || requestedUrl || "—";
+  $("diagnosticStage").textContent=technical.stage || "Análisis del sitio";
+  $("diagnosticHttp").textContent=technical.httpStatus ? `HTTP ${technical.httpStatus}` : "No disponible";
+  $("diagnosticTime").textContent=new Date().toLocaleString("es-PY");
+  $("diagnosticAlternatives").innerHTML=renderAlternativeSites(data.alternatives || details.alternatives || []);
+  dialog.showModal();
+}
+
+function openAlternativeSites(alternatives=[], requestedUrl="") {
+  openSiteDiagnostic({errorDetails:{title:"Sitios relacionados detectados",message:"El radar encontró otras direcciones que pueden pertenecer a la misma presencia digital de la empresa.",action:"Revise la confianza de cada opción. Puede analizarla directamente o abrirla en una nueva pestaña.",code:"RELATED_SITES",technical:{requestedUrl,stage:"identificación de presencia digital"}}, alternatives}, requestedUrl);
+}
+
+function maybeShowAlternatives(analysis, requestedUrl="") {
+  if (Array.isArray(analysis?.alternativeSites) && analysis.alternativeSites.length) {
+    openAlternativeSites(analysis.alternativeSites, requestedUrl || analysis.url);
+  }
 }
 
 function setScanProgress(stage, progress, message, active = true) {
@@ -560,9 +607,10 @@ async function deepenWebsiteAnalysis(analysisId, card = null, silent = false) {
   try {
     const response = await fetch(`/api/website-analysis/${analysisId}/deep`, { method: "POST" });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "No se pudo completar el análisis profundo");
+    if (!response.ok) { openSiteDiagnostic(data, card?.querySelector('a')?.href || ''); throw new Error(data.error || "No se pudo completar el análisis profundo"); }
     const current = card || document.querySelector(`.analysis-card[data-analysis-id="${analysisId}"]`);
     if (current) current.outerHTML = renderWebsiteAnalysis(data);
+    if (Array.isArray(data.alternativeSites) && data.alternativeSites.length) maybeShowAlternatives(data, data.url);
     if (!silent) setScanProgress("Completado", 100, `Análisis profundo completado: ${data.pagesAnalyzed || 0} páginas relevantes · potencial ${data.level}.`, false);
     return data;
   } catch (error) {
@@ -591,9 +639,10 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
       body: JSON.stringify({ url, mode: "quick" }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "No se pudo analizar el sitio");
+    if (!response.ok) { openSiteDiagnostic(data, url); throw new Error(data.error || "No se pudo analizar el sitio"); }
     skeleton.remove();
     $("siteAnalysisResults").insertAdjacentHTML("afterbegin", renderWebsiteAnalysis(data));
+    if (Array.isArray(data.alternativeSites) && data.alternativeSites.length) maybeShowAlternatives(data, url);
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     if (data.cached || data.scanMode === "deep") {
       setScanProgress("Cache reciente", 100, `Resultado reutilizado en ${seconds}s. No fue necesario descargar el sitio nuevamente.`, false);
@@ -615,6 +664,13 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
 $("siteAnalysisResults").addEventListener("click", async (event) => {
   const card = event.target.closest(".analysis-card");
   if (!card) return;
+  if (event.target.closest(".show-site-alternatives")) {
+    const id=card.dataset.analysisId;
+    const response=await fetch(`/api/website-analysis`); const rows=await response.json();
+    const item=Array.isArray(rows)?rows.find(x=>String(x.id)===String(id)):null;
+    openAlternativeSites(item?.alternativeSites||[], item?.url||"");
+    return;
+  }
   const deepButton = event.target.closest(".deep-analysis");
   if (deepButton) {
     deepButton.disabled = true;
@@ -757,3 +813,17 @@ render();
 if (selected) selectLead(selected);
 loadToday();
 loadCommandCenter();
+
+
+$("closeSiteDiagnostic")?.addEventListener("click",()=>$("siteDiagnosticDialog").close());
+$("siteDiagnosticDialog")?.addEventListener("click",event=>{
+  const analyze=event.target.closest(".analyze-alternative");
+  const open=event.target.closest(".open-alternative");
+  const use=event.target.closest(".use-alternative");
+  const row=event.target.closest(".alternative-site-row");
+  if (!row) return;
+  const url=row.dataset.altUrl;
+  if (open) window.open(url,"_blank","noopener");
+  if (use) { $("companyWebsite").value=url; $("siteDiagnosticDialog").close(); setScanProgress("Sitio principal actualizado",0,"La dirección alternativa quedó seleccionada. Presione Analizar empresa para continuar.",false); }
+  if (analyze) { $("companyWebsite").value=url; $("siteDiagnosticDialog").close(); $("siteAnalysisForm").requestSubmit(); }
+});

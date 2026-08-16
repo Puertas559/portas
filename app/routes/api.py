@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, jsonify, request, send_file, send_from_directory
 from sqlalchemy import text
@@ -89,6 +90,138 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
     return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name}
 
+
+
+def _website_domain(value):
+    raw=(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed=urlparse(raw if "://" in raw else "https://"+raw)
+        return (parsed.hostname or "").lower().removeprefix("www.") or None
+    except Exception:
+        return None
+
+
+def _analysis_enrichment(analysis):
+    data=dict((analysis.diagnostics or {}).get("enrichment") or {})
+    data.setdefault("legalName", None)
+    data.setdefault("ruc", None)
+    data.setdefault("foundedYear", None)
+    data.setdefault("owners", [])
+    data.setdefault("operationPlants", [])
+    data.setdefault("keyActivities", [])
+    data.setdefault("city", None)
+    data.setdefault("department", None)
+    data.setdefault("address", analysis.address)
+    data.setdefault("officialWebsite", analysis.url)
+    data.setdefault("domain", _website_domain(analysis.url))
+    data.setdefault("socialLinks", analysis.social_links or {})
+    data.setdefault("products", analysis.products or [])
+    data.setdefault("fieldConfidence", {})
+    data.setdefault("reviewRequired", [])
+    return data
+
+
+def _merge_company_enrichment(company, analysis, *, overwrite=False, source_label="Análisis automático del sitio"):
+    enrichment=_analysis_enrichment(analysis)
+    confidence=enrichment.get("fieldConfidence") or {}
+    updated=[]; preserved=[]; review=set(enrichment.get("reviewRequired") or [])
+
+    def assign(attr, value, key, min_conf=0):
+        if value in (None, "", [], {}):
+            return
+        current=getattr(company, attr)
+        field_conf=int(confidence.get(key) or 0)
+        if field_conf and field_conf < min_conf:
+            review.add(key); return
+        if overwrite or current in (None, "", [], {}):
+            setattr(company, attr, value); updated.append(key)
+        else:
+            preserved.append(key)
+
+    assign("legal_name", enrichment.get("legalName"), "legalName", 70)
+    assign("ruc", enrichment.get("ruc"), "ruc", 78)
+    assign("founded_year", enrichment.get("foundedYear"), "foundedYear", 70)
+    owners=[]
+    for item in enrichment.get("owners") or []:
+        if isinstance(item, dict):
+            if int(item.get("confidence") or 0) >= 80:
+                owners.append(item.get("name"))
+            else:
+                review.add("owners")
+        elif item:
+            owners.append(str(item))
+    assign("owners", [x for x in owners if x], "owners", 0)
+    assign("operation_plants", enrichment.get("operationPlants") or [], "operationPlants", 0)
+    assign("key_activities", enrichment.get("keyActivities") or [], "keyActivities", 0)
+    assign("city", enrichment.get("city"), "city", 0)
+    assign("department", enrichment.get("department"), "department", 0)
+    assign("address", enrichment.get("address") or analysis.address, "address", 70)
+    assign("company_size", analysis.company_size if analysis.company_size != "No determinado" else None, "companySize", 0)
+    assign("sector", analysis.sector if analysis.sector != "Por validar" else None, "sector", 0)
+    assign("description", analysis.summary, "description", 0)
+    assign("website", enrichment.get("officialWebsite") or analysis.url, "website", 0)
+    assign("domain", enrichment.get("domain") or _website_domain(analysis.url), "domain", 0)
+    if analysis.emails:
+        assign("email_business", analysis.emails[0], "email", 0)
+    if analysis.phones:
+        assign("phone_business", analysis.phones[0], "phone", 0)
+    if analysis.whatsapp:
+        assign("whatsapp", analysis.whatsapp, "whatsapp", 0)
+    social=dict(enrichment.get("socialLinks") or analysis.social_links or {})
+    if social.get("linkedin"):
+        assign("linkedin_url", social.get("linkedin"), "linkedin", 0)
+
+    presence=dict(company.digital_presence or {})
+    presence["officialWebsite"] = company.website or analysis.url
+    presence["alternativeSites"] = analysis.alternative_sites or presence.get("alternativeSites") or []
+    presence["socialLinks"] = {**(presence.get("socialLinks") or {}), **social}
+    presence["lastVerifiedAt"] = datetime.now(timezone.utc).isoformat()
+    presence["autoEnrichment"] = {
+        "sourceUrl": analysis.url,
+        "source": source_label,
+        "lastRunAt": datetime.now(timezone.utc).isoformat(),
+        "updatedFields": updated,
+        "preservedManualFields": preserved,
+        "reviewRequired": sorted(review),
+        "fieldConfidence": confidence,
+        "pagesAnalyzed": analysis.pages_analyzed,
+    }
+    company.digital_presence=presence
+    sources=list(company.data_sources or [])
+    source_record={"type":"COMPANY_WEBSITE","url":analysis.url,"label":source_label,"verifiedAt":datetime.now(timezone.utc).isoformat()}
+    if not any(isinstance(x,dict) and x.get("url")==analysis.url for x in sources):
+        sources.append(source_record)
+    company.data_sources=sources[-30:]
+    company.last_enriched_at=datetime.now(timezone.utc)
+    company.research_status="REVIEW" if review else "ENRICHED"
+    company.identity_confidence=max(company.identity_confidence or 0, min(95, 50 + analysis.pages_analyzed * 3))
+    company.data_completeness_score=company_completeness(company)[0]
+    return {"updated":updated,"preserved":preserved,"reviewRequired":sorted(review),"completeness":company.data_completeness_score}
+
+
+def _match_company_for_analysis(tenant_id, analysis):
+    domain=_website_domain(analysis.url)
+    if domain:
+        row=Company.query.filter_by(tenant_id=tenant_id, status="ACTIVE", domain=domain).first()
+        if row:
+            return row
+        row=Company.query.filter(Company.tenant_id==tenant_id, Company.status=="ACTIVE", Company.website.ilike(f"%{domain}%")).first()
+        if row:
+            return row
+    return None
+
+
+def _auto_sync_existing_company(analysis):
+    tenant=current_tenant()
+    company=_match_company_for_analysis(tenant.id, analysis)
+    if not company:
+        return None
+    result=_merge_company_enrichment(company, analysis)
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Enriquecimiento automático", summary=f"El sitio fue revisado automáticamente. {len(result['updated'])} campos fueron completados y {len(result['reviewRequired'])} requieren revisión.", extra_data=result))
+    db.session.commit()
+    return {"companyId":company.id, **result}
 
 def _create_cadence(opportunity):
     if opportunity.tasks:
@@ -300,7 +433,7 @@ def company_dossier(company_id):
             "email": company.email_business or company.email, "linkedin": company.linkedin_url, "companySize": company.company_size,
             "employeeEstimate": company.employee_estimate, "foundedYear": company.founded_year, "owners": company.owners or [],
             "operationPlants": company.operation_plants or [], "keyActivities": company.key_activities or [],
-            "facilityProfile": company.facility_profile or {}, "commercialNotes": company.commercial_notes,
+            "facilityProfile": company.facility_profile or {}, "digitalPresence": company.digital_presence or {}, "commercialNotes": company.commercial_notes,
             "dataSources": company.data_sources or [], "fit": company.account_fit_score, "accessibility": company.accessibility_score,
             "momentum": company.momentum_score, "completeness": completeness, "missing": missing,
             "lastEnrichedAt": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
@@ -336,7 +469,7 @@ def company_profile_update(company_id):
         "website":"website", "city":"city", "department":"department", "address":"address", "headquarters":"headquarters",
         "phone":"phone_business", "whatsapp":"whatsapp", "email":"email_business", "linkedin":"linkedin_url",
         "companySize":"company_size", "foundedYear":"founded_year", "commercialNotes":"commercial_notes",
-        "owners":"owners", "operationPlants":"operation_plants", "keyActivities":"key_activities", "dataSources":"data_sources",
+        "owners":"owners", "operationPlants":"operation_plants", "keyActivities":"key_activities", "dataSources":"data_sources", "digitalPresence":"digital_presence",
     }
     changed=[]
     for key, attr in fields.items():
@@ -488,28 +621,37 @@ def website_analysis_create():
     mode = str(data.get("mode") or "quick").lower()
     force = bool(data.get("force"))
     try:
-        from ..services.site_analyzer import analyze_website, normalize_website_url
+        from ..services.site_analyzer import SiteAnalysisError, analyze_website, classify_site_error, normalize_website_url
         normalized = normalize_website_url(data["url"])
         tenant = current_tenant()
         fresh_since = datetime.now(timezone.utc) - timedelta(hours=12)
         cached = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id, url=normalized).filter(
             WebsiteAnalysis.created_at >= fresh_since, WebsiteAnalysis.status == "COMPLETED"
         ).order_by(WebsiteAnalysis.created_at.desc()).first()
-        if cached and not force:
+        if cached and not force and (cached.diagnostics or {}).get("enrichment"):
             payload = cached.to_dict(); payload.update(cached=True, scanMode="deep")
+            synced = _auto_sync_existing_company(cached)
+            if synced: payload["crmSync"] = synced
             return jsonify(payload), 200
         if mode == "deep":
             analysis = analyze_website(normalized, max_pages=18, use_sitemap=True, request_timeout=12, status="COMPLETED")
             payload = analysis.to_dict(); payload.update(cached=False, scanMode="deep")
+            synced = _auto_sync_existing_company(analysis)
+            if synced: payload["crmSync"] = synced
             return jsonify(payload), 201
         analysis = analyze_website(normalized, max_pages=3, use_sitemap=False, request_timeout=8, status="QUICK")
         payload = analysis.to_dict(); payload.update(cached=False, scanMode="quick")
+        synced = _auto_sync_existing_company(analysis)
+        if synced: payload["crmSync"] = synced
         return jsonify(payload), 201
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
-    except Exception:
+    except SiteAnalysisError as exc:
         db.session.rollback()
-        return jsonify(error="No se pudo analizar el sitio. Verifique que sea público y esté disponible."), 502
+        return jsonify(error=exc.message, errorDetails=exc.to_dict(), alternatives=exc.alternatives), exc.status
+    except Exception as exc:
+        db.session.rollback()
+        from ..services.site_analyzer import classify_site_error
+        diagnosed = classify_site_error(data.get("url"), exc, "análisis del sitio")
+        return jsonify(error=diagnosed.message, errorDetails=diagnosed.to_dict(), alternatives=diagnosed.alternatives), diagnosed.status
 
 
 @api_bp.post("/website-analysis/<int:analysis_id>/deep")
@@ -517,15 +659,31 @@ def website_analysis_deep(analysis_id):
     tenant = current_tenant()
     analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
     try:
-        from ..services.site_analyzer import analyze_website
+        from ..services.site_analyzer import SiteAnalysisError, analyze_website, classify_site_error
         analysis = analyze_website(analysis.url, max_pages=18, use_sitemap=True, request_timeout=12, analysis=analysis, status="COMPLETED")
         payload = analysis.to_dict(); payload.update(cached=False, scanMode="deep")
+        synced = _auto_sync_existing_company(analysis)
+        if synced: payload["crmSync"] = synced
         return jsonify(payload), 200
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
-    except Exception:
+    except SiteAnalysisError as exc:
         db.session.rollback()
-        return jsonify(error="El escaneo rápido terminó, pero no se pudo completar el análisis profundo."), 502
+        return jsonify(error=exc.message, errorDetails=exc.to_dict(), alternatives=exc.alternatives), exc.status
+    except Exception as exc:
+        db.session.rollback()
+        from ..services.site_analyzer import classify_site_error
+        diagnosed = classify_site_error(analysis.url, exc, "análisis profundo")
+        return jsonify(error=diagnosed.message, errorDetails=diagnosed.to_dict(), alternatives=diagnosed.alternatives), diagnosed.status
+
+
+@api_bp.post("/website-analysis/alternatives")
+def website_analysis_alternatives():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify(error="Ingrese un sitio para buscar alternativas"), 400
+    from ..services.site_analyzer import discover_alternative_sites
+    alternatives = discover_alternative_sites(url, timeout=4)
+    return jsonify(alternatives=alternatives, count=len(alternatives))
 
 
 @api_bp.post("/website-analysis/bulk")
@@ -626,6 +784,13 @@ def website_analysis_qualify(analysis_id):
     analysis.decision, analysis.opportunity_id = "QUALIFIED", opportunity.id
     analysis.whatsapp_message, analysis.email_subject, analysis.email_body = whatsapp, subject, email
     opportunity.project.company.last_enriched_at = datetime.now(timezone.utc)
+    presence = dict(opportunity.project.company.digital_presence or {})
+    presence["officialWebsite"] = analysis.url
+    presence["alternativeSites"] = analysis.alternative_sites or []
+    presence["socialLinks"] = analysis.social_links or {}
+    presence["lastVerifiedAt"] = datetime.now(timezone.utc).isoformat()
+    opportunity.project.company.digital_presence = presence
+    auto_fill = _merge_company_enrichment(opportunity.project.company, analysis, source_label="Calificación automática desde sitio")
     opportunity.project.company.data_completeness_score = company_completeness(opportunity.project.company)[0]
     lead_readiness(opportunity)
     db.session.add(TimelineEvent(
@@ -1057,6 +1222,49 @@ def watchlist_list():
         "nextCheckAt": row.next_check_at.isoformat() if row.next_check_at else None,
     } for row in rows])
 
+
+
+@api_bp.get("/companies/enrichment-queue")
+def company_enrichment_queue():
+    tenant=current_tenant()
+    try:
+        limit=max(1,min(200,int(request.args.get("limit",100))))
+    except ValueError:
+        limit=100
+    rows=Company.query.filter_by(tenant_id=tenant.id,status="ACTIVE").order_by(Company.last_enriched_at.asc().nullsfirst(),Company.account_fit_score.desc()).limit(limit).all()
+    return jsonify([{
+        "id":c.id,"name":c.name,"website":c.website,"domain":c.domain,"completeness":company_completeness(c)[0],
+        "lastEnrichedAt":c.last_enriched_at.isoformat() if c.last_enriched_at else None,
+        "researchStatus":c.research_status,
+        "canAutoEnrich":bool(c.website),
+    } for c in rows])
+
+
+@api_bp.post("/companies/<int:company_id>/auto-enrich")
+@require_permission("WRITE_CRM")
+def company_auto_enrich(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id,tenant_id=tenant.id,status="ACTIVE").first_or_404()
+    if not company.website:
+        company.research_status="NEEDS_WEBSITE"
+        db.session.commit()
+        return jsonify(error="La empresa no tiene un sitio web registrado. Primero confirme su sitio oficial.",code="MISSING_WEBSITE"),400
+    data=request.get_json(silent=True) or {}
+    deep=bool(data.get("deep",True))
+    overwrite=bool(data.get("overwrite",False))
+    try:
+        from ..services.site_analyzer import analyze_website
+        analysis=analyze_website(company.website,max_pages=18 if deep else 4,use_sitemap=deep,request_timeout=12 if deep else 8,status="COMPLETED" if deep else "QUICK")
+        result=_merge_company_enrichment(company,analysis,overwrite=overwrite,source_label="Actualización automática de empresa existente")
+        db.session.add(CompanyActivity(tenant_id=tenant.id,company_id=company.id,activity_type="DATA_UPDATE",channel="SITIO_WEB",subject="Actualización automática de ficha 360°",summary=f"Se completaron {len(result['updated'])} campos. {len(result['reviewRequired'])} dato(s) quedaron pendientes de revisión.",extra_data=result))
+        _audit("AUTO_ENRICH","COMPANY",company.id,result)
+        db.session.commit()
+        return jsonify(ok=True,companyId=company.id,name=company.name,analysis=analysis.to_dict(),result=result)
+    except Exception as exc:
+        db.session.rollback()
+        from ..services.site_analyzer import classify_site_error
+        diagnosed=classify_site_error(company.website,exc,"actualización automática de la ficha 360°")
+        return jsonify(error=diagnosed.message,errorDetails=diagnosed.to_dict(),alternatives=diagnosed.alternatives),diagnosed.status
 
 
 @api_bp.get("/workspace/overview")

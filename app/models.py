@@ -70,6 +70,7 @@ class Company(db.Model):
     company_size = db.Column(db.String(80))
     employee_estimate = db.Column(db.Integer)
     facility_profile = db.Column(db.JSON, nullable=False, default=dict)
+    digital_presence = db.Column(db.JSON, nullable=False, default=dict)
     account_fit_score = db.Column(db.Integer, nullable=False, default=0)
     accessibility_score = db.Column(db.Integer, nullable=False, default=0)
     momentum_score = db.Column(db.Integer, nullable=False, default=0)
@@ -663,6 +664,8 @@ class WebsiteAnalysis(db.Model):
     whatsapp_message = db.Column(db.Text)
     email_subject = db.Column(db.String(300))
     email_body = db.Column(db.Text)
+    alternative_sites = db.Column(db.JSON, default=list, nullable=False)
+    diagnostics = db.Column(db.JSON, default=dict, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
     opportunity = db.relationship("Opportunity")
 
@@ -677,5 +680,7 @@ class WebsiteAnalysis(db.Model):
             "error": self.error, "createdAt": self.created_at.isoformat() if self.created_at else None,
             "decision": self.decision, "opportunityId": self.opportunity_id,
             "whatsappMessage": self.whatsapp_message, "emailSubject": self.email_subject,
-            "emailBody": self.email_body,
+            "emailBody": self.email_body, "alternativeSites": self.alternative_sites or [],
+            "diagnostics": self.diagnostics or {},
+            "enrichment": (self.diagnostics or {}).get("enrichment") or {},
         }

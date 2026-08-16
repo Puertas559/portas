@@ -8,9 +8,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v7">
-  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v7">
-<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v7">
+  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v8">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v8">
+<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
 </head>
 <body>
 <div class="app">
@@ -84,7 +84,7 @@
     </section>
 
     <section class="crm-hub app-module" data-module="crm" id="crm">
-      <div class="crm-head"><div><p class="eyebrow">CENTRO DE OPERACIÓN COMERCIAL</p><h2><i class="bi bi-briefcase"></i> Caja CRM</h2><p>Todas las empresas clasificadas y oportunidades comerciales están reunidas aquí.</p></div><div class="crm-controls"><select id="crmStatusFilter"><option value="ALL">Todos los estados</option><option value="NOVO">Nuevo</option><option value="QUALIFICADO">Calificado</option><option value="CONTATO_REALIZADO">Contacto realizado</option><option value="RESPONDEU">Respondió</option><option value="VISITA">Visita</option><option value="ORCAMENTO">Presupuesto</option><option value="NEGOCIACAO">Negociación</option><option value="GANHO">Ganado</option><option value="MONITORAMENTO">Seguimiento</option></select><span id="crmCount">{{ leads|length }} empresas</span></div></div>
+      <div class="crm-head"><div><p class="eyebrow">CENTRO DE OPERACIÓN COMERCIAL</p><h2><i class="bi bi-briefcase"></i> Caja CRM</h2><p>Todas las empresas clasificadas y oportunidades comerciales están reunidas aquí.</p></div><div class="crm-controls"><button id="autoEnrichCrm" class="secondary-action" type="button"><i class="bi bi-stars"></i> Completar CRM automáticamente</button><span id="crmEnrichProgress" class="crm-enrich-progress"></span><select id="crmStatusFilter"><option value="ALL">Todos los estados</option><option value="NOVO">Nuevo</option><option value="QUALIFICADO">Calificado</option><option value="CONTATO_REALIZADO">Contacto realizado</option><option value="RESPONDEU">Respondió</option><option value="VISITA">Visita</option><option value="ORCAMENTO">Presupuesto</option><option value="NEGOCIACAO">Negociación</option><option value="GANHO">Ganado</option><option value="MONITORAMENTO">Seguimiento</option></select><span id="crmCount">{{ leads|length }} empresas</span></div></div>
       <div class="crm-grid" id="crmGrid"></div>
     </section>
 
@@ -177,13 +177,14 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
   <div class="dossier-shell">
     <header class="dossier-header"><div><p>FICHA EMPRESARIAL 360°</p><h2 id="dossierCompanyName">Empresa</h2><span id="dossierCompanyMeta">Cargando información...</span></div><div class="dossier-header-actions"><button id="dossierLogActivity" class="primary"><i class="bi bi-plus-circle"></i> Registrar interacción</button><button id="closeDossier" class="icon-close" aria-label="Cerrar">×</button></div></header>
     <div class="dossier-kpis" id="dossierKpis"></div>
-    <nav class="dossier-tabs" id="dossierTabs"><button class="active" data-dossier-tab="summary">Resumen</button><button data-dossier-tab="profile">Datos empresariales</button><button data-dossier-tab="contacts">Contactos</button><button data-dossier-tab="activity">Actividad</button><button data-dossier-tab="business">Negocios</button><button data-dossier-tab="messages">Mensajes</button></nav>
+    <nav class="dossier-tabs" id="dossierTabs"><button class="active" data-dossier-tab="summary">Resumen</button><button data-dossier-tab="profile">Datos empresariales</button><button data-dossier-tab="contacts">Contactos</button><button data-dossier-tab="activity">Actividad</button><button data-dossier-tab="business">Negocios</button><button data-dossier-tab="digital">Presencia digital</button><button data-dossier-tab="messages">Mensajes</button></nav>
     <main class="dossier-content">
       <section data-dossier-panel="summary" id="dossierSummary"></section>
       <section data-dossier-panel="profile" id="dossierProfile" hidden></section>
       <section data-dossier-panel="contacts" id="dossierContacts" hidden></section>
       <section data-dossier-panel="activity" id="dossierActivity" hidden></section>
       <section data-dossier-panel="business" id="dossierBusiness" hidden></section>
+      <section data-dossier-panel="digital" id="dossierDigital" hidden></section>
       <section data-dossier-panel="messages" id="dossierMessages" hidden></section>
     </main>
   </div>
@@ -191,10 +192,19 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <dialog id="activityDialog" class="activity-dialog"><form id="activityForm"><div class="modal-head"><div><p class="eyebrow">HISTORIAL COMERCIAL</p><h2>Registrar interacción</h2><p id="activityCompanyLabel"></p></div><button type="button" id="closeActivityDialog">×</button></div><input type="hidden" name="companyId" id="activityCompanyId"><div class="form-grid"><label>Tipo<select name="type" required><option value="CALL">Llamada</option><option value="EMAIL_SENT">Correo enviado</option><option value="WHATSAPP_SENT">WhatsApp enviado</option><option value="MEETING">Reunión</option><option value="VISIT">Visita</option><option value="PROPOSAL_SENT">Propuesta enviada</option><option value="REPLY">Respuesta recibida</option><option value="FOLLOW_UP">Seguimiento</option><option value="NOTE">Nota</option><option value="DATA_UPDATE">Actualización de datos</option></select></label><label>Contacto<select name="contactId" id="activityContactId"><option value="">Contacto general</option></select></label><label>Resultado<select name="outcome"><option value="">Sin resultado definido</option><option value="CONNECTED">Contacto realizado</option><option value="NO_RESPONSE">Sin respuesta</option><option value="REFERRED">Derivado al responsable</option><option value="INTERESTED">Interesado</option><option value="FUTURE">Proyecto futuro</option><option value="QUOTE_REQUESTED">Solicitó presupuesto</option><option value="NOT_INTERESTED">Sin interés</option></select></label><label>Próxima acción<input name="nextActionAt" type="datetime-local"></label><label class="wide">Asunto<input name="subject" placeholder="Ej.: Presentación institucional enviada"></label><label class="wide">Resumen<textarea name="summary" required placeholder="Qué ocurrió, con quién habló, qué información obtuvo y qué quedó acordado."></textarea></label><label class="wide">Próximo paso<textarea name="nextAction" placeholder="Ej.: Llamar a Ingeniería el jueves y confirmar cronograma."></textarea></label></div><button class="primary submit">Guardar en el historial</button><p id="activityFormMessage"></p></form></dialog>
 
+<dialog id="siteDiagnosticDialog" class="site-diagnostic-dialog">
+  <div class="diagnostic-shell">
+    <header class="diagnostic-header"><div><p>DIAGNÓSTICO DEL SITIO</p><h2 id="diagnosticTitle">No fue posible analizar el sitio</h2></div><button id="closeSiteDiagnostic" class="icon-close" aria-label="Cerrar">×</button></header>
+    <section class="diagnostic-summary"><div class="diagnostic-icon"><i class="bi bi-exclamation-triangle"></i></div><div><strong id="diagnosticMessage"></strong><p><b>Qué hacer ahora:</b> <span id="diagnosticAction"></span></p></div></section>
+    <section><div class="diagnostic-section-head"><div><p>SITIOS RELACIONADOS</p><h3>Posibles direcciones alternativas</h3></div><span>El radar solo muestra alternativas que logró verificar como accesibles.</span></div><div id="diagnosticAlternatives" class="diagnostic-alternatives"></div></section>
+    <details class="diagnostic-technical"><summary>Ver detalles técnicos</summary><div class="diagnostic-facts"><div><small>Código</small><b id="diagnosticCode">—</b></div><div><small>Etapa</small><b id="diagnosticStage">—</b></div><div><small>Respuesta</small><b id="diagnosticHttp">—</b></div><div><small>Intento</small><b id="diagnosticTime">—</b></div><div class="wide"><small>URL solicitada</small><b id="diagnosticRequestedUrl">—</b></div></div></details>
+  </div>
+</dialog>
+
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }};</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260816-v7"></script>
-<script src="{{ url_for('static', filename='workspace.js') }}?v=20260816-v7"></script>
-<script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v7"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260816-v8"></script>
+<script src="{{ url_for('static', filename='workspace.js') }}?v=20260816-v8"></script>
+<script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v8"></script>
 </body>
 </html>

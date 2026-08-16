@@ -145,3 +145,20 @@ La pestaña **Mensajes** de la ficha 360° genera una presentación instituciona
 ### Datos que se completan manualmente
 
 Los datos que no puedan inferirse con seguridad desde fuentes públicas —por ejemplo RUC, razón social exacta, propietarios, plantas de operación o información obtenida en una llamada— se completan en **Datos empresariales** dentro de la ficha 360°. Esto evita inventar información y mantiene trazabilidad comercial.
+
+## V8 — Diagnóstico de sitios y presencia digital
+
+- Los errores del calificador ahora explican causa, etapa, acción recomendada y detalles técnicos.
+- Se distinguen URL inválida, DNS, timeout, bloqueo HTTP, SSL, 404, errores del servidor y fallos de conexión.
+- El radar prueba variantes seguras del dominio y puede sugerir sitios alternativos verificados.
+- El usuario puede analizar una alternativa, usarla como sitio principal o abrirla externamente.
+- La Ficha 360° incorpora una pestaña de Presencia digital con sitio oficial, dominios alternativos, redes y fecha de verificación.
+
+## V9 — Enriquecimiento automático de empresas
+
+- Las empresas nuevas llevan datos estructurados del análisis web a la ficha 360° al ingresar al CRM.
+- Las empresas existentes pueden actualizarse individualmente desde la ficha 360° o en lote desde **Completar CRM automáticamente**.
+- El enriquecimiento completa únicamente campos vacíos por defecto y conserva las ediciones manuales existentes.
+- Cada ejecución registra fuente, fecha, campos actualizados, campos preservados, confianza y datos que requieren revisión.
+- Se detectan y consolidan presencia digital, sitio oficial, dominios alternativos y perfiles corporativos (LinkedIn, Facebook, Instagram y YouTube cuando están enlazados desde el sitio).
+- El analizador intenta extraer razón social, RUC, año de fundación, propietarios/fundadores mencionados, plantas/unidades operativas, actividades, ubicación y canales de contacto. Los datos de menor confianza quedan marcados para revisión antes de usarlos comercialmente.
