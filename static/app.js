@@ -700,9 +700,13 @@ $("siteAnalysisResults").addEventListener("click", async (event) => {
       if (existing >= 0) leads[existing] = data.opportunity; else leads.unshift(data.opportunity);
       selected = data.opportunity;
       render();
-      window.setTimeout(() => $("crm").scrollIntoView({ behavior: "smooth" }), 250);
+      const preferredChannel = (analysis.emails||[]).length ? "EMAIL" : (analysis.whatsapp || (analysis.phones||[]).length ? "WHATSAPP" : "CALL");
+      if (typeof window.openWorkspaceModule === "function") window.openWorkspaceModule("crm");
+      window.setTimeout(() => {
+        if (typeof window.openCompanyActionCenter === "function") window.openCompanyActionCenter(data.opportunity, preferredChannel);
+      }, 120);
     }
-    toast(qualify ? "Empresa ingresada al CRM y mensajes generados" : "Empresa desclasificada");
+    toast(qualify ? "Empresa clasificada. Centro de contacto preparado." : "Empresa desclasificada");
   } catch (error) {
     event.target.disabled = false;
     event.target.textContent = qualify ? "Clasificar e ingresar al CRM" : "Desclasificar";

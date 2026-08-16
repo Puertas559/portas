@@ -43,24 +43,90 @@ def _optional_number(value):
 
 def _department_context(contact=None, email=None):
     blob = " ".join(filter(None, [getattr(contact, "role", None), getattr(contact, "buying_role", None), email])).lower()
-    if any(k in blob for k in ("marketing", "mercadeo", "comunicacion", "comunicación")):
+    if any(k in blob for k in ("marketing", "mercadeo", "comunicacion", "comunicación", "prensa")):
         return "MARKETING"
-    if any(k in blob for k in ("compra", "buyer", "procurement", "abastecimiento")):
+    if any(k in blob for k in ("compra", "buyer", "procurement", "abastecimiento", "proveedores")):
         return "COMPRAS"
-    if any(k in blob for k in ("mantenimiento", "ingenier", "infraestructura", "proyecto", "técnic", "tecnic")):
+    if any(k in blob for k in ("mantenimiento", "maintenance", "ingenier", "engineering", "infraestructura", "proyecto", "técnic", "tecnic", "planta")):
         return "TECNICO"
-    if any(k in blob for k in ("logistica", "logística", "operacion", "operación", "deposito", "depósito")):
+    if any(k in blob for k in ("logistica", "logística", "operacion", "operación", "deposito", "depósito", "expedicion", "expedición", "recepcion", "recepción")):
         return "OPERACIONES"
-    if any(k in blob for k in ("direccion", "dirección", "gerencia", "director", "gerente", "ceo")):
+    if any(k in blob for k in ("direccion", "dirección", "gerencia", "director", "gerente", "ceo", "administracion", "administración")):
         return "DIRECCION"
+    if any(k in blob for k in ("ventas", "venta", "comercial", "sales")):
+        return "COMERCIAL"
+    if any(k in blob for k in ("rrhh", "recursos", "talento", "people", "rh@")):
+        return "RRHH"
     return "GENERAL"
 
 
-def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
+def _email_area_label(email):
+    dept = _department_context(None, email)
+    labels = {
+        "MARKETING": "Marketing / Comunicación",
+        "COMPRAS": "Compras / Abastecimiento",
+        "TECNICO": "Área técnica / Mantenimiento / Ingeniería",
+        "OPERACIONES": "Operaciones / Logística",
+        "DIRECCION": "Gerencia / Dirección",
+        "COMERCIAL": "Ventas / Comercial",
+        "RRHH": "Recursos Humanos",
+        "GENERAL": "Correo general",
+    }
+    local = (email or "").split("@", 1)[0].replace("_", " ").replace("-", " ").strip()
+    suffix = f" · {local.title()}" if local and dept not in {"GENERAL"} else ""
+    return dept, labels.get(dept, "Correo general") + suffix
+
+
+def _company_email_candidates(company, contacts=None):
+    seen = set()
+    items = []
+    def add(email, *, source, contact=None, confidence=70):
+        email = str(email or "").strip().lower()
+        if not email or "@" not in email or email in seen:
+            return
+        seen.add(email)
+        dept, label = _email_area_label(email)
+        if contact:
+            dept = _department_context(contact, email)
+            display = f"{contact.name} · {contact.role or label}"
+            confidence = max(confidence, int(contact.confidence or 0))
+        else:
+            display = f"{email} · {label}"
+        items.append({
+            "email": email, "department": dept, "label": label, "display": display,
+            "source": source, "contactId": contact.id if contact else None, "confidence": confidence,
+        })
+    for c in contacts or []:
+        add(c.email, source="Contacto CRM", contact=c, confidence=90)
+    add(company.email_business, source="Ficha empresarial", confidence=85)
+    add(company.email, source="Ficha empresarial", confidence=75)
+    opportunity_ids = [row[0] for row in db.session.query(Opportunity.id).join(Project).filter(
+        Project.company_id == company.id, Opportunity.tenant_id == company.tenant_id
+    ).all()]
+    analyses = []
+    if opportunity_ids:
+        analyses = WebsiteAnalysis.query.filter(
+            WebsiteAnalysis.tenant_id == company.tenant_id,
+            WebsiteAnalysis.opportunity_id.in_(opportunity_ids),
+            WebsiteAnalysis.status == "COMPLETED",
+        ).order_by(WebsiteAnalysis.created_at.desc()).limit(10).all()
+    domain = _website_domain(company.website or company.domain)
+    if domain:
+        more = WebsiteAnalysis.query.filter_by(tenant_id=company.tenant_id, status="COMPLETED").order_by(WebsiteAnalysis.created_at.desc()).limit(80).all()
+        analyses += [a for a in more if _website_domain(a.url) == domain]
+    for a in analyses:
+        for email in (a.emails or []):
+            add(email, source="Sitio web", confidence=78)
+    priority = {"TECNICO":0,"OPERACIONES":1,"COMPRAS":2,"DIRECCION":3,"MARKETING":4,"COMERCIAL":5,"GENERAL":6,"RRHH":7}
+    items.sort(key=lambda x: (priority.get(x["department"], 9), -x["confidence"], x["email"]))
+    return items
+
+
+def _company_message(company, contact=None, channel="EMAIL", opportunity=None, recipient_email=None, department=None):
     company_name = company.name
     contact_name = contact.name.strip() if contact and contact.name else ""
-    email = (contact.email if contact else None) or company.email_business or company.email or ""
-    dept = _department_context(contact, email)
+    email = (recipient_email or (contact.email if contact else None) or company.email_business or company.email or "").strip()
+    dept = department or _department_context(contact, email)
     greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
     sector = company.sector or "su operación"
     products = (opportunity.products if opportunity else []) or []
@@ -75,6 +141,8 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         "TECNICO": f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
         "OPERACIONES": f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
         "DIRECCION": "Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
+        "COMERCIAL": "Veo que este canal corresponde al área Comercial o de Ventas. Mi intención es presentar brevemente Puertas Brasil y solicitar su orientación para llegar al responsable interno que gestiona infraestructura, mantenimiento u operaciones.",
+        "RRHH": "Veo que este canal corresponde a Recursos Humanos. Mi intención es únicamente solicitar su orientación para identificar al responsable técnico o de infraestructura adecuado dentro de la empresa.",
         "GENERAL": f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
     }
     ask_map = {
@@ -83,6 +151,8 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         "TECNICO": "¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
         "OPERACIONES": "¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos para conversar brevemente sobre estas necesidades?",
         "DIRECCION": "¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
+        "COMERCIAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+        "RRHH": "¿Podrían indicarme, por favor, el nombre o correo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
         "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
     }
     body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
@@ -91,7 +161,8 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
     elif channel.upper() == "CALL":
         body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
-    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name, "recipientEmail": email}
+    recipient_phone = ((contact.whatsapp or contact.phone) if contact else None) or company.whatsapp or company.phone_business or company.phone or ""
+    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name, "recipientEmail": email, "recipientPhone": recipient_phone}
 
 
 
@@ -427,6 +498,7 @@ def company_dossier(company_id):
     activities = CompanyActivity.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(CompanyActivity.occurred_at.desc()).limit(200).all()
     completeness, missing = company_completeness(company)
     last_contact = activities[0].occurred_at if activities else None
+    email_candidates = _company_email_candidates(company, contacts)
     return jsonify(
         company={
             "id": company.id, "name": company.name, "legalName": company.legal_name, "ruc": company.ruc or company.registration_id,
@@ -454,6 +526,7 @@ def company_dossier(company_id):
         } for pr in projects],
         opportunities=[op.to_dict() for op in opportunities],
         activities=[row.to_dict() for row in activities],
+        emailCandidates=email_candidates,
         stats={
             "contacts": len(contacts), "projects": len(projects), "opportunities": len(opportunities), "activities": len(activities),
             "openPipeline": round(sum(float(op.potential_deal_value or op.estimated_value or 0) for op in opportunities if op.status not in {"GANHO","PERDIDO","DESCARTADO"}), 2),
@@ -551,7 +624,7 @@ def company_contextual_message(company_id):
         opportunity=Opportunity.query.filter_by(id=data.get("opportunityId"), tenant_id=tenant.id).first()
     if opportunity is None:
         opportunity=Opportunity.query.join(Project).filter(Project.company_id==company.id, Opportunity.tenant_id==tenant.id).order_by(Opportunity.score.desc()).first()
-    return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity))
+    return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity, recipient_email=data.get("recipientEmail"), department=data.get("department")))
 
 
 @api_bp.post("/companies/<int:company_id>/email-draft")
@@ -572,7 +645,7 @@ def company_email_draft(company_id):
         Project.company_id == company.id, Opportunity.tenant_id == tenant.id
     ).order_by(Opportunity.score.desc()).first()
 
-    generated = _company_message(company, contact, "EMAIL", opportunity)
+    generated = _company_message(company, contact, "EMAIL", opportunity, recipient_email=data.get("recipient"), department=data.get("department"))
     recipient = str(data.get("recipient") or generated.get("recipientEmail") or "").strip()
     subject = str(data.get("subject") or generated.get("subject") or "Puertas Brasil Paraguay | Primer Contacto").strip()
     body = str(data.get("body") or generated.get("body") or "").strip()
