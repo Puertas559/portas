@@ -4,15 +4,160 @@ import json
 import os
 import re
 import socket
+import ssl
+import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 from ..extensions import db
 from ..models import WebsiteAnalysis
 from ..tenant import current_tenant
 
 USER_AGENT = os.getenv("RADAR_USER_AGENT", "PuertasBrasilRevenueRadar/2.1")
+
+
+class SiteAnalysisError(Exception):
+    def __init__(self, category, title, message, action, code=None, technical=None, alternatives=None, status=502):
+        super().__init__(message)
+        self.category = category
+        self.title = title
+        self.message = message
+        self.action = action
+        self.code = code or category
+        self.technical = technical or {}
+        self.alternatives = alternatives or []
+        self.status = status
+
+    def to_dict(self):
+        return {
+            "category": self.category, "title": self.title, "message": self.message,
+            "action": self.action, "code": self.code, "technical": self.technical,
+            "alternatives": self.alternatives,
+        }
+
+
+def _domain_stem(host):
+    host = (host or "").lower().removeprefix("www.")
+    parts = host.split(".")
+    return parts[0] if parts else host
+
+
+def _candidate_urls(value):
+    raw = (value or "").strip()
+    if not raw:
+        return []
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return []
+    bare = host.removeprefix("www.")
+    hosts = [host, bare, "www." + bare]
+    if bare.endswith(".com.py"):
+        hosts += [bare[:-3], "www." + bare[:-3]]
+    elif bare.endswith(".com"):
+        hosts += [bare + ".py", "www." + bare + ".py"]
+    elif "." in bare and not bare.endswith(".py"):
+        hosts += [bare + ".py", "www." + bare + ".py"]
+    out=[]
+    for h in hosts:
+        for scheme in ("https", "http"):
+            candidate=f"{scheme}://{h}{parsed.path or '/'}"
+            if parsed.query:
+                candidate += "?" + parsed.query
+            if candidate not in out:
+                out.append(candidate)
+    return out[:12]
+
+
+def _probe_url(candidate, timeout=5):
+    started=time.monotonic()
+    try:
+        normalized=_normalize_url(candidate)
+        raw, final_url, content_type=_fetch_resource(normalized, accepted=("html","xhtml","text"), timeout=timeout)
+        elapsed=round((time.monotonic()-started)*1000)
+        title=""
+        try:
+            parser=PageParser(); parser.feed(raw[:250000]); title=parser.title.strip()
+        except Exception:
+            pass
+        return {"ok": True, "url": normalized, "finalUrl": final_url, "title": title[:160], "responseMs": elapsed, "contentType": content_type}
+    except Exception as exc:
+        return {"ok": False, "url": candidate, "error": str(exc)[:180]}
+
+
+def discover_alternative_sites(value, timeout=4):
+    alternatives=[]
+    original_host=None
+    try:
+        raw=(value or "").strip()
+        parsed=urlparse(raw if raw.startswith(("http://","https://")) else "https://"+raw)
+        original_host=parsed.hostname
+    except Exception:
+        pass
+    stem=_domain_stem(original_host)
+    seen=set()
+    for candidate in _candidate_urls(value):
+        result=_probe_url(candidate, timeout=timeout)
+        if not result.get("ok"):
+            continue
+        final=result.get("finalUrl") or result.get("url")
+        final_host=urlparse(final).hostname or ""
+        key=final.rstrip("/")
+        if key in seen:
+            continue
+        seen.add(key)
+        same_stem=bool(stem and stem in _domain_stem(final_host))
+        confidence=92 if final_host == original_host else 84 if same_stem else 68
+        reason="Mismo dominio con una variante accesible" if final_host == original_host else ("Dominio con nombre coincidente y respuesta válida" if same_stem else "Redirección válida detectada desde una variante del dominio")
+        alternatives.append({
+            "url": final, "host": final_host, "title": result.get("title"),
+            "confidence": confidence, "reason": reason, "verified": True,
+            "responseMs": result.get("responseMs"),
+        })
+    alternatives.sort(key=lambda x: (-x["confidence"], x.get("responseMs") or 99999))
+    return alternatives[:6]
+
+
+def classify_site_error(value, exc, stage="conexión inicial"):
+    technical={"requestedUrl": value, "stage": stage, "exception": exc.__class__.__name__}
+    alternatives=[]
+    try:
+        alternatives=discover_alternative_sites(value, timeout=3)
+    except Exception:
+        alternatives=[]
+    if isinstance(exc, SiteAnalysisError):
+        if alternatives and not exc.alternatives:
+            exc.alternatives=alternatives
+        return exc
+    if isinstance(exc, HTTPError):
+        technical["httpStatus"]=exc.code
+        if exc.code in (401,403):
+            return SiteAnalysisError("ACCESS_BLOCKED","Acceso bloqueado por el sitio",f"El servidor respondió con HTTP {exc.code} y rechazó la consulta automática.","Abra el sitio en el navegador. Si funciona, registre los datos disponibles manualmente o pruebe uno de los sitios alternativos detectados.",f"HTTP_{exc.code}",technical,alternatives,502)
+        if exc.code == 404:
+            return SiteAnalysisError("NOT_FOUND","Página o sitio no encontrado","El servidor respondió HTTP 404. La dirección puede haber cambiado o la página ya no existe.","Revise la dirección o pruebe un sitio alternativo relacionado.","HTTP_404",technical,alternatives,404)
+        if exc.code >= 500:
+            return SiteAnalysisError("REMOTE_SERVER_ERROR","El servidor de la empresa está con problemas",f"El sitio respondió HTTP {exc.code}.","Intente nuevamente más tarde o use un sitio alternativo verificado.",f"HTTP_{exc.code}",technical,alternatives,502)
+        return SiteAnalysisError("HTTP_ERROR","El sitio respondió con un error",f"El servidor devolvió HTTP {exc.code}.","Revise el sitio en el navegador y vuelva a intentar.",f"HTTP_{exc.code}",technical,alternatives,502)
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return SiteAnalysisError("TIMEOUT","Tiempo de espera agotado","El sitio tardó demasiado en responder y el radar interrumpió la consulta para no bloquear su trabajo.","Verifique si el sitio abre normalmente o intente nuevamente en unos minutos.","TIMEOUT",technical,alternatives,504)
+    if isinstance(exc, ssl.SSLError):
+        return SiteAnalysisError("SSL_ERROR","Problema de seguridad HTTPS","No fue posible establecer una conexión HTTPS válida con el sitio.","Abra el sitio en el navegador o pruebe una variante HTTP/HTTPS sugerida.","SSL_ERROR",technical,alternatives,502)
+    if isinstance(exc, URLError):
+        reason=getattr(exc,"reason",None)
+        if isinstance(reason, socket.gaierror):
+            return SiteAnalysisError("DNS_ERROR","Dominio no localizado","No fue posible localizar el dominio en Internet. Puede estar escrito incorrectamente, haber cambiado o estar fuera de servicio.","Revise el dominio o pruebe una de las alternativas detectadas.","DNS_ERROR",technical,alternatives,404)
+        return SiteAnalysisError("CONNECTION_ERROR","No fue posible conectar con el sitio",f"La conexión con el servidor falló: {str(reason or exc)[:160]}.","Compruebe si el sitio abre en el navegador y vuelva a intentar.","CONNECTION_ERROR",technical,alternatives,502)
+    if isinstance(exc, ValueError):
+        msg=str(exc)
+        category="INVALID_URL" if "válida" in msg.lower() else "SITE_VALIDATION_ERROR"
+        title="Dirección web no válida" if category=="INVALID_URL" else "No fue posible validar el sitio"
+        action="Corrija la dirección e intente nuevamente." if category=="INVALID_URL" else "Revise la dirección o pruebe uno de los sitios alternativos detectados."
+        return SiteAnalysisError(category,title,msg,action,category,technical,alternatives,400)
+    return SiteAnalysisError("UNKNOWN_ERROR","No fue posible completar el análisis","Ocurrió un problema técnico no esperado durante el análisis del sitio.","Intente nuevamente. Si se repite, abra los detalles técnicos y registre el código del error.","ANALYZER_ERROR",technical,alternatives,502)
 MAX_BYTES = 2_000_000
 MAX_PAGES = 18
 MAX_SITEMAP_URLS = 80
@@ -79,6 +224,7 @@ class PageParser(HTMLParser):
         self.links = []
         self.title = ""
         self.meta = []
+        self.canonical = None
         self._in_title = False
         self._skip = 0
 
@@ -91,6 +237,8 @@ class PageParser(HTMLParser):
         if tag == "a" and attrs.get("href"):
             label = " ".join(filter(None, (attrs.get("aria-label"), attrs.get("title"))))
             self.links.append((attrs.get("href"), label))
+        if tag == "link" and "canonical" in (attrs.get("rel") or "").lower() and attrs.get("href"):
+            self.canonical = attrs.get("href")
         if tag == "meta" and attrs.get("content"):
             key = (attrs.get("name") or attrs.get("property") or "").lower()
             if key in {"description", "og:description", "og:title", "twitter:description", "twitter:title"}:
@@ -118,15 +266,15 @@ def _normalize_url(value):
         value = "https://" + value
     parsed = urlparse(value)
     if not parsed.hostname or parsed.scheme not in {"http", "https"}:
-        raise ValueError("Ingrese una dirección web válida")
+        raise SiteAnalysisError("INVALID_URL", "Dirección web no válida", "La dirección ingresada no tiene un dominio web válido.", "Corrija la dirección e intente nuevamente. Ejemplo: https://empresa.com.py", "INVALID_URL", {"requestedUrl": value, "stage": "validación de la dirección"}, status=400)
     try:
         addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or 443)}
     except socket.gaierror as exc:
-        raise ValueError("No se pudo localizar el sitio") from exc
+        raise SiteAnalysisError("DNS_ERROR", "Dominio no localizado", "No fue posible localizar el dominio en Internet. Puede estar escrito incorrectamente, haber cambiado o estar fuera de servicio.", "Revise el dominio o utilice la búsqueda de sitios relacionados.", "DNS_ERROR", {"requestedUrl": value, "host": parsed.hostname, "stage": "resolución DNS"}, status=404) from exc
     for address in addresses:
         ip = ipaddress.ip_address(address)
         if not ip.is_global:
-            raise ValueError("El sitio utiliza una dirección no permitida")
+            raise SiteAnalysisError("PRIVATE_ADDRESS", "Dirección no permitida", "El dominio apunta a una dirección privada o no pública y no puede ser analizado por seguridad.", "Utilice el sitio web público de la empresa.", "PRIVATE_ADDRESS", {"requestedUrl": value, "host": parsed.hostname}, status=400)
     return parsed._replace(fragment="").geturl()
 
 
@@ -242,6 +390,18 @@ def _flatten_jsonld(value, bucket):
     if any(item in {"Organization", "Corporation", "LocalBusiness", "Store", "Factory", "Place"} for item in kinds):
         if value.get("name"):
             bucket["names"].append(str(value["name"]))
+        if value.get("legalName"):
+            bucket["legal_names"].append(str(value["legalName"]))
+        if value.get("foundingDate"):
+            bucket["founding_dates"].append(str(value["foundingDate"]))
+        founder = value.get("founder") or value.get("founders")
+        if founder:
+            items = founder if isinstance(founder, list) else [founder]
+            for item in items:
+                if isinstance(item, dict) and item.get("name"):
+                    bucket["founders"].append(str(item["name"]))
+                elif isinstance(item, str):
+                    bucket["founders"].append(item)
         for key in ("email", "telephone"):
             if value.get(key):
                 bucket[key].append(str(value[key]))
@@ -264,7 +424,7 @@ def _flatten_jsonld(value, bucket):
 
 
 def _extract_jsonld(raw):
-    bucket = {"names": [], "email": [], "telephone": [], "addresses": [], "employees": []}
+    bucket = {"names": [], "legal_names": [], "email": [], "telephone": [], "addresses": [], "employees": [], "founding_dates": [], "founders": []}
     blocks = re.findall(r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", raw, re.I | re.S)
     for block in blocks[:20]:
         try:
@@ -306,12 +466,156 @@ def _signal_excerpt(documents, terms):
     return _unique(snippets)[:6]
 
 
+
+def _extract_ruc(text):
+    patterns = [
+        r"(?:RUC|Registro\s+Único\s+de\s+Contribuyentes|Registro\s+Unico\s+de\s+Contribuyentes)\s*(?:N[°ºo.]?\s*)?[:#\-]?\s*(\d{5,10}(?:\s*[-–]\s*\d)?)",
+        r"\b(\d{7,9}-\d)\b",
+    ]
+    for index, pattern in enumerate(patterns):
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = re.sub(r"\s+", "", match.group(1)).replace("–", "-")
+            return value, (94 if index == 0 else 72)
+    return None, 0
+
+
+def _extract_legal_name(text, structured_legal=None, fallback=None):
+    for candidate in structured_legal or []:
+        candidate = re.sub(r"\s+", " ", str(candidate)).strip()
+        if 3 < len(candidate) < 180:
+            return candidate, 94
+    patterns = [
+        r"(?:raz[oó]n\s+social|denominaci[oó]n\s+social|nombre\s+legal)\s*[:\-]?\s*([^\n|]{3,180})",
+        r"\b([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9 .,&'\-]{2,130}\s+(?:S\.A\.E\.C\.A\.|S\.A\.E\.|S\.A\.|S\.R\.L\.|S\.A\.S\.|LTDA\.?|SOCIEDAD\s+AN[ÓO]NIMA))\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
+            if 3 < len(value) < 180:
+                return value, 84
+    return (fallback, 55) if fallback else (None, 0)
+
+
+def _extract_founded_year(text, structured_dates=None):
+    for value in structured_dates or []:
+        match = re.search(r"\b(18\d{2}|19\d{2}|20\d{2})\b", str(value))
+        if match:
+            return int(match.group(1)), 92
+    patterns = [
+        r"(?:fundad[ao]|fundaci[oó]n|desde|establecid[ao]|iniciamos\s+(?:en|nuestras\s+actividades\s+en))\s*(?:en\s*)?(18\d{2}|19\d{2}|20\d{2})",
+        r"(?:desde\s+el\s+año|desde\s+el\s+ano)\s+(18\d{2}|19\d{2}|20\d{2})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return int(match.group(1)), 78
+    return None, 0
+
+
+def _extract_owners(text, structured_founders=None):
+    results = [(re.sub(r"\s+", " ", str(v)).strip(), 88, "Fundador informado en datos estructurados") for v in (structured_founders or []) if v]
+    patterns = [
+        (r"(?:fundador(?:a)?|propietario(?:a)?|dueñ[oa]|accionista\s+principal|socio\s+fundador)\s*[:\-–]?\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.'-]+){1,4})", 74),
+    ]
+    for pattern, confidence in patterns:
+        for match in re.finditer(pattern, text, re.I):
+            results.append((re.sub(r"\s+", " ", match.group(1)).strip(), confidence, "Mención societaria o fundacional en el sitio"))
+    unique=[]; seen=set()
+    for name, confidence, reason in results:
+        key=name.casefold()
+        if key in seen or len(name) < 4:
+            continue
+        seen.add(key); unique.append({"name": name, "confidence": confidence, "reason": reason})
+    return unique[:10]
+
+
+def _extract_operation_plants(documents):
+    terms=("planta", "fábrica", "fabrica", "centro de distribución", "centro de distribucion", "sucursal", "unidad", "complejo industrial", "depósito", "deposito", "frigorífico", "frigorifico")
+    rows=[]
+    for document in documents:
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", document):
+            clean=re.sub(r"\s+", " ", sentence).strip()
+            low=clean.lower()
+            if 25 <= len(clean) <= 260 and any(t in low for t in terms) and any(k in low for k in ("ubic", "km", "ruta", "ciudad", "paraguay", "departamento", "dirección", "direccion", "opera", "contamos", "nuestra")):
+                rows.append(clean)
+    return _unique(rows)[:12]
+
+
+def _extract_key_activities(text, sector):
+    lower=text.lower(); rows=[]
+    lexicon={
+        "fabricación": ["fabricamos", "fabricación", "fabricacion", "manufactura", "producción", "produccion"],
+        "logística y distribución": ["logística", "logistica", "distribución", "distribucion", "centro de distribución", "depósito", "deposito"],
+        "procesamiento de alimentos": ["procesamiento", "alimentos", "frigorífico", "frigorifico", "lácteos", "lacteos", "bebidas"],
+        "agronegocio": ["granos", "semillas", "fertilizantes", "acopio", "agroindustrial", "agricultura"],
+        "construcción e ingeniería": ["constructora", "ingeniería", "ingenieria", "obra", "estructura metálica", "estructura metalica"],
+        "comercio y distribución": ["supermercado", "retail", "importación", "importacion", "comercialización", "comercializacion"],
+    }
+    for label, terms in lexicon.items():
+        if any(term in lower for term in terms):
+            rows.append(label)
+    if sector and sector != "Por validar":
+        rows.insert(0, sector)
+    return _unique(rows)[:10]
+
+
+def _extract_location_from_address(address):
+    if not address:
+        return None, None
+    text=address.lower()
+    departments={
+        "Alto Paraná": ["ciudad del este", "hernandarias", "minga guazú", "minga guazu", "presidente franco", "santa rita", "san alberto", "naranjal"],
+        "Central": ["san lorenzo", "luque", "capiatá", "capiata", "mariano roque alonso", "fernando de la mora", "lambaré", "lambare", "limpio", "villa elisa"],
+        "Asunción": ["asunción", "asuncion"],
+        "Itapúa": ["encarnación", "encarnacion", "hohenau", "obligado", "bella vista"],
+        "Caaguazú": ["caaguazú", "caaguazu", "coronel oviedo"],
+        "Canindeyú": ["salto del guairá", "salto del guaira", "katueté", "katuete"],
+    }
+    for department, cities in departments.items():
+        for city in cities:
+            if city in text:
+                return city.title(), department
+    return None, None
+
+
+def _build_enrichment(text, documents, structured, company_name, sector, address, social, products, normalized, host):
+    ruc, ruc_conf = _extract_ruc(text)
+    legal, legal_conf = _extract_legal_name(text, structured.get("legal_names"), company_name)
+    year, year_conf = _extract_founded_year(text, structured.get("founding_dates"))
+    owners = _extract_owners(text, structured.get("founders"))
+    plants = _extract_operation_plants(documents)
+    activities = _extract_key_activities(text, sector)
+    city, department = _extract_location_from_address(address)
+    field_confidence = {
+        "legalName": legal_conf, "ruc": ruc_conf, "foundedYear": year_conf,
+        "address": 86 if address else 0, "sector": 82 if sector and sector != "Por validar" else 0,
+        "companySize": 65, "owners": max([x["confidence"] for x in owners], default=0),
+        "operationPlants": 72 if plants else 0, "keyActivities": 76 if activities else 0,
+        "website": 95, "socialLinks": 88 if social else 0,
+    }
+    review_required=[key for key,val in field_confidence.items() if val and val < 80]
+    return {
+        "legalName": legal, "ruc": ruc, "foundedYear": year,
+        "owners": owners, "operationPlants": plants, "keyActivities": activities,
+        "city": city, "department": department, "address": address,
+        "products": products or [], "socialLinks": social or {},
+        "officialWebsite": normalized, "domain": host,
+        "fieldConfidence": field_confidence, "reviewRequired": review_required,
+        "sourceUrl": normalized,
+    }
+
 def normalize_website_url(url):
     return _normalize_url(url)
 
 
 def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=20, analysis=None, status="COMPLETED"):
-    normalized = _normalize_url(url)
+    requested_url = url
+    try:
+        normalized = _normalize_url(url)
+    except Exception as exc:
+        raise classify_site_error(url, exc, "validación de la dirección") from exc
     parsed = urlparse(normalized)
     host = parsed.hostname
     queue = [(1000, normalized)]
@@ -319,6 +623,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
         for candidate in _sitemap_urls(normalized, host, timeout=min(request_timeout, 8)):
             queue.append((_link_priority(candidate), candidate))
     seen, queued, documents, titles, all_links, raw_pages, meta_text = set(), {normalized}, [], [], [], [], []
+    canonical_urls, redirects, fetch_errors = [], [], []
 
     while queue and len(documents) < max_pages:
         queue.sort(key=lambda item: item[0], reverse=True)
@@ -328,14 +633,25 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
         seen.add(current)
         try:
             raw, final_url, _ = _fetch_page(current, timeout=request_timeout)
-        except Exception:
+        except Exception as exc:
+            fetch_errors.append({"url": current, "error": str(exc)[:160], "type": exc.__class__.__name__})
             if not documents:
-                raise
+                raise classify_site_error(requested_url, exc, "descarga de la página principal") from exc
             continue
+        if urlparse(final_url).hostname != urlparse(current).hostname:
+            redirects.append(final_url)
         if not _same_host(final_url, host):
-            continue
+            if not documents and current == normalized:
+                # A redirección corporativa a otro dominio puede ser el sitio oficial vigente.
+                normalized = final_url
+                host = urlparse(final_url).hostname
+                queued.add(final_url)
+            else:
+                continue
         parser = PageParser()
         parser.feed(raw)
+        if parser.canonical:
+            canonical_urls.append(urljoin(final_url, parser.canonical))
         visible = "\n".join(parser.text)
         if visible.strip():
             documents.append(visible)
@@ -358,7 +674,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
 
     text = "\n".join(meta_text + documents)
     searchable = text.lower()
-    structured = {"names": [], "email": [], "telephone": [], "addresses": [], "employees": []}
+    structured = {"names": [], "legal_names": [], "email": [], "telephone": [], "addresses": [], "employees": [], "founding_dates": [], "founders": []}
     for raw in raw_pages:
         data = _extract_jsonld(raw)
         for key in structured:
@@ -442,6 +758,17 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
     summary_parts.append(f"Cobertura: {len(documents)} páginas relevantes analizadas de {len(seen)} URLs intentadas.")
     summary = " ".join(summary_parts)[:2200]
 
+    alternative_sites = []
+    for alt in _unique(redirects + canonical_urls):
+        alt_host = urlparse(alt).hostname or ""
+        if alt_host and alt_host != host:
+            alternative_sites.append({"url": alt, "host": alt_host, "confidence": 90 if _domain_stem(alt_host) == _domain_stem(host) else 76, "reason": "Redirección o URL canónica detectada por el sitio", "verified": True})
+    enrichment = _build_enrichment(text, documents, structured, analysis.company_name if analysis and analysis.company_name else _best_company_name(titles, host, structured["names"]), sector, _extract_address(text, structured["addresses"]), social, products, normalized, host)
+    diagnostics = {
+        "requestedUrl": requested_url, "resolvedUrl": normalized, "host": host,
+        "pagesAnalyzed": len(documents), "urlsAttempted": len(seen), "fetchErrors": fetch_errors[:12],
+        "enrichment": enrichment,
+    }
     if analysis is None:
         analysis = WebsiteAnalysis(tenant_id=current_tenant().id, url=normalized)
     analysis.url = normalized
@@ -462,6 +789,8 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
     analysis.pages_analyzed = len(documents)
     analysis.summary = summary or "No se encontró texto público suficiente para una calificación profunda."
     analysis.status = status
+    analysis.alternative_sites = alternative_sites
+    analysis.diagnostics = diagnostics
     db.session.add(analysis)
     db.session.commit()
     return analysis

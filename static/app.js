@@ -1,5 +1,5 @@
 const leads = Array.isArray(window.RADAR_LEADS) ? window.RADAR_LEADS : [];
-const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Industrial Revenue Radar";
+const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Radar Comercial Industrial";
 let selected = leads[0] || null;
 let level = "ALL";
 let selectedChannel = "whatsapp";
@@ -99,7 +99,7 @@ function contactMessage(lead, channel = selectedChannel) {
   const context = lead.whyNow || `${lead.company} presenta una operación que puede requerir soluciones de acceso industrial.`;
   const next = lead.nextBestAction || "validar el responsable técnico y el cronograma de la operación";
   const role = "Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos";
-  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, retrofit y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
+  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, modernización y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
   if (channel === "call") return `GUION DE LLAMADA\n\n1. Presentarse como David Granja, de ${brandName}.\n2. Mencionar el contexto: ${context}\n3. Pedir al responsable de ${role}.\n4. Validar etapa, cronograma, accesos industriales, áreas de carga y necesidades de ${products}.\n5. Objetivo de la llamada: ${next}.\n6. Cerrar proponiendo visita técnica o conversación de 15 minutos.`;
   if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuvimos conociendo la operación de ${lead.company} y vimos un posible encaje para ${products}. Me gustaría conectar con la persona responsable de ${role} para entender la etapa actual y evaluar si podemos aportar una solución técnica. ¿Podría orientarme con el contacto adecuado?`;
   return `Hola, ¿cómo está? Soy David Granja, de ${brandName}. Estuve conociendo la operación de ${lead.company} y detectamos un posible encaje para ${products}. ${context}\n\nQuisiera hablar con la persona responsable de ${role} para entender la etapa actual y verificar si podemos aportar una solución adecuada. ¿Podría indicarme con quién debería conversar?`;
@@ -117,7 +117,7 @@ function renderCrm() {
       <div class="crm-card-top"><span class="avatar">${escapeHtml(initials(lead.company))}</span><div><h3>${escapeHtml(lead.company)}</h3><p>${escapeHtml(lead.sector)} · ${escapeHtml(lead.city)}</p></div>${tag(lead.level, lead.score)}</div>
       <strong>${escapeHtml(lead.project)}</strong><small><i class="bi bi-geo-alt"></i> ${escapeHtml(address)}</small>
       <div class="crm-flags"><span class="${lead.contactVerified ? "verified" : "pending"}"><i class="bi bi-${lead.contactVerified ? "person-check-fill" : "person-exclamation"}"></i> ${lead.contactVerified ? "Contacto validado" : "Validar contacto"}</span>${lead.nextActionAt ? `<span><i class="bi bi-calendar-event"></i> ${new Date(lead.nextActionAt).toLocaleDateString("es-PY")}</span>` : ""}</div>
-      <div class="crm-card-actions"><button class="open-crm-detail"><i class="bi bi-eye"></i> Ver ficha</button><label><input class="visit-check" type="checkbox" ${visitSelection.has(String(lead.id)) ? "checked" : ""}> Incluir en visita</label></div>
+      <div class="crm-card-actions"><button class="open-company-dossier"><i class="bi bi-building"></i> Ficha 360°</button><label><input class="visit-check" type="checkbox" ${visitSelection.has(String(lead.id)) ? "checked" : ""}> Incluir en visita</label></div>
     </article>`;
   }).join("") || '<div class="empty-signals"><strong>No hay empresas en este estado.</strong></div>';
 }
@@ -181,7 +181,7 @@ async function loadTimeline() {
   activateTab("timeline");
   if (!selected) return;
   if (selected.demo) {
-    $("timelineList").innerHTML = "<article><i></i><small>DESCUBRIMIENTO</small><strong>Evento demostrativo identificado por el radar</strong></article>";
+    $("timelineList").innerHTML = "<article><i></i><small>DESCUBRIMIENTO</small><strong>Evento de demostración identificado por el radar</strong></article>";
     return;
   }
   try {
@@ -213,7 +213,7 @@ $("crmGrid").addEventListener("click", (event) => {
   if (!lead) return;
   if (event.target.closest(".open-crm-detail")) {
     selectLead(lead);
-    $("drawer").scrollIntoView({ behavior: "smooth", block: "start" });
+    document.body.classList.add("drawer-open");
   }
   if (event.target.matches(".visit-check")) {
     if (event.target.checked) visitSelection.add(String(lead.id)); else visitSelection.delete(String(lead.id));
@@ -231,7 +231,7 @@ document.querySelectorAll(".tabs button").forEach((button) => {
 $("status").addEventListener("change", async (event) => {
   if (!selected) return;
   if (selected.demo) {
-    toast("DATOS DEMO: registre una oportunidad para guardarla en el CRM");
+    toast("DATOS DE DEMOSTRACIÓN: registre una oportunidad para guardarla en el CRM");
     event.target.value = selected.status || "NOVO";
     return;
   }
@@ -287,7 +287,7 @@ $("kanbanBoard").addEventListener("change", async (event) => {
   if (!event.target.matches(".kanban-status")) return;
   const card = event.target.closest(".kanban-card");
   const lead = leads.find((item) => String(item.id) === card.dataset.id);
-  if (!lead || lead.demo) return toast("Los datos demostrativos no se pueden mover");
+  if (!lead || lead.demo) return toast("Los datos de demostracións no se pueden mover");
   const oldStatus = lead.status;
   const response = await fetch(`/api/opportunities/${lead.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: event.target.value }) });
   if (!response.ok) { event.target.value = oldStatus; return toast("No se pudo mover la oportunidad"); }
@@ -519,7 +519,7 @@ function renderWebsiteAnalysis(analysis) {
   const decision = analysis.decision || "PENDING";
   const decisionLabel = { QUALIFIED: "CALIFICADA", DISQUALIFIED: "DESCALIFICADA", PENDING: "PENDIENTE" }[decision];
   const scanMode = analysis.scanMode || (analysis.status === "QUICK" ? "quick" : "deep");
-  const scanLabel = scanMode === "quick" ? "QUICK SCAN" : (analysis.cached ? "CACHE RECIENTE" : "ANÁLISIS PROFUNDO");
+  const scanLabel = scanMode === "quick" ? "ANÁLISIS RÁPIDO" : (analysis.cached ? "RESULTADO EN CACHÉ" : "ANÁLISIS PROFUNDO");
   const decisionActions = decision === "PENDING"
     ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
     : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
@@ -540,9 +540,56 @@ function renderWebsiteAnalysis(analysis) {
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
       <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+      ${analysis.enrichment && Object.keys(analysis.enrichment).length ? `<div class="analysis-autofill"><div><b><i class="bi bi-magic"></i> Datos preparados para la ficha 360°</b><span>El radar completará automáticamente los campos seguros al ingresar la empresa al CRM.</span></div><div class="autofill-grid"><span><small>Razón social</small><strong>${escapeHtml(analysis.enrichment.legalName || 'Por validar')}</strong></span><span><small>RUC</small><strong>${escapeHtml(analysis.enrichment.ruc || 'Por validar')}</strong></span><span><small>Fundación</small><strong>${escapeHtml(analysis.enrichment.foundedYear || 'Por validar')}</strong></span><span><small>Plantas / unidades</small><strong>${Number((analysis.enrichment.operationPlants||[]).length)}</strong></span><span><small>Redes detectadas</small><strong>${Number(Object.keys(analysis.enrichment.socialLinks||{}).length)}</strong></span><span><small>Revisión manual</small><strong>${Number((analysis.enrichment.reviewRequired||[]).length)} campo(s)</strong></span></div></div>` : ''}
+      ${Array.isArray(analysis.alternativeSites) && analysis.alternativeSites.length ? `<div class="site-alternative-notice"><div><b>Presencia digital relacionada detectada</b><span>${analysis.alternativeSites.length} sitio(s) alternativo(s) o redirección(es) vinculados al dominio analizado.</span></div><button class="show-site-alternatives">Ver sitios relacionados</button></div>` : ''}
       <div class="analysis-decision">${deepAction}${decisionActions}</div>
       ${drafts}
     </article>`;
+}
+
+function siteErrorText(details={}) {
+  return {
+    INVALID_URL:"Dirección web no válida", DNS_ERROR:"Dominio no localizado", TIMEOUT:"Tiempo de espera agotado",
+    ACCESS_BLOCKED:"Acceso bloqueado por el sitio", SSL_ERROR:"Problema de seguridad HTTPS", NOT_FOUND:"Sitio no encontrado",
+    REMOTE_SERVER_ERROR:"Servidor temporalmente indisponible", CONNECTION_ERROR:"No fue posible conectar", HTTP_ERROR:"Respuesta HTTP con error",
+    SITE_VALIDATION_ERROR:"No fue posible validar el sitio", UNKNOWN_ERROR:"Error técnico del analizador"
+  }[details.category] || details.title || "No fue posible analizar el sitio";
+}
+
+function renderAlternativeSites(alternatives=[]) {
+  if (!alternatives.length) return '<div class="diagnostic-empty">No se encontró otra dirección accesible relacionada automáticamente. Puede verificar el nombre de la empresa en una búsqueda externa y pegar el nuevo sitio en el calificador.</div>';
+  return alternatives.map((alt,index)=>`<article class="alternative-site-row" data-alt-url="${escapeHtml(alt.url)}">
+    <div class="alternative-confidence"><b>${Number(alt.confidence)||0}%</b><small>confianza</small></div>
+    <div><strong>${escapeHtml(alt.title || alt.host || alt.url)}</strong><a href="${escapeHtml(alt.url)}" target="_blank" rel="noopener">${escapeHtml(alt.url)}</a><p>${escapeHtml(alt.reason || 'Sitio relacionado detectado')}</p></div>
+    <div class="alternative-actions"><button class="analyze-alternative primary">Analizar</button><button class="use-alternative">Usar como sitio principal</button><button class="open-alternative">Abrir</button></div>
+  </article>`).join('');
+}
+
+function openSiteDiagnostic(data={}, requestedUrl="") {
+  const details=data.errorDetails || {};
+  const dialog=$("siteDiagnosticDialog");
+  if (!dialog) return;
+  $("diagnosticTitle").textContent=siteErrorText(details);
+  $("diagnosticMessage").textContent=details.message || data.error || "No fue posible completar el análisis.";
+  $("diagnosticAction").textContent=details.action || "Revise la dirección y vuelva a intentar.";
+  const technical=details.technical || {};
+  $("diagnosticCode").textContent=details.code || details.category || "ANALYZER_ERROR";
+  $("diagnosticRequestedUrl").textContent=technical.requestedUrl || requestedUrl || "—";
+  $("diagnosticStage").textContent=technical.stage || "Análisis del sitio";
+  $("diagnosticHttp").textContent=technical.httpStatus ? `HTTP ${technical.httpStatus}` : "No disponible";
+  $("diagnosticTime").textContent=new Date().toLocaleString("es-PY");
+  $("diagnosticAlternatives").innerHTML=renderAlternativeSites(data.alternatives || details.alternatives || []);
+  dialog.showModal();
+}
+
+function openAlternativeSites(alternatives=[], requestedUrl="") {
+  openSiteDiagnostic({errorDetails:{title:"Sitios relacionados detectados",message:"El radar encontró otras direcciones que pueden pertenecer a la misma presencia digital de la empresa.",action:"Revise la confianza de cada opción. Puede analizarla directamente o abrirla en una nueva pestaña.",code:"RELATED_SITES",technical:{requestedUrl,stage:"identificación de presencia digital"}}, alternatives}, requestedUrl);
+}
+
+function maybeShowAlternatives(analysis, requestedUrl="") {
+  if (Array.isArray(analysis?.alternativeSites) && analysis.alternativeSites.length) {
+    openAlternativeSites(analysis.alternativeSites, requestedUrl || analysis.url);
+  }
 }
 
 function setScanProgress(stage, progress, message, active = true) {
@@ -560,14 +607,15 @@ async function deepenWebsiteAnalysis(analysisId, card = null, silent = false) {
   try {
     const response = await fetch(`/api/website-analysis/${analysisId}/deep`, { method: "POST" });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "No se pudo completar el análisis profundo");
+    if (!response.ok) { openSiteDiagnostic(data, card?.querySelector('a')?.href || ''); throw new Error(data.error || "No se pudo completar el análisis profundo"); }
     const current = card || document.querySelector(`.analysis-card[data-analysis-id="${analysisId}"]`);
     if (current) current.outerHTML = renderWebsiteAnalysis(data);
+    if (Array.isArray(data.alternativeSites) && data.alternativeSites.length) maybeShowAlternatives(data, data.url);
     if (!silent) setScanProgress("Completado", 100, `Análisis profundo completado: ${data.pagesAnalyzed || 0} páginas relevantes · potencial ${data.level}.`, false);
     return data;
   } catch (error) {
     if (card) card.classList.remove("is-upgrading");
-    if (!silent) setScanProgress("Quick Scan disponible", 100, error.message, false);
+    if (!silent) setScanProgress("Análisis rápido disponible", 100, error.message, false);
     return null;
   }
 }
@@ -579,7 +627,7 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
   const started = performance.now();
   button.disabled = true;
   button.querySelector("span") && (button.querySelector("span").textContent = "Escaneando…");
-  setScanProgress("Quick Scan", 18, "Leyendo página principal y rutas esenciales para devolver una ficha inicial…", true);
+  setScanProgress("Análisis rápido", 18, "Leyendo página principal y rutas esenciales para devolver una ficha inicial…", true);
   const skeleton = document.createElement("div");
   skeleton.className = "analysis-skeleton";
   skeleton.innerHTML = '<i></i><div><b></b><span></span><span></span><span></span></div>';
@@ -591,14 +639,15 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
       body: JSON.stringify({ url, mode: "quick" }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "No se pudo analizar el sitio");
+    if (!response.ok) { openSiteDiagnostic(data, url); throw new Error(data.error || "No se pudo analizar el sitio"); }
     skeleton.remove();
     $("siteAnalysisResults").insertAdjacentHTML("afterbegin", renderWebsiteAnalysis(data));
+    if (Array.isArray(data.alternativeSites) && data.alternativeSites.length) maybeShowAlternatives(data, url);
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     if (data.cached || data.scanMode === "deep") {
       setScanProgress("Cache reciente", 100, `Resultado reutilizado en ${seconds}s. No fue necesario descargar el sitio nuevamente.`, false);
     } else {
-      setScanProgress("Ficha inicial lista", 48, `Quick Scan listo en ${seconds}s. Puede seguir trabajando mientras completamos el análisis profundo.`, true);
+      setScanProgress("Ficha inicial lista", 48, `Análisis rápido listo en ${seconds}s. Puede seguir trabajando mientras completamos el análisis profundo.`, true);
       const card = document.querySelector(`.analysis-card[data-analysis-id="${data.id}"]`);
       deepenWebsiteAnalysis(data.id, card, false);
     }
@@ -615,6 +664,13 @@ $("siteAnalysisForm").addEventListener("submit", async (event) => {
 $("siteAnalysisResults").addEventListener("click", async (event) => {
   const card = event.target.closest(".analysis-card");
   if (!card) return;
+  if (event.target.closest(".show-site-alternatives")) {
+    const id=card.dataset.analysisId;
+    const response=await fetch(`/api/website-analysis`); const rows=await response.json();
+    const item=Array.isArray(rows)?rows.find(x=>String(x.id)===String(id)):null;
+    openAlternativeSites(item?.alternativeSites||[], item?.url||"");
+    return;
+  }
   const deepButton = event.target.closest(".deep-analysis");
   if (deepButton) {
     deepButton.disabled = true;
@@ -739,9 +795,9 @@ async function loadCommandCenter() {
     const opportunityCard = (lead) => `<article class="radar-row" data-opportunity-id="${lead.id}"><div><strong>${escapeHtml(lead.company)}</strong><span>${escapeHtml(lead.project)} · ${escapeHtml(lead.department || "")}</span></div><div class="radar-badges"><b>${Number(lead.score) || 0}</b><em>BW ${Number(lead.buyingWindow) || 0}</em><em>↑ ${Number(lead.momentum) || 0}</em></div><p>${escapeHtml(lead.whyNow || "Señal comercial prioritaria")}</p><small>${escapeHtml(lead.nextBestAction || "Validar responsables y cronograma")}</small></article>`;
     $("hotNowList").innerHTML = (data.hotNow || []).map(opportunityCard).join("") || '<p>No hay oportunidades HOT en este momento.</p>';
     $("momentumList").innerHTML = (data.momentum || []).map(opportunityCard).join("") || '<p>No hay cuentas acelerando.</p>';
-    $("researchQueue").innerHTML = (data.researchQueue || []).map((row) => `<article class="radar-row"><div><strong>${escapeHtml(row.company)}</strong><span>Fit ${row.fit} · Acceso ${row.accessibility}</span></div><p>Falta: ${escapeHtml((row.missing || []).join(", ") || "enriquecimiento general")}</p></article>`).join("") || '<p>No hay cuentas pendientes de enriquecimiento.</p>';
+    $("researchQueue").innerHTML = (data.researchQueue || []).map((row) => `<article class="radar-row"><div><strong>${escapeHtml(row.company)}</strong><span>Afinidad ${row.fit} · Acceso ${row.accessibility}</span></div><p>Falta: ${escapeHtml((row.missing || []).join(", ") || "enriquecimiento general")}</p></article>`).join("") || '<p>No hay cuentas pendientes de enriquecimiento.</p>';
   } catch (_error) {
-    $("hotNowList").innerHTML = '<p>No se pudo cargar el Command Center.</p>';
+    $("hotNowList").innerHTML = '<p>No se pudo cargar el Centro de inteligencia.</p>';
   }
 }
 
@@ -757,3 +813,17 @@ render();
 if (selected) selectLead(selected);
 loadToday();
 loadCommandCenter();
+
+
+$("closeSiteDiagnostic")?.addEventListener("click",()=>$("siteDiagnosticDialog").close());
+$("siteDiagnosticDialog")?.addEventListener("click",event=>{
+  const analyze=event.target.closest(".analyze-alternative");
+  const open=event.target.closest(".open-alternative");
+  const use=event.target.closest(".use-alternative");
+  const row=event.target.closest(".alternative-site-row");
+  if (!row) return;
+  const url=row.dataset.altUrl;
+  if (open) window.open(url,"_blank","noopener");
+  if (use) { $("companyWebsite").value=url; $("siteDiagnosticDialog").close(); setScanProgress("Sitio principal actualizado",0,"La dirección alternativa quedó seleccionada. Presione Analizar empresa para continuar.",false); }
+  if (analyze) { $("companyWebsite").value=url; $("siteDiagnosticDialog").close(); $("siteAnalysisForm").requestSubmit(); }
+});

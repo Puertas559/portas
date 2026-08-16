@@ -57,14 +57,27 @@ class Company(db.Model):
     email_business = db.Column(db.String(240))
     linkedin_url = db.Column(db.String(700))
     registration_id = db.Column(db.String(120), index=True)
+    legal_name = db.Column(db.String(300))
+    ruc = db.Column(db.String(80), index=True)
+    founded_year = db.Column(db.Integer)
+    headquarters = db.Column(db.String(260))
+    owners = db.Column(db.JSON, nullable=False, default=list)
+    operation_plants = db.Column(db.JSON, nullable=False, default=list)
+    key_activities = db.Column(db.JSON, nullable=False, default=list)
+    commercial_notes = db.Column(db.Text)
+    data_sources = db.Column(db.JSON, nullable=False, default=list)
     identity_confidence = db.Column(db.Integer, nullable=False, default=50)
     company_size = db.Column(db.String(80))
     employee_estimate = db.Column(db.Integer)
     facility_profile = db.Column(db.JSON, nullable=False, default=dict)
+    digital_presence = db.Column(db.JSON, nullable=False, default=dict)
     account_fit_score = db.Column(db.Integer, nullable=False, default=0)
     accessibility_score = db.Column(db.Integer, nullable=False, default=0)
     momentum_score = db.Column(db.Integer, nullable=False, default=0)
     watch_status = db.Column(db.String(30), nullable=False, default="WATCH", index=True)
+    research_status = db.Column(db.String(30), nullable=False, default="PENDING", index=True)
+    data_completeness_score = db.Column(db.Integer, nullable=False, default=0)
+    last_enriched_at = db.Column(db.DateTime(timezone=True), index=True)
     last_signal_at = db.Column(db.DateTime(timezone=True), index=True)
     status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
     deleted_at = db.Column(db.DateTime(timezone=True))
@@ -73,6 +86,7 @@ class Company(db.Model):
     projects = db.relationship("Project", back_populates="company", cascade="all, delete-orphan")
     aliases = db.relationship("CompanyAlias", back_populates="company", cascade="all, delete-orphan")
     contacts = db.relationship("Contact", back_populates="company", cascade="all, delete-orphan")
+    activities = db.relationship("CompanyActivity", back_populates="company", cascade="all, delete-orphan")
     tenant = db.relationship("Tenant")
     __table_args__ = (db.CheckConstraint("identity_confidence BETWEEN 0 AND 100", name="ck_company_identity_confidence"),)
 
@@ -114,6 +128,42 @@ class Contact(db.Model):
         db.CheckConstraint("influence_score BETWEEN 0 AND 100", name="ck_contact_influence"),
         db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_contact_confidence"),
     )
+
+
+class CompanyActivity(db.Model):
+    __tablename__ = "company_activities"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
+    contact_id = db.Column(db.Integer, db.ForeignKey("contacts.id", ondelete="SET NULL"), index=True)
+    activity_type = db.Column(db.String(50), nullable=False, index=True)
+    channel = db.Column(db.String(40), index=True)
+    direction = db.Column(db.String(20), nullable=False, default="OUTBOUND")
+    subject = db.Column(db.String(400))
+    summary = db.Column(db.Text)
+    outcome = db.Column(db.String(80), index=True)
+    next_action = db.Column(db.String(400))
+    next_action_at = db.Column(db.DateTime(timezone=True), index=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    created_by = db.Column(db.String(180), nullable=False, default="Equipo comercial")
+    extra_data = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    company = db.relationship("Company", back_populates="activities")
+    contact = db.relationship("Contact")
+    opportunity = db.relationship("Opportunity")
+
+    def to_dict(self):
+        return {
+            "id": self.id, "companyId": self.company_id, "opportunityId": self.opportunity_id,
+            "contactId": self.contact_id, "contact": self.contact.name if self.contact else None,
+            "type": self.activity_type, "channel": self.channel, "direction": self.direction,
+            "subject": self.subject, "summary": self.summary, "outcome": self.outcome,
+            "nextAction": self.next_action,
+            "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
+            "occurredAt": self.occurred_at.isoformat() if self.occurred_at else None,
+            "createdBy": self.created_by, "extra": self.extra_data or {},
+        }
 
 
 class Watchlist(db.Model):
@@ -210,6 +260,12 @@ class Opportunity(db.Model):
     potential_deal_value = db.Column(db.Numeric(18, 2), nullable=False, default=0)
     expected_revenue = db.Column(db.Numeric(18, 2), nullable=False, default=0)
     score_version = db.Column(db.String(60), nullable=False, default="legacy-v1")
+    lead_readiness_score = db.Column(db.Integer, nullable=False, default=0, index=True)
+    sales_ready = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    outcome_code = db.Column(db.String(50), index=True)
+    lost_reason = db.Column(db.String(80), index=True)
+    last_result_at = db.Column(db.DateTime(timezone=True), index=True)
+    last_contact_at = db.Column(db.DateTime(timezone=True), index=True)
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     project = db.relationship("Project", back_populates="opportunities")
@@ -239,7 +295,8 @@ class Opportunity(db.Model):
             "Agronegocio": ["Polvo y clima", "Grandes vanos", "Protección de equipos"],
         }.get(sector, ["Seguridad de accesos", "Continuidad operativa", "Mantenimiento preventivo"])
         return {
-            "id": self.id, "company": self.project.company.name, "sector": sector,
+            "id": self.id, "companyId": self.project.company.id, "company": self.project.company.name, "sector": sector,
+            "legalName": self.project.company.legal_name, "ruc": self.project.company.ruc or self.project.company.registration_id,
             "origin": self.project.company.origin_country or "No informado", "project": self.project.name,
             "city": self.project.city, "department": self.project.department, "stage": self.project.stage or "No informado",
             "investment": self.project.investment or "No divulgado", "event": self.event_type, "score": self.score,
@@ -261,6 +318,10 @@ class Opportunity(db.Model):
             "intent": self.intent_score, "dataConfidence": self.data_confidence,
             "potentialDealValue": float(self.potential_deal_value or 0),
             "expectedRevenue": float(self.expected_revenue or 0), "scoreVersion": self.score_version,
+            "leadReadiness": self.lead_readiness_score, "salesReady": self.sales_ready,
+            "outcomeCode": self.outcome_code, "lostReason": self.lost_reason,
+            "dataCompleteness": self.project.company.data_completeness_score,
+            "lastEnrichedAt": self.project.company.last_enriched_at.isoformat() if self.project.company.last_enriched_at else None,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }
 
@@ -603,6 +664,8 @@ class WebsiteAnalysis(db.Model):
     whatsapp_message = db.Column(db.Text)
     email_subject = db.Column(db.String(300))
     email_body = db.Column(db.Text)
+    alternative_sites = db.Column(db.JSON, default=list, nullable=False)
+    diagnostics = db.Column(db.JSON, default=dict, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
     opportunity = db.relationship("Opportunity")
 
@@ -617,5 +680,7 @@ class WebsiteAnalysis(db.Model):
             "error": self.error, "createdAt": self.created_at.isoformat() if self.created_at else None,
             "decision": self.decision, "opportunityId": self.opportunity_id,
             "whatsappMessage": self.whatsapp_message, "emailSubject": self.email_subject,
-            "emailBody": self.email_body,
+            "emailBody": self.email_body, "alternativeSites": self.alternative_sites or [],
+            "diagnostics": self.diagnostics or {},
+            "enrichment": (self.diagnostics or {}).get("enrichment") or {},
         }
