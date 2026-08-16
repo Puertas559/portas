@@ -16,12 +16,18 @@
     if(lead?.companyId)return lead.companyId;
     const r=await fetch(`/api/companies?q=${encodeURIComponent(lead?.company||"")}`);const d=await r.json();return (d.items||[])[0]?.id;
   }
-  async function openDossier(lead){
+  function activateDossierTab(tab="summary"){
+    const button=document.querySelector(`#dossierTabs button[data-dossier-tab="${tab}"]`) || document.querySelector('#dossierTabs button[data-dossier-tab="summary"]');
+    if(!button)return;
+    document.querySelectorAll('#dossierTabs button').forEach(x=>x.classList.toggle('active',x===button));
+    document.querySelectorAll('[data-dossier-panel]').forEach(x=>x.hidden=x.dataset.dossierPanel!==button.dataset.dossierTab);
+  }
+  async function openDossier(lead, initialTab="summary"){
     const id=await resolveCompanyId(lead);if(!id)return window.alert("No se pudo localizar la empresa en el CRM.");
     currentCompanyId=id;const dialog=$("companyDossierDialog");dialog.showModal();$("dossierCompanyName").textContent=lead?.company||"Empresa";$("dossierCompanyMeta").textContent="Cargando ficha empresarial…";
     $("dossierSummary").innerHTML='<div class="dossier-empty">Cargando información empresarial…</div>';
     const r=await fetch(`/api/companies/${id}/dossier`);if(!r.ok){$("dossierSummary").innerHTML='<div class="dossier-empty">No se pudo cargar la ficha.</div>';return;}
-    dossier=await r.json();renderAll();
+    dossier=await r.json();renderAll();activateDossierTab(initialTab);
   }
   function renderAll(){
     const c=dossier.company,s=dossier.stats||{};
@@ -74,6 +80,8 @@
   function openActivity(){if(!currentCompanyId)return;$("activityCompanyId").value=currentCompanyId;$("activityCompanyLabel").textContent=dossier?.company?.name||'';fillActivityContacts();$("activityDialog").showModal();}
   async function createActivity(payload){const r=await fetch(`/api/companies/${currentCompanyId}/activities`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok){alert('No se pudo registrar la interacción.');return false;}await reloadDossier();return true;}
   async function reloadDossier(){const r=await fetch(`/api/companies/${currentCompanyId}/dossier`);if(r.ok){dossier=await r.json();renderAll();}}
+
+  window.openCompanyDossier=(lead,tab="summary")=>openDossier(lead,tab);
   document.addEventListener('click',e=>{const b=e.target.closest('.open-company-dossier');if(!b)return;const card=b.closest('.crm-card');const lead=(window.RADAR_LEADS||[]).find(x=>String(x.id)===card?.dataset.id);if(lead)openDossier(lead);});
   $("closeDossier")?.addEventListener('click',()=>$("companyDossierDialog").close());$("dossierLogActivity")?.addEventListener('click',openActivity);$("closeActivityDialog")?.addEventListener('click',()=>$("activityDialog").close());
   $("dossierTabs")?.addEventListener('click',e=>{const b=e.target.closest('button[data-dossier-tab]');if(!b)return;document.querySelectorAll('#dossierTabs button').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('[data-dossier-panel]').forEach(x=>x.hidden=x.dataset.dossierPanel!==b.dataset.dossierTab);});

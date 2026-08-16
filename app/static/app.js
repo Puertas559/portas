@@ -524,11 +524,6 @@ function renderWebsiteAnalysis(analysis) {
     ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
     : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
   const deepAction = scanMode === "quick" ? '<button class="deep-analysis"><i class="bi bi-arrow-repeat"></i> Profundizar ahora</button>' : '';
-  const drafts = decision === "QUALIFIED" ? `
-    <div class="outreach-drafts">
-      <div><b>Mensaje para WhatsApp</b><textarea readonly>${escapeHtml(analysis.whatsappMessage || "")}</textarea><button class="copy-draft">Copiar WhatsApp</button></div>
-      <div><b>Correo personalizado · ${escapeHtml(analysis.emailSubject || "")}</b><textarea readonly>${escapeHtml(analysis.emailBody || "")}</textarea><button class="copy-draft">Copiar correo</button></div>
-    </div>` : "";
   return `
     <article class="analysis-card ${scanMode === "quick" ? "quick-result" : "deep-result"}" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
       <div class="analysis-score"><strong>${Number(analysis.score) || 0}</strong><small>${escapeHtml(analysis.level)}</small></div>
@@ -543,7 +538,6 @@ function renderWebsiteAnalysis(analysis) {
       ${analysis.enrichment && Object.keys(analysis.enrichment).length ? `<div class="analysis-autofill"><div><b><i class="bi bi-magic"></i> Datos preparados para la ficha 360°</b><span>El radar completará automáticamente los campos seguros al ingresar la empresa al CRM.</span></div><div class="autofill-grid"><span><small>Razón social</small><strong>${escapeHtml(analysis.enrichment.legalName || 'Por validar')}</strong></span><span><small>RUC</small><strong>${escapeHtml(analysis.enrichment.ruc || 'Por validar')}</strong></span><span><small>Fundación</small><strong>${escapeHtml(analysis.enrichment.foundedYear || 'Por validar')}</strong></span><span><small>Plantas / unidades</small><strong>${Number((analysis.enrichment.operationPlants||[]).length)}</strong></span><span><small>Redes detectadas</small><strong>${Number(Object.keys(analysis.enrichment.socialLinks||{}).length)}</strong></span><span><small>Revisión manual</small><strong>${Number((analysis.enrichment.reviewRequired||[]).length)} campo(s)</strong></span></div></div>` : ''}
       ${Array.isArray(analysis.alternativeSites) && analysis.alternativeSites.length ? `<div class="site-alternative-notice"><div><b>Presencia digital relacionada detectada</b><span>${analysis.alternativeSites.length} sitio(s) alternativo(s) o redirección(es) vinculados al dominio analizado.</span></div><button class="show-site-alternatives">Ver sitios relacionados</button></div>` : ''}
       <div class="analysis-decision">${deepAction}${decisionActions}</div>
-      ${drafts}
     </article>`;
 }
 
@@ -700,7 +694,13 @@ $("siteAnalysisResults").addEventListener("click", async (event) => {
       if (existing >= 0) leads[existing] = data.opportunity; else leads.unshift(data.opportunity);
       selected = data.opportunity;
       render();
-      window.setTimeout(() => $("crm").scrollIntoView({ behavior: "smooth" }), 250);
+      window.setTimeout(() => {
+        if (typeof window.openCompanyDossier === "function") {
+          window.openCompanyDossier(data.opportunity, "messages");
+        } else {
+          $("crm").scrollIntoView({ behavior: "smooth" });
+        }
+      }, 120);
     }
     toast(qualify ? "Empresa ingresada al CRM y mensajes generados" : "Empresa desclasificada");
   } catch (error) {
