@@ -249,6 +249,48 @@ def record_evidence(tenant, company, project, data):
     return signal, evidence
 
 
+
+def company_completeness(company):
+    checks = {
+        "website": bool(company.website),
+        "phone": bool(company.phone_business or company.phone),
+        "email": bool(company.email_business or company.email),
+        "whatsapp": bool(company.whatsapp),
+        "location": bool(company.city or company.address),
+        "sector": bool(company.sector),
+        "identity": int(company.identity_confidence or 0) >= 65,
+        "decisionMaker": bool(company.contacts),
+    }
+    weights = {"website": 12, "phone": 13, "email": 13, "whatsapp": 12, "location": 10, "sector": 10, "identity": 10, "decisionMaker": 20}
+    score = sum(weights[key] for key, present in checks.items() if present)
+    missing = [key for key, present in checks.items() if not present]
+    return min(100, score), missing
+
+
+def lead_readiness(opportunity):
+    company = opportunity.project.company
+    completeness, missing = company_completeness(company)
+    contact_ready = bool(opportunity.contact_verified or company.contacts)
+    readiness = round(
+        (opportunity.score or 0) * .25 +
+        (opportunity.buying_window_score or 0) * .20 +
+        (opportunity.confidence_score or 0) * .15 +
+        completeness * .20 +
+        (100 if contact_ready else opportunity.accessibility_score or 0) * .15 +
+        (100 if opportunity.next_best_action else 0) * .05
+    )
+    blockers = list(missing)
+    if (opportunity.confidence_score or 0) < 60: blockers.append("confidence")
+    if (opportunity.score or 0) < 65: blockers.append("commercialFit")
+    if not contact_ready: blockers.append("decisionMaker")
+    sales_ready = readiness >= 70 and (opportunity.score or 0) >= 65 and (opportunity.confidence_score or 0) >= 55 and contact_ready
+    company.data_completeness_score = completeness
+    company.research_status = "READY" if completeness >= 80 and contact_ready else "PENDING"
+    opportunity.lead_readiness_score = min(100, readiness)
+    opportunity.sales_ready = bool(sales_ready)
+    return opportunity.lead_readiness_score, sorted(set(blockers))
+
+
 def score_opportunity(tenant, opportunity, data):
     configured = (tenant.settings or {}).get("scoring_weights") or DEFAULT_WEIGHTS
     total_weight = sum(float(configured.get(code, 0)) for code in DEFAULT_WEIGHTS) or 1
@@ -310,6 +352,8 @@ def score_opportunity(tenant, opportunity, data):
     company.momentum_score = max(company.momentum_score or 0, opportunity.momentum_score)
     company.watch_status = "HOT" if total >= 90 else "WARM" if total >= 70 else "WATCH"
     opportunity.next_best_action = next_best_action_for(opportunity)
+    company.last_enriched_at = datetime.now(timezone.utc)
+    lead_readiness(opportunity)
     return evaluation
 
 

@@ -65,6 +65,9 @@ class Company(db.Model):
     accessibility_score = db.Column(db.Integer, nullable=False, default=0)
     momentum_score = db.Column(db.Integer, nullable=False, default=0)
     watch_status = db.Column(db.String(30), nullable=False, default="WATCH", index=True)
+    research_status = db.Column(db.String(30), nullable=False, default="PENDING", index=True)
+    data_completeness_score = db.Column(db.Integer, nullable=False, default=0)
+    last_enriched_at = db.Column(db.DateTime(timezone=True), index=True)
     last_signal_at = db.Column(db.DateTime(timezone=True), index=True)
     status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
     deleted_at = db.Column(db.DateTime(timezone=True))
@@ -210,6 +213,12 @@ class Opportunity(db.Model):
     potential_deal_value = db.Column(db.Numeric(18, 2), nullable=False, default=0)
     expected_revenue = db.Column(db.Numeric(18, 2), nullable=False, default=0)
     score_version = db.Column(db.String(60), nullable=False, default="legacy-v1")
+    lead_readiness_score = db.Column(db.Integer, nullable=False, default=0, index=True)
+    sales_ready = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    outcome_code = db.Column(db.String(50), index=True)
+    lost_reason = db.Column(db.String(80), index=True)
+    last_result_at = db.Column(db.DateTime(timezone=True), index=True)
+    last_contact_at = db.Column(db.DateTime(timezone=True), index=True)
     discovered_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     project = db.relationship("Project", back_populates="opportunities")
@@ -261,6 +270,10 @@ class Opportunity(db.Model):
             "intent": self.intent_score, "dataConfidence": self.data_confidence,
             "potentialDealValue": float(self.potential_deal_value or 0),
             "expectedRevenue": float(self.expected_revenue or 0), "scoreVersion": self.score_version,
+            "leadReadiness": self.lead_readiness_score, "salesReady": self.sales_ready,
+            "outcomeCode": self.outcome_code, "lostReason": self.lost_reason,
+            "dataCompleteness": self.project.company.data_completeness_score,
+            "lastEnrichedAt": self.project.company.last_enriched_at.isoformat() if self.project.company.last_enriched_at else None,
             "discoveredAt": self.discovered_at.isoformat() if self.discovered_at else None,
         }
 

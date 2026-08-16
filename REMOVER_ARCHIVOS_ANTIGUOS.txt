@@ -1,0 +1,7 @@
+REMOVER ESTOS ARCHIVOS SI USA EL PATCH:
+app/services/google_places.py
+app/static/prospecting-map.js
+app/static/prospecting-map.css
+docs/google-maps-prospecting.md
+
+La versión completa ya viene limpia y no contiene esos archivos.

@@ -11,7 +11,7 @@ from ..models import (
     ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, Watchlist, WebsiteAnalysis,
 )
 from ..services.entity_resolution import resolve_company, resolve_project
-from ..services.intelligence import as_datetime, link_evidence_and_products, record_evidence, score_opportunity
+from ..services.intelligence import as_datetime, company_completeness, lead_readiness, link_evidence_and_products, record_evidence, score_opportunity
 from ..tenant import current_tenant, current_user, require_permission
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -43,9 +43,10 @@ def _create_cadence(opportunity):
     now = datetime.now(timezone.utc)
     steps = [
         (0, "WHATSAPP", "Enviar primer contacto personalizado por WhatsApp"),
-        (2, "CALL", "Llamar e identificar al responsable de mantenimiento, operaciones o compras"),
-        (5, "EMAIL", "Enviar carta de presentación y casos aplicables"),
-        (10, "VISIT", "Proponer una visita técnica presencial"),
+        (1, "CALL", "Llamar e identificar al responsable técnico y validar la etapa del proyecto"),
+        (3, "EMAIL", "Enviar presentación ejecutiva con solución vinculada al contexto de la empresa"),
+        (7, "FOLLOW_UP", "Hacer seguimiento con una pregunta de avance o cronograma"),
+        (14, "VISIT", "Proponer visita técnica o reunión de diagnóstico"),
     ]
     for step, (days, channel, title) in enumerate(steps, 1):
         db.session.add(SalesTask(opportunity=opportunity, title=title, channel=channel, due_at=now + timedelta(days=days), sequence_step=step))
@@ -305,6 +306,31 @@ def website_analysis_create():
         return jsonify(error="No se pudo analizar el sitio. Verifique que sea público y esté disponible."), 502
 
 
+@api_bp.post("/website-analysis/bulk")
+def website_analysis_bulk():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("urls") or []
+    if isinstance(raw, str):
+        raw = [part.strip() for part in raw.replace("\r", "\n").split("\n") if part.strip()]
+    urls = []
+    for item in raw:
+        candidate = str(item).strip()
+        if candidate and candidate not in urls:
+            urls.append(candidate)
+    if not urls:
+        return jsonify(error="Ingrese al menos un sitio o URL"), 400
+    if len(urls) > 25:
+        return jsonify(error="El análisis en lote admite hasta 25 sitios por ejecución"), 400
+    from ..services.site_analyzer import analyze_website
+    results, errors = [], []
+    for url in urls:
+        try:
+            results.append(analyze_website(url).to_dict())
+        except Exception as exc:
+            errors.append({"url": url, "error": str(exc)[:180]})
+    return jsonify(results=results, errors=errors, analyzed=len(results), failed=len(errors)), 207 if errors else 201
+
+
 @api_bp.get("/website-analysis")
 def website_analysis_list():
     tenant = current_tenant()
@@ -320,30 +346,30 @@ def _commercial_messages(analysis):
     services = analysis.services or ["evaluación técnica y proyecto a medida"]
     product_text = ", ".join(products[:3])
     service_text = ", ".join(services[:2])
+    evidence = "; ".join((analysis.reasons or [])[:2]) or analysis.summary or f"actividad empresarial en el sector {analysis.sector}"
     whatsapp = (
-        f"Hola, {contact}. Soy parte del equipo comercial de {brand_name}. "
-        f"Al conocer la actividad de {analysis.company_name} en el sector {analysis.sector}, "
-        f"identificamos una posible aplicación para {product_text}. "
-        f"Podemos realizar {service_text} para validar la solución adecuada. "
-        "¿Con quién podríamos coordinar una breve conversación técnica?"
+        f"Hola, ¿cómo está? Soy David Granja, del equipo comercial de {brand_name}. "
+        f"Estuve conociendo la operación de {analysis.company_name} y, a partir de información pública sobre {evidence.lower()}, "
+        f"identificamos un posible encaje para {product_text}. "
+        "Nuestro objetivo es entender primero la operación y la etapa actual, no enviar un catálogo genérico. "
+        "¿Podría indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? "
+        "Me gustaría coordinar una conversación breve para validar si podemos aportar una solución técnica adecuada."
     )
-    subject = f"Propuesta de soluciones de accesos automáticos para {analysis.company_name}"
+    subject = f"Puertas Brasil Paraguay | Primer Contacto — {analysis.company_name}"
     email = (
-        f"Estimado/a {contact}:\n\n"
-        f"Es un gusto presentarle a {brand_name}, empresa especializada en soluciones "
-        "de cerramientos automáticos para los segmentos industrial, logístico, comercial y aeronáutico.\n\n"
-        f"A partir de la información pública de {analysis.company_name}, dedicada al sector {analysis.sector}, "
-        f"identificamos una posible oportunidad de mejora mediante {product_text}. Nuestra propuesta puede incluir "
-        f"{service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones, repuestos "
-        "multimarca y retrofit.\n\n"
-        "Nos gustaría conocer su operación y verificar, sin compromiso, si estas soluciones pueden aportar mayor "
-        "seguridad, eficiencia y continuidad operativa. Quedamos a disposición para coordinar una visita técnica "
-        "o una breve reunión con la persona responsable de mantenimiento, operaciones o compras.\n\n"
-        f"Atentamente,\nEquipo comercial de {brand_name}\n"
+        f"Estimado/a {contact},\n\n"
+        f"Mi nombre es David Granja y formo parte del equipo comercial de {brand_name}. Estuvimos revisando información pública de "
+        f"{analysis.company_name}, vinculada al sector {analysis.sector}, y encontramos señales que pueden tener aplicación para {product_text}.\n\n"
+        f"En particular, observamos: {evidence}.\n\n"
+        f"Somos fábrica especializada en soluciones de cerramientos y accesos automáticos para operaciones industriales, logísticas, comerciales y aeronáuticas. "
+        f"Podemos trabajar con {service_text}, además de instalación, mantenimiento preventivo y correctivo, retrofit, reparaciones y repuestos multimarca.\n\n"
+        "Nuestro interés es comprender la necesidad real y la etapa del proyecto u operación antes de proponer una solución. "
+        "¿Podrían indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? "
+        "Si resulta oportuno, podemos coordinar una conversación de 15 minutos o una visita técnica.\n\n"
+        f"Saludos cordiales,\nDavid Granja\n{brand_name}\n"
         f"{brand.get('sales_phone', '')}\n{brand.get('sales_email', '')}\n{brand.get('website', '')}"
     )
     return whatsapp, subject, email
-
 
 @api_bp.post("/website-analysis/<int:analysis_id>/qualify")
 @require_permission("WRITE_CRM")
@@ -372,6 +398,9 @@ def website_analysis_qualify(analysis_id):
     whatsapp, subject, email = _commercial_messages(analysis)
     analysis.decision, analysis.opportunity_id = "QUALIFIED", opportunity.id
     analysis.whatsapp_message, analysis.email_subject, analysis.email_body = whatsapp, subject, email
+    opportunity.project.company.last_enriched_at = datetime.now(timezone.utc)
+    opportunity.project.company.data_completeness_score = company_completeness(opportunity.project.company)[0]
+    lead_readiness(opportunity)
     db.session.add(TimelineEvent(
         opportunity=opportunity, event_type="WEBSITE_QUALIFICATION",
         description="Empresa calificada manualmente; mensajes comerciales personalizados generados",
@@ -534,13 +563,19 @@ def commercial_metrics():
     contacted = [row for row in opportunities if row.status not in {"NOVO", "QUALIFICADO", "DESCARTADO"}]
     won = [row for row in opportunities if row.status == "GANHO"]
     overdue = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id, SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
+    companies = Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").all()
+    sales_ready = sum(1 for row in active if row.sales_ready)
+    with_decision_maker = sum(1 for company in companies if company.contacts)
+    completeness = round(sum(company.data_completeness_score or 0 for company in companies) / len(companies), 1) if companies else 0
     return jsonify(
         opportunities=len(opportunities), contacted=len(contacted), proposals=len(proposals), won=len(won),
         pipelineValue=sum(row.estimated_value or 0 for row in active),
         weightedValue=sum((row.estimated_value or 0) * (row.probability or 0) / 100 for row in active),
-        proposalValue=sum(row.amount for row in proposals), overdueTasks=overdue,
+        proposalValue=sum(row.amount for row in proposals), overdueTasks=overdue, salesReady=sales_ready,
         responseRate=round(100 * len(contacted) / len(opportunities), 1) if opportunities else 0,
         winRate=round(100 * len(won) / len(opportunities), 1) if opportunities else 0,
+        accounts=len(companies), withDecisionMaker=with_decision_maker, averageCompleteness=completeness,
+        decisionMakerCoverage=round(100 * with_decision_maker / len(companies), 1) if companies else 0,
     )
 
 
@@ -755,6 +790,9 @@ def company_contact_create(company_id):
     )
     db.session.add(contact)
     company.accessibility_score = min(100, (company.accessibility_score or 0) + 15)
+    company.last_enriched_at = datetime.now(timezone.utc)
+    for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
+        lead_readiness(opportunity)
     db.session.commit()
     return jsonify(id=contact.id, companyId=company.id), 201
 
@@ -789,96 +827,105 @@ def watchlist_list():
     } for row in rows])
 
 
-@api_bp.get("/prospecting-map/config")
-def prospecting_map_config():
-    import os
-    return jsonify(
-        enabled=bool(os.getenv("GOOGLE_PLACES_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY")),
-        browserKey=os.getenv("GOOGLE_MAPS_BROWSER_KEY") or "",
-    )
 
-
-@api_bp.get("/prospecting-map/search")
-def prospecting_map_search():
-    from ..services.google_places import search_places
+@api_bp.get("/workspace/overview")
+def workspace_overview():
     tenant = current_tenant()
-    try:
-        payload = search_places(
-            query=request.args.get("q", ""),
-            city=request.args.get("city", ""),
-            region=request.args.get("region", ""),
-            industry=request.args.get("industry", ""),
-            depth=request.args.get("depth", "deep"),
-        )
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
-    except RuntimeError as exc:
-        return jsonify(error=str(exc)), 502
+    now = datetime.now(timezone.utc)
+    companies = Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").all()
+    opportunities = Opportunity.query.filter_by(tenant_id=tenant.id).all()
+    active = [row for row in opportunities if row.status not in {"GANHO", "PERDIDO", "DESCARTADO"}]
+    research = []
+    for company in companies:
+        completeness, missing = company_completeness(company)
+        company.data_completeness_score = completeness
+        age_days = None
+        if company.last_enriched_at:
+            stamp = company.last_enriched_at if company.last_enriched_at.tzinfo else company.last_enriched_at.replace(tzinfo=timezone.utc)
+            age_days = max(0, (now - stamp).days)
+        research.append({
+            "companyId": company.id, "company": company.name, "sector": company.sector, "city": company.city, "website": company.website,
+            "fit": company.account_fit_score, "momentum": company.momentum_score, "accessibility": company.accessibility_score,
+            "completeness": completeness, "missing": missing, "staleDays": age_days,
+            "priority": round((company.account_fit_score or 0) * .45 + (company.momentum_score or 0) * .35 + (100-completeness) * .20),
+        })
+    research.sort(key=lambda row: row["priority"], reverse=True)
+    sales_ready = []
+    for row in active:
+        score, blockers = lead_readiness(row)
+        if row.sales_ready or score >= 60:
+            item = row.to_dict(); item["blockers"] = blockers; sales_ready.append(item)
+    sales_ready.sort(key=lambda row: (row.get("salesReady", False), row.get("leadReadiness", 0), row.get("score", 0)), reverse=True)
+    stale = [row for row in research if row["staleDays"] is None or row["staleDays"] >= 90]
+    smart = {
+        "hotWithoutDecisionMaker": [row.to_dict() for row in active if row.score >= 75 and not (row.contact_verified or row.project.company.contacts)][:50],
+        "buyingWindow": [row.to_dict() for row in active if row.buying_window_score >= 75][:50],
+        "followUpDue": [row.to_dict() for row in active if row.next_action_at and row.next_action_at <= now + timedelta(days=1)][:50],
+        "proposalStalled": [row.to_dict() for row in active if row.status in {"ORCAMENTO", "NEGOCIACAO"} and row.updated_at and (now - (row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc))).days >= 5][:50],
+        "staleData": stale[:50],
+    }
+    db.session.commit()
+    return jsonify(researchQueue=research[:100], salesReady=sales_ready[:100], smartLists=smart, summary={
+        "salesReady": sum(1 for row in active if row.sales_ready), "needsResearch": sum(1 for row in research if row["completeness"] < 80),
+        "staleAccounts": len(stale), "withoutDecisionMaker": sum(1 for company in companies if not company.contacts),
+    })
 
-    place_ids = [f"gplace:{row['placeId']}" for row in payload["results"] if row.get("placeId")]
-    crm_by_place = {}
-    if place_ids:
-        for company in Company.query.filter(Company.tenant_id == tenant.id, Company.registration_id.in_(place_ids)).all():
-            crm_by_place[company.registration_id.removeprefix("gplace:")] = company.id
-    for row in payload["results"]:
-        company_id = crm_by_place.get(row.get("placeId"))
-        row["inCrm"] = bool(company_id)
-        row["crmCompanyId"] = company_id
-    return jsonify(payload)
 
-
-@api_bp.post("/prospecting-map/import")
+@api_bp.post("/opportunities/<int:opportunity_id>/cadence")
 @require_permission("WRITE_CRM")
-def prospecting_map_import():
-    data = request.get_json(silent=True) or {}
-    rows = data.get("places") or []
-    if not isinstance(rows, list) or not rows:
-        return jsonify(error="Seleccione al menos una empresa"), 400
-    if len(rows) > 100:
-        return jsonify(error="Importe como máximo 100 empresas por lote"), 400
+def opportunity_cadence(opportunity_id):
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
+    replace = bool((request.get_json(silent=True) or {}).get("replace"))
+    if replace:
+        SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").delete()
+        db.session.flush()
+    _create_cadence(opportunity)
+    db.session.flush()
+    pending = [row for row in opportunity.tasks if row.status == "PENDING"]
+    opportunity.next_action_at = min((row.due_at for row in pending), default=opportunity.next_action_at)
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="CADENCE", description="Cadencia comercial creada/recalculada"))
+    db.session.commit()
+    return jsonify(tasks=[row.to_dict() for row in pending])
 
-    created, existing, errors = [], [], []
-    for row in rows:
-        if not row.get("company") or not row.get("placeId"):
-            continue
-        payload = {
-            "company": row.get("company"),
-            "project": "Empresa identificada en mapa de prospección",
-            "event": "GOOGLE_PLACES_DISCOVERY",
-            "projectType": "TERRITORIAL_PROSPECTING",
-            "stage": "Prospección territorial",
-            "city": data.get("city") or "Por validar",
-            "department": data.get("region") or "Por validar",
-            "country": "Paraguay",
-            "sector": row.get("primaryType") or data.get("industry") or "Industria y manufactura",
-            "website": row.get("website"),
-            "phone": row.get("phone"),
-            "whatsapp": row.get("phone"),
-            "address": row.get("address"),
-            "registrationId": f"gplace:{row.get('placeId')}",
-            "sourceName": "Google Places",
-            "sourceUrl": row.get("mapsUrl") or row.get("website"),
-            "sourceTitle": row.get("company"),
-            "evidence": f"Empresa identificada por Google Places durante barrido territorial. Coincidencia: {row.get('matchedTerm') or 'búsqueda empresarial'}.",
-            "evidenceClassification": "FACT",
-            "dataConfidence": 72 if row.get("website") or row.get("phone") else 60,
-            "icpFit": 65,
-            "intent": 25,
-            "probability": 10,
-            "products": [],
-        }
-        try:
-            opportunity, was_created = _create_intelligence_opportunity(payload)
-            db.session.commit()
-            if was_created:
-                created.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
-            else:
-                existing.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
-        except Exception as exc:
-            db.session.rollback()
-            errors.append({"company": row.get("company"), "error": str(exc)[:180]})
-            continue
-    return jsonify(created=created, existing=existing, errors=errors, imported=len(created), skipped=len(existing))
+
+@api_bp.post("/opportunities/<int:opportunity_id>/outcome")
+@require_permission("WRITE_CRM")
+def opportunity_outcome(opportunity_id):
+    tenant = current_tenant()
+    opportunity = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    outcome = (data.get("outcome") or "").upper()
+    valid = {"RESPONDED", "NO_RESPONSE", "WRONG_CONTACT", "FUTURE_PROJECT", "QUOTE_SENT", "WON", "LOST", "POSTPONED", "NO_FIT"}
+    if outcome not in valid:
+        return jsonify(error="Resultado comercial inválido"), 400
+    lost_reason = (data.get("lostReason") or "").upper() or None
+    opportunity.outcome_code = outcome; opportunity.lost_reason = lost_reason; opportunity.last_result_at = datetime.now(timezone.utc)
+    if outcome in {"RESPONDED", "QUOTE_SENT", "WON", "LOST", "NO_FIT"}: opportunity.last_contact_at = datetime.now(timezone.utc)
+    status_map = {"RESPONDED":"RESPONDEU", "QUOTE_SENT":"ORCAMENTO", "WON":"GANHO", "LOST":"PERDIDO", "NO_FIT":"DESCARTADO", "POSTPONED":"MONITORAMENTO", "FUTURE_PROJECT":"MONITORAMENTO"}
+    if outcome in status_map: opportunity.status = status_map[outcome]
+    if opportunity.status in {"GANHO", "PERDIDO", "DESCARTADO"}: SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status":"CANCELLED"})
+    lead_readiness(opportunity)
+    db.session.add(TimelineEvent(opportunity=opportunity, event_type="COMMERCIAL_RESULT", description=f"Resultado: {outcome}" + (f" · Motivo: {lost_reason}" if lost_reason else "")))
+    db.session.commit(); return jsonify(opportunity.to_dict())
+
+
+@api_bp.post("/bulk/actions")
+@require_permission("WRITE_CRM")
+def bulk_actions():
+    tenant = current_tenant(); data = request.get_json(silent=True) or {}
+    ids = [int(value) for value in (data.get("opportunityIds") or []) if str(value).isdigit()][:100]
+    action = (data.get("action") or "").upper()
+    rows = Opportunity.query.filter(Opportunity.tenant_id == tenant.id, Opportunity.id.in_(ids)).all() if ids else []
+    if not rows: return jsonify(error="Seleccione oportunidades"), 400
+    for opportunity in rows:
+        if action == "CREATE_CADENCE": _create_cadence(opportunity)
+        elif action == "WATCH": opportunity.status = "MONITORAMENTO"; opportunity.project.company.watch_status = "WATCH"
+        elif action == "QUALIFY": opportunity.status = "QUALIFICADO"
+        elif action == "ASSIGN": opportunity.owner_name = str(data.get("owner") or "Equipo comercial").strip()
+        else: return jsonify(error="Acción masiva inválida"), 400
+        lead_readiness(opportunity)
+    db.session.commit(); return jsonify(updated=len(rows), action=action)
 
 
 @api_bp.get("/health")

@@ -91,3 +91,19 @@ Sin PostgreSQL local, la aplicación utiliza SQLite únicamente para desarrollo.
 ## Seguridad
 
 La plataforma dispone de autenticación por sesión, aislamiento por tenant y roles `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. Para evitar bloquear el despliegue actual, active `AUTH_REQUIRED=true` solamente después de configurar `ADMIN_EMAIL`, `ADMIN_PASSWORD` y una `SECRET_KEY` fuerte. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
+
+## Sales Workspace V5
+
+A interface foi reorganizada para operar como ferramenta diária de vendas, não como uma página longa. O módulo inicial é o qualificador por site; cada item da navegação abre apenas o workspace correspondente.
+
+Principais recursos V5:
+- Qualificação individual e em lote (até 25 sites por execução).
+- Research Queue com completude, dados faltantes, prioridade e validade dos dados.
+- Lead Readiness Score e flag Sales Ready.
+- Buying Committee com decisor, influenciadores e dados de contato.
+- Cadência comercial D0/D1/D3/D7/D14.
+- Registro estruturado de resultado comercial e motivo de perda.
+- Smart Lists atualizadas a partir do estado do CRM.
+- Ações em massa para cadência, monitoramento e qualificação.
+- Métricas de cobertura de decisores, completude, resposta, win rate e pipeline.
+- Google Maps/Places removido do produto; empresas encontradas manualmente podem ser qualificadas pelo site e levadas ao CRM.

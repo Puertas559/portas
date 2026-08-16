@@ -96,10 +96,13 @@ function renderKanban() {
 
 function contactMessage(lead, channel = selectedChannel) {
   const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos";
-  if (channel === "email") return `Asunto: Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company}:\n\nIdentificamos una posible aplicación de ${products} para su operación en ${lead.city}. ${brandName} puede realizar una evaluación técnica y proponer una solución a medida.\n\n¿Podemos coordinar una breve conversación con la persona responsable de mantenimiento, operaciones o compras?\n\nAtentamente,\nEquipo comercial de ${brandName}`;
-  if (channel === "call") return `GUION DE LLAMADA\n\nPresentarse como ${brandName}. Confirmar la actividad de ${lead.company} y preguntar por el responsable de mantenimiento, operaciones o compras. Validar necesidades de ${products}, próximos proyectos y disponibilidad para una visita técnica.`;
-  if (channel === "linkedin") return `Hola. Soy parte del equipo comercial de ${brandName}. Conocimos la operación de ${lead.company} y nos gustaría conectar con la persona responsable de mantenimiento, operaciones o compras para presentar soluciones industriales.`;
-  return `¡Hola! Soy parte del equipo comercial de ${brandName}. Identificamos que ${lead.company} opera en ${lead.city} y puede tener aplicación para ${products}. ¿Con quién podríamos coordinar una breve conversación técnica?`;
+  const context = lead.whyNow || `${lead.company} presenta una operación que puede requerir soluciones de acceso industrial.`;
+  const next = lead.nextBestAction || "validar el responsable técnico y el cronograma de la operación";
+  const role = "Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos";
+  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, retrofit y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
+  if (channel === "call") return `GUION DE LLAMADA\n\n1. Presentarse como David Granja, de ${brandName}.\n2. Mencionar el contexto: ${context}\n3. Pedir al responsable de ${role}.\n4. Validar etapa, cronograma, accesos industriales, áreas de carga y necesidades de ${products}.\n5. Objetivo de la llamada: ${next}.\n6. Cerrar proponiendo visita técnica o conversación de 15 minutos.`;
+  if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuvimos conociendo la operación de ${lead.company} y vimos un posible encaje para ${products}. Me gustaría conectar con la persona responsable de ${role} para entender la etapa actual y evaluar si podemos aportar una solución técnica. ¿Podría orientarme con el contacto adecuado?`;
+  return `Hola, ¿cómo está? Soy David Granja, de ${brandName}. Estuve conociendo la operación de ${lead.company} y detectamos un posible encaje para ${products}. ${context}\n\nQuisiera hablar con la persona responsable de ${role} para entender la etapa actual y verificar si podemos aportar una solución adecuada. ¿Podría indicarme con quién debería conversar?`;
 }
 
 function renderCrm() {
@@ -169,7 +172,7 @@ function activateTab(tabName) {
   document.querySelectorAll(".tabs button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
-  ["overview", "evidence", "timeline"].forEach((name) => {
+  ["overview", "committee", "evidence", "timeline"].forEach((name) => {
     $(name + "Panel").classList.toggle("hidden", name !== tabName);
   });
 }
