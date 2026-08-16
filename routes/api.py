@@ -314,46 +314,34 @@ def website_analysis_list():
 
 def _commercial_messages(analysis):
     brand = current_tenant().settings or {}
-    brand_name = brand.get("brand_name", "Puertas Brasil")
-    person = analysis.contacts[0] if analysis.contacts else None
-    greeting = f"Hola, {person}." if person else "Hola, buen día."
-    email_greeting = f"Estimado/a {person}," if person else "Estimados señores,"
-    products = analysis.products or ["soluciones de accesos automáticos industriales"]
+    brand_name = brand.get("brand_name", "Puertas Brasil PY")
+    contact = analysis.contacts[0] if analysis.contacts else f"equipo de {analysis.company_name}"
+    products = analysis.products or ["soluciones de accesos automáticos"]
     services = analysis.services or ["evaluación técnica y proyecto a medida"]
     product_text = ", ".join(products[:3])
     service_text = ", ".join(services[:2])
-    reason = (analysis.reasons or [f"actividad en el sector {analysis.sector}"])[0]
-    size_context = ""
-    if analysis.company_size and analysis.company_size != "No determinado":
-        size_context = f" y una operación de porte {analysis.company_size.lower()}"
-
     whatsapp = (
-        f"{greeting} Soy David Granja, de {brand_name}. "
-        f"Estuve revisando la operación de {analysis.company_name} y encontré un punto que puede ser relevante para ustedes: "
-        f"{reason.lower()}. Por el perfil de la empresa, vemos posible aplicación de {product_text}{size_context}. "
-        "No quisiera enviarle una presentación genérica; prefiero entender primero si existe algún proyecto, ampliación, necesidad de mantenimiento o mejora de accesos en curso. "
-        "¿Me podría indicar quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos para conversar brevemente?"
+        f"Hola, {contact}. Soy parte del equipo comercial de {brand_name}. "
+        f"Al conocer la actividad de {analysis.company_name} en el sector {analysis.sector}, "
+        f"identificamos una posible aplicación para {product_text}. "
+        f"Podemos realizar {service_text} para validar la solución adecuada. "
+        "¿Con quién podríamos coordinar una breve conversación técnica?"
     )
-
-    subject = f"{analysis.company_name} | Accesos industriales y soporte técnico"
-    email = f"""{email_greeting}
-
-Mi nombre es David Granja y formo parte del equipo comercial de {brand_name}.
-
-Antes de contactarlos revisamos información pública de {analysis.company_name}. El análisis indica {reason.lower()} y una posible afinidad con soluciones como {product_text}. Por ese motivo, nuestro contacto no busca enviar un catálogo de forma indiscriminada, sino identificar si existe actualmente alguna necesidad vinculada a nuevos accesos, ampliaciones, mantenimiento, retrofit o mejora de la operación.
-
-Podemos apoyar con {service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones especializadas y repuestos multimarca.
-
-Si fuera posible, agradecería el contacto de la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos. Con una breve conversación podemos entender el escenario y verificar si tiene sentido avanzar con una visita técnica o una propuesta específica.
-
-Quedo a disposición.
-
-Atentamente,
-David Granja
-{brand_name}
-{brand.get('sales_phone', '')}
-{brand.get('sales_email', '')}
-{brand.get('website', '')}"""
+    subject = f"Propuesta de soluciones de accesos automáticos para {analysis.company_name}"
+    email = (
+        f"Estimado/a {contact}:\n\n"
+        f"Es un gusto presentarle a {brand_name}, empresa especializada en soluciones "
+        "de cerramientos automáticos para los segmentos industrial, logístico, comercial y aeronáutico.\n\n"
+        f"A partir de la información pública de {analysis.company_name}, dedicada al sector {analysis.sector}, "
+        f"identificamos una posible oportunidad de mejora mediante {product_text}. Nuestra propuesta puede incluir "
+        f"{service_text}, además de instalación, mantenimiento preventivo y correctivo, reparaciones, repuestos "
+        "multimarca y retrofit.\n\n"
+        "Nos gustaría conocer su operación y verificar, sin compromiso, si estas soluciones pueden aportar mayor "
+        "seguridad, eficiencia y continuidad operativa. Quedamos a disposición para coordinar una visita técnica "
+        "o una breve reunión con la persona responsable de mantenimiento, operaciones o compras.\n\n"
+        f"Atentamente,\nEquipo comercial de {brand_name}\n"
+        f"{brand.get('sales_phone', '')}\n{brand.get('sales_email', '')}\n{brand.get('website', '')}"
+    )
     return whatsapp, subject, email
 
 
@@ -799,6 +787,102 @@ def watchlist_list():
         "reason": row.reason, "momentum": row.company.momentum_score, "fit": row.company.account_fit_score,
         "nextCheckAt": row.next_check_at.isoformat() if row.next_check_at else None,
     } for row in rows])
+
+
+@api_bp.get("/prospecting-map/config")
+def prospecting_map_config():
+    import os
+    return jsonify(
+        enabled=True,
+        googlePlacesEnabled=bool(os.getenv("GOOGLE_PLACES_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY")),
+        browserKey=os.getenv("GOOGLE_MAPS_BROWSER_KEY") or "",
+        maxCalls=int(os.getenv("GOOGLE_PLACES_MAX_CALLS", "120")),
+    )
+
+
+@api_bp.get("/prospecting-map/search")
+def prospecting_map_search():
+    from ..services.google_places import search_places
+    tenant = current_tenant()
+    try:
+        payload = search_places(
+            query=request.args.get("q", ""),
+            city=request.args.get("city", ""),
+            region=request.args.get("region", ""),
+            industry=request.args.get("industry", ""),
+            depth=request.args.get("depth", "deep"),
+        )
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 502
+
+    source_ids = [row.get("sourceId") or (f"gplace:{row['placeId']}" if row.get("placeId") else None) for row in payload["results"]]
+    source_ids = [value for value in source_ids if value]
+    crm_by_source = {}
+    if source_ids:
+        for company in Company.query.filter(Company.tenant_id == tenant.id, Company.registration_id.in_(source_ids)).all():
+            crm_by_source[company.registration_id] = company.id
+    for row in payload["results"]:
+        source_id = row.get("sourceId") or (f"gplace:{row['placeId']}" if row.get("placeId") else None)
+        company_id = crm_by_source.get(source_id)
+        row["inCrm"] = bool(company_id)
+        row["crmCompanyId"] = company_id
+    return jsonify(payload)
+
+
+@api_bp.post("/prospecting-map/import")
+@require_permission("WRITE_CRM")
+def prospecting_map_import():
+    data = request.get_json(silent=True) or {}
+    rows = data.get("places") or []
+    if not isinstance(rows, list) or not rows:
+        return jsonify(error="Seleccione al menos una empresa"), 400
+    if len(rows) > 100:
+        return jsonify(error="Importe como máximo 100 empresas por lote"), 400
+
+    created, existing, errors = [], [], []
+    for row in rows:
+        if not row.get("company") or not (row.get("sourceId") or row.get("placeId")):
+            continue
+        payload = {
+            "company": row.get("company"),
+            "project": "Empresa identificada en mapa de prospección",
+            "event": "TERRITORIAL_DISCOVERY",
+            "projectType": "TERRITORIAL_PROSPECTING",
+            "stage": "Prospección territorial",
+            "city": data.get("city") or "Por validar",
+            "department": data.get("region") or "Por validar",
+            "country": "Paraguay",
+            "sector": row.get("primaryType") or data.get("industry") or "Industria y manufactura",
+            "website": row.get("website"),
+            "phone": row.get("phone"),
+            "whatsapp": row.get("phone"),
+            "address": row.get("address"),
+            "registrationId": row.get("sourceId") or f"gplace:{row.get('placeId')}",
+            "sourceName": row.get("source") or "Territorial Discovery",
+            "sourceUrl": row.get("mapsUrl") or row.get("website"),
+            "sourceTitle": row.get("company"),
+            "evidence": f"Empresa identificada durante barrido territorial por {row.get('source') or 'fuente empresarial'}. Coincidencia: {row.get('matchedTerm') or 'búsqueda empresarial'}.",
+            "evidenceClassification": "FACT",
+            "dataConfidence": 72 if row.get("website") or row.get("phone") else 60,
+            "icpFit": 65,
+            "intent": 25,
+            "probability": 10,
+            "products": [],
+        }
+        try:
+            opportunity, was_created = _create_intelligence_opportunity(payload)
+            db.session.commit()
+            if was_created:
+                created.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
+            else:
+                existing.append({"opportunityId": opportunity.id, "company": opportunity.project.company.name})
+        except Exception as exc:
+            db.session.rollback()
+            errors.append({"company": row.get("company"), "error": str(exc)[:180]})
+            continue
+    return jsonify(created=created, existing=existing, errors=errors, imported=len(created), skipped=len(existing))
 
 
 @api_bp.get("/health")

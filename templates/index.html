@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260815-redesign1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='prospecting-map.css') }}?v=20260816-map2">
 </head>
 <body>
 <div class="app">
@@ -18,7 +19,7 @@
       <span class="brand-product"><b>Radar Comercial</b><small>Inteligencia industrial · PY</small></span>
     </a>
     <nav>
-      <p>INTELIGENCIA</p><a class="active" href="#hoy"><i class="bi bi-sun-fill"></i><span>Mi día</span></a><a href="#radar"><i class="bi bi-broadcast-pin"></i><span>Radar comercial</span></a><a href="#captacion"><i class="bi bi-radar"></i><span>Captación automática</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a><a href="#prioridades"><i class="bi bi-stars"></i><span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#buscador"><i class="bi bi-search"></i><span>Buscar empresas</span></a>
+      <p>INTELIGENCIA</p><a class="active" href="#hoy"><i class="bi bi-sun-fill"></i><span>Mi día</span></a><a href="#radar"><i class="bi bi-broadcast-pin"></i><span>Radar comercial</span></a><a href="#captacion"><i class="bi bi-radar"></i><span>Captación automática</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a><a href="#prioridades"><i class="bi bi-stars"></i><span>Oportunidades</span><b>{{ leads|length }}</b></a><a href="#buscador"><i class="bi bi-search"></i><span>Buscar empresas</span></a><a href="#mapa-prospeccion"><i class="bi bi-map-fill"></i><span>Mapa de prospección</span></a>
       <p>OPERACIÓN</p><a href="#crm"><i class="bi bi-inbox-fill"></i><span>Caja CRM</span><b>{{ leads|length }}</b></a><a href="#pipeline"><i class="bi bi-kanban-fill"></i><span>Pipeline</span></a><a href="#visitas"><i class="bi bi-sign-turn-right-fill"></i><span>Rutas de visitas</span></a><a href="#timeline"><i class="bi bi-clock-history"></i><span>Cronología</span></a><a href="#alertas"><i class="bi bi-bell"></i><span>Alertas</span></a>
       <p>HERRAMIENTAS</p><a href="#triage"><i class="bi bi-building-check"></i><span>Calificar un sitio</span></a><a href="#pesquisas"><i class="bi bi-bookmark-search"></i><span>Búsquedas</span></a><a href="/api/exports/status"><i class="bi bi-download"></i><span>Exportaciones</span></a>
     </nav>
@@ -59,6 +60,36 @@
     <section class="search-results hidden" id="companySearchResults">
       <div class="section-head"><div><p class="eyebrow">DESCUBRIMIENTO EMPRESARIAL</p><h2>Empresas encontradas</h2><p id="companySearchMessage">Resultados públicos para validar comercialmente.</p></div><button class="icon-close" id="closeCompanySearch" aria-label="Cerrar resultados"><i class="bi bi-x-lg"></i></button></div>
       <div class="company-result-grid" id="companyResultGrid"></div>
+    </section>
+
+    <section class="prospecting-map-hub" id="mapa-prospeccion">
+      <div class="prospecting-map-head">
+        <div><p class="eyebrow">COBERTURA TERRITORIAL</p><h2>Mapa de prospección</h2><p>Varra una ciudad o región, seleccione empresas y envíelas directamente al CRM.</p></div>
+        <span class="map-provider"><i class="bi bi-google"></i> Google Places + fuentes territoriales</span>
+      </div>
+      <div class="map-searchbar">
+        <label class="map-query"><i class="bi bi-search"></i><input id="mapSearchQuery" placeholder="Ej.: industria, frigorífico, logística, fábrica" value="industria" autocomplete="off"></label>
+        <input id="mapSearchCity" placeholder="Ciudad">
+        <select id="mapSearchRegion"><option value="">Todo Paraguay</option><option>Alto Paraná</option><option>Central</option><option>Itapúa</option><option>Caaguazú</option><option>Presidente Hayes</option><option>Amambay</option><option>Concepción</option><option>Paraguarí</option><option>Cordillera</option><option>San Pedro</option></select>
+        <select id="mapSearchIndustry"><option value="industria">Industria amplia</option><option value="logistica">Logística y depósitos</option><option value="frigorifico">Frigoríficos y frío</option><option value="agro">Agronegocio</option><option value="construccion">Construcción industrial</option><option value="retail">Retail de gran porte</option><option value="aeronautica">Aeronáutica</option></select>
+        <select id="mapSearchDepth"><option value="quick">Rápida</option><option value="deep" selected>Profunda</option><option value="territorial">Territorial — máxima cobertura</option></select>
+        <button class="primary" id="runMapSearch"><i class="bi bi-radar"></i> Barrer territorio</button>
+      </div>
+      <div class="map-search-note"><i class="bi bi-info-circle"></i><span>La búsqueda territorial divide la región en polos, expande decenas de actividades relacionadas, combina fuentes y elimina duplicados antes de mostrar empresas.</span></div>
+      <div class="map-discovery-stats" id="mapDiscoveryStats">
+        <article><small>ENCONTRADAS</small><b>0</b></article><article><small>NUEVAS</small><b>0</b></article><article><small>YA EN CRM</small><b>0</b></article><article><small>CON SITIO</small><b>0</b></article><article><small>CON CONTACTO</small><b>0</b></article><article><small>SELECCIONADAS</small><b>0</b></article>
+      </div>
+      <div class="prospecting-map-layout">
+        <div class="map-stage">
+          <div id="googleProspectingMap" class="google-map"><div class="map-empty"><i class="bi bi-map"></i><strong>Mapa listo para prospección</strong><span>Configure las claves de Google Maps en Railway y ejecute una búsqueda.</span></div></div>
+          <div class="map-legend"><span><i class="pin-dot new"></i>Nueva</span><span><i class="pin-dot crm"></i>En CRM</span><span><i class="pin-dot selected"></i>Seleccionada</span></div>
+        </div>
+        <aside class="map-results-panel">
+          <div class="map-results-toolbar"><label><input type="checkbox" id="selectAllMapResults"> Seleccionar visibles</label><button id="importMapSelection" class="primary"><i class="bi bi-inbox-arrow-down"></i> Agregar al CRM</button></div>
+          <div id="mapSearchStatus" class="map-search-status">Ejecute una búsqueda para descubrir empresas.</div>
+          <div id="mapPlaceResults" class="map-place-results"></div>
+        </aside>
+      </div>
     </section>
 
     <section class="metrics">
@@ -167,5 +198,6 @@
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }};</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='prospecting-map.js') }}?v=20260816-map2"></script>
 </body>
 </html>
