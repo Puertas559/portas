@@ -7,7 +7,7 @@ from sqlalchemy import text
 from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import (
-    AuditLog, CollectorRun, Company, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
+    AuditLog, CollectorRun, Company, CompanyActivity, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
     ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, Watchlist, WebsiteAnalysis,
 )
 from ..services.entity_resolution import resolve_company, resolve_project
@@ -35,6 +35,59 @@ def _optional_number(value):
         return max(0, float(value))
     except (TypeError, ValueError):
         raise ValueError("Valor numérico inválido")
+
+
+def _department_context(contact=None, email=None):
+    blob = " ".join(filter(None, [getattr(contact, "role", None), getattr(contact, "buying_role", None), email])).lower()
+    if any(k in blob for k in ("marketing", "mercadeo", "comunicacion", "comunicación")):
+        return "MARKETING"
+    if any(k in blob for k in ("compra", "buyer", "procurement", "abastecimiento")):
+        return "COMPRAS"
+    if any(k in blob for k in ("mantenimiento", "ingenier", "infraestructura", "proyecto", "técnic", "tecnic")):
+        return "TECNICO"
+    if any(k in blob for k in ("logistica", "logística", "operacion", "operación", "deposito", "depósito")):
+        return "OPERACIONES"
+    if any(k in blob for k in ("direccion", "dirección", "gerencia", "director", "gerente", "ceo")):
+        return "DIRECCION"
+    return "GENERAL"
+
+
+def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
+    company_name = company.name
+    contact_name = contact.name.strip() if contact and contact.name else ""
+    email = (contact.email if contact else None) or company.email_business or company.email or ""
+    dept = _department_context(contact, email)
+    greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
+    sector = company.sector or "su operación"
+    products = (opportunity.products if opportunity else []) or []
+    product_phrase = ", ".join(products[:3]) if products else "soluciones de accesos automáticos e industriales"
+    intro = (
+        "Mi nombre es David Granja y represento a Puertas Brasil, empresa especializada en soluciones de accesos automáticos e industriales, "
+        "con fábrica ubicada en el km 13 de Ciudad del Este."
+    )
+    context_map = {
+        "MARKETING": "Entiendo que este contacto corresponde al área de Marketing o Comunicación. Mi intención es presentar brevemente nuestra empresa y solicitar su orientación para llegar al responsable técnico adecuado.",
+        "COMPRAS": "Nos gustaría quedar registrados como proveedor y conocer el canal correcto para futuras cotizaciones, homologaciones o procesos de compra relacionados con accesos industriales.",
+        "TECNICO": f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
+        "OPERACIONES": f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
+        "DIRECCION": "Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
+        "GENERAL": f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
+    }
+    ask_map = {
+        "MARKETING": "¿Podría indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+        "COMPRAS": "¿Podría indicarme quién gestiona Compras o Abastecimiento y quién valida técnicamente este tipo de solución en Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos?",
+        "TECNICO": "¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
+        "OPERACIONES": "¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos para conversar brevemente sobre estas necesidades?",
+        "DIRECCION": "¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
+        "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+    }
+    body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
+    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company_name}"
+    if channel.upper() == "WHATSAPP":
+        body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
+    elif channel.upper() == "CALL":
+        body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
+    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name}
 
 
 def _create_cadence(opportunity):
@@ -228,6 +281,143 @@ def timeline(opportunity_id):
     return jsonify([{"id": row.id, "type": row.event_type, "description": row.description, "occurredAt": row.occurred_at.isoformat()} for row in rows])
 
 
+@api_bp.get("/companies/<int:company_id>/dossier")
+def company_dossier(company_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id, status="ACTIVE").first_or_404()
+    contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
+    projects = Project.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(Project.updated_at.desc()).all()
+    opportunities = Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).order_by(Opportunity.updated_at.desc()).all()
+    activities = CompanyActivity.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(CompanyActivity.occurred_at.desc()).limit(200).all()
+    completeness, missing = company_completeness(company)
+    last_contact = activities[0].occurred_at if activities else None
+    return jsonify(
+        company={
+            "id": company.id, "name": company.name, "legalName": company.legal_name, "ruc": company.ruc or company.registration_id,
+            "sector": company.sector, "description": company.description, "website": company.website, "domain": company.domain,
+            "country": company.country, "department": company.department, "city": company.city, "address": company.address,
+            "headquarters": company.headquarters, "phone": company.phone_business or company.phone, "whatsapp": company.whatsapp,
+            "email": company.email_business or company.email, "linkedin": company.linkedin_url, "companySize": company.company_size,
+            "employeeEstimate": company.employee_estimate, "foundedYear": company.founded_year, "owners": company.owners or [],
+            "operationPlants": company.operation_plants or [], "keyActivities": company.key_activities or [],
+            "facilityProfile": company.facility_profile or {}, "commercialNotes": company.commercial_notes,
+            "dataSources": company.data_sources or [], "fit": company.account_fit_score, "accessibility": company.accessibility_score,
+            "momentum": company.momentum_score, "completeness": completeness, "missing": missing,
+            "lastEnrichedAt": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
+            "lastContactAt": last_contact.isoformat() if last_contact else None,
+        },
+        contacts=[{
+            "id": c.id, "name": c.name, "role": c.role, "buyingRole": c.buying_role, "influence": c.influence_score,
+            "email": c.email, "phone": c.phone, "whatsapp": c.whatsapp, "linkedin": c.linkedin_url,
+            "confidence": c.confidence, "verifiedAt": c.verified_at.isoformat() if c.verified_at else None,
+        } for c in contacts],
+        projects=[{
+            "id": pr.id, "name": pr.name, "type": pr.project_type, "stage": pr.stage, "lifecycle": pr.lifecycle_stage,
+            "city": pr.city, "department": pr.department, "investment": pr.investment, "areaM2": float(pr.area_m2 or 0),
+            "description": pr.description, "buyingWindow": pr.buying_window_score, "demandProbability": pr.demand_probability,
+        } for pr in projects],
+        opportunities=[op.to_dict() for op in opportunities],
+        activities=[row.to_dict() for row in activities],
+        stats={
+            "contacts": len(contacts), "projects": len(projects), "opportunities": len(opportunities), "activities": len(activities),
+            "openPipeline": round(sum(float(op.potential_deal_value or op.estimated_value or 0) for op in opportunities if op.status not in {"GANHO","PERDIDO","DESCARTADO"}), 2),
+        },
+    )
+
+
+@api_bp.patch("/companies/<int:company_id>/profile")
+@require_permission("WRITE_CRM")
+def company_profile_update(company_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    fields = {
+        "name":"name", "legalName":"legal_name", "ruc":"ruc", "sector":"sector", "description":"description",
+        "website":"website", "city":"city", "department":"department", "address":"address", "headquarters":"headquarters",
+        "phone":"phone_business", "whatsapp":"whatsapp", "email":"email_business", "linkedin":"linkedin_url",
+        "companySize":"company_size", "foundedYear":"founded_year", "commercialNotes":"commercial_notes",
+        "owners":"owners", "operationPlants":"operation_plants", "keyActivities":"key_activities", "dataSources":"data_sources",
+    }
+    changed=[]
+    for key, attr in fields.items():
+        if key in data:
+            value=data[key]
+            if key == "foundedYear" and value not in (None, ""):
+                try: value=int(value)
+                except (TypeError,ValueError): return jsonify(error="Año de fundación inválido"),400
+            setattr(company, attr, value if value != "" else None)
+            changed.append(key)
+    if not changed:
+        return jsonify(error="No se recibieron cambios"),400
+    company.last_enriched_at=datetime.now(timezone.utc)
+    company.data_completeness_score=company_completeness(company)[0]
+    _audit("UPDATE", "COMPANY_PROFILE", company.id, {"fields":changed})
+    db.session.commit()
+    return jsonify(ok=True, companyId=company.id, completeness=company.data_completeness_score)
+
+
+@api_bp.get("/companies/<int:company_id>/activities")
+def company_activities(company_id):
+    tenant=current_tenant()
+    Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    rows=CompanyActivity.query.filter_by(tenant_id=tenant.id, company_id=company_id).order_by(CompanyActivity.occurred_at.desc()).limit(250).all()
+    return jsonify([row.to_dict() for row in rows])
+
+
+@api_bp.post("/companies/<int:company_id>/activities")
+@require_permission("WRITE_CRM")
+def company_activity_create(company_id):
+    tenant=current_tenant(); user=current_user()
+    company=Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data=request.get_json(silent=True) or {}
+    activity_type=str(data.get("type") or "NOTE").upper()
+    allowed={"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","FOLLOW_UP","NOTE","REPLY","DATA_UPDATE"}
+    if activity_type not in allowed: return jsonify(error="Tipo de interacción inválido"),400
+    next_at=None
+    if data.get("nextActionAt"):
+        try: next_at=datetime.fromisoformat(str(data["nextActionAt"]).replace("Z","+00:00"))
+        except ValueError: return jsonify(error="Fecha de próxima acción inválida"),400
+    occurred=datetime.now(timezone.utc)
+    if data.get("occurredAt"):
+        try: occurred=datetime.fromisoformat(str(data["occurredAt"]).replace("Z","+00:00"))
+        except ValueError: pass
+    row=CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, opportunity_id=data.get("opportunityId"), contact_id=data.get("contactId"),
+        activity_type=activity_type, channel=data.get("channel"), direction=str(data.get("direction") or "OUTBOUND").upper(),
+        subject=data.get("subject"), summary=data.get("summary"), outcome=data.get("outcome"),
+        next_action=data.get("nextAction"), next_action_at=next_at, occurred_at=occurred,
+        created_by=(user.name if user else "Equipo comercial"), extra_data=data.get("extra") or {},
+    )
+    db.session.add(row)
+    for op in Opportunity.query.join(Project).filter(Project.company_id==company.id, Opportunity.tenant_id==tenant.id).all():
+        if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","REPLY"}: op.last_contact_at=occurred
+        if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT"} and op.status in {"NOVO","QUALIFICADO"}: op.status="CONTATO_REALIZADO"
+        elif activity_type == "REPLY" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="RESPONDEU"
+        elif activity_type in {"VISIT","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
+        elif activity_type == "PROPOSAL_SENT" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="ORCAMENTO"
+        if next_at: op.next_action_at=next_at
+        db.session.add(TimelineEvent(opportunity=op,event_type=activity_type,description=data.get("summary") or data.get("subject") or "Interacción comercial registrada"))
+    _audit("CREATE","COMPANY_ACTIVITY",company.id,{"type":activity_type})
+    db.session.commit()
+    return jsonify(row.to_dict()),201
+
+
+@api_bp.post("/companies/<int:company_id>/message")
+def company_contextual_message(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data=request.get_json(silent=True) or {}
+    contact=None
+    if data.get("contactId"):
+        contact=Contact.query.filter_by(id=data.get("contactId"), tenant_id=tenant.id, company_id=company.id).first()
+    opportunity=None
+    if data.get("opportunityId"):
+        opportunity=Opportunity.query.filter_by(id=data.get("opportunityId"), tenant_id=tenant.id).first()
+    if opportunity is None:
+        opportunity=Opportunity.query.join(Project).filter(Project.company_id==company.id, Opportunity.tenant_id==tenant.id).order_by(Opportunity.score.desc()).first()
+    return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity))
+
+
 @api_bp.get("/exports/status")
 def export_status():
     return jsonify(dataDir="/data", status="ready")
@@ -295,15 +485,47 @@ def website_analysis_create():
     data = request.get_json(silent=True) or {}
     if not data.get("url"):
         return jsonify(error="Ingrese el sitio web de la empresa"), 400
+    mode = str(data.get("mode") or "quick").lower()
+    force = bool(data.get("force"))
     try:
-        from ..services.site_analyzer import analyze_website
-        analysis = analyze_website(data["url"])
-        return jsonify(analysis.to_dict()), 201
+        from ..services.site_analyzer import analyze_website, normalize_website_url
+        normalized = normalize_website_url(data["url"])
+        tenant = current_tenant()
+        fresh_since = datetime.now(timezone.utc) - timedelta(hours=12)
+        cached = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id, url=normalized).filter(
+            WebsiteAnalysis.created_at >= fresh_since, WebsiteAnalysis.status == "COMPLETED"
+        ).order_by(WebsiteAnalysis.created_at.desc()).first()
+        if cached and not force:
+            payload = cached.to_dict(); payload.update(cached=True, scanMode="deep")
+            return jsonify(payload), 200
+        if mode == "deep":
+            analysis = analyze_website(normalized, max_pages=18, use_sitemap=True, request_timeout=12, status="COMPLETED")
+            payload = analysis.to_dict(); payload.update(cached=False, scanMode="deep")
+            return jsonify(payload), 201
+        analysis = analyze_website(normalized, max_pages=3, use_sitemap=False, request_timeout=8, status="QUICK")
+        payload = analysis.to_dict(); payload.update(cached=False, scanMode="quick")
+        return jsonify(payload), 201
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     except Exception:
         db.session.rollback()
         return jsonify(error="No se pudo analizar el sitio. Verifique que sea público y esté disponible."), 502
+
+
+@api_bp.post("/website-analysis/<int:analysis_id>/deep")
+def website_analysis_deep(analysis_id):
+    tenant = current_tenant()
+    analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
+    try:
+        from ..services.site_analyzer import analyze_website
+        analysis = analyze_website(analysis.url, max_pages=18, use_sitemap=True, request_timeout=12, analysis=analysis, status="COMPLETED")
+        payload = analysis.to_dict(); payload.update(cached=False, scanMode="deep")
+        return jsonify(payload), 200
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        db.session.rollback()
+        return jsonify(error="El escaneo rápido terminó, pero no se pudo completar el análisis profundo."), 502
 
 
 @api_bp.post("/website-analysis/bulk")
@@ -321,11 +543,22 @@ def website_analysis_bulk():
         return jsonify(error="Ingrese al menos un sitio o URL"), 400
     if len(urls) > 25:
         return jsonify(error="El análisis en lote admite hasta 25 sitios por ejecución"), 400
-    from ..services.site_analyzer import analyze_website
+    from ..services.site_analyzer import analyze_website, normalize_website_url
     results, errors = [], []
+    tenant = current_tenant()
+    fresh_since = datetime.now(timezone.utc) - timedelta(hours=12)
     for url in urls:
         try:
-            results.append(analyze_website(url).to_dict())
+            normalized = normalize_website_url(url)
+            cached = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id, url=normalized).filter(
+                WebsiteAnalysis.created_at >= fresh_since, WebsiteAnalysis.status == "COMPLETED"
+            ).order_by(WebsiteAnalysis.created_at.desc()).first()
+            if cached:
+                payload = cached.to_dict(); payload.update(cached=True, scanMode="deep")
+            else:
+                analysis = analyze_website(normalized, max_pages=3, use_sitemap=False, request_timeout=8, status="QUICK")
+                payload = analysis.to_dict(); payload.update(cached=False, scanMode="quick")
+            results.append(payload)
         except Exception as exc:
             errors.append({"url": url, "error": str(exc)[:180]})
     return jsonify(results=results, errors=errors, analyzed=len(results), failed=len(errors)), 207 if errors else 201
@@ -340,36 +573,30 @@ def website_analysis_list():
 
 def _commercial_messages(analysis):
     brand = current_tenant().settings or {}
-    brand_name = brand.get("brand_name", "Puertas Brasil PY")
-    contact = analysis.contacts[0] if analysis.contacts else f"equipo de {analysis.company_name}"
-    products = analysis.products or ["soluciones de accesos automáticos"]
-    services = analysis.services or ["evaluación técnica y proyecto a medida"]
-    product_text = ", ".join(products[:3])
-    service_text = ", ".join(services[:2])
-    evidence = "; ".join((analysis.reasons or [])[:2]) or analysis.summary or f"actividad empresarial en el sector {analysis.sector}"
+    brand_name = brand.get("brand_name", "Puertas Brasil")
+    company = analysis.company_name
+    sector = analysis.sector or "su operación"
+    products = analysis.products or []
+    product_text = ", ".join(products[:3]) if products else "soluciones de accesos automáticos e industriales"
     whatsapp = (
-        f"Hola, ¿cómo está? Soy David Granja, del equipo comercial de {brand_name}. "
-        f"Estuve conociendo la operación de {analysis.company_name} y, a partir de información pública sobre {evidence.lower()}, "
-        f"identificamos un posible encaje para {product_text}. "
-        "Nuestro objetivo es entender primero la operación y la etapa actual, no enviar un catálogo genérico. "
-        "¿Podría indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? "
-        "Me gustaría coordinar una conversación breve para validar si podemos aportar una solución técnica adecuada."
+        f"Hola, ¿cómo está? Soy David Granja, de {brand_name}. Me gustaría presentar nuestra empresa y ponernos a disposición de {company}. "
+        f"Por el perfil de su operación en {sector}, vemos posibles aplicaciones para {product_text}. "
+        "¿Podría indicarme el nombre o contacto directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos? Muchas gracias."
     )
-    subject = f"Puertas Brasil Paraguay | Primer Contacto — {analysis.company_name}"
+    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company}"
     email = (
-        f"Estimado/a {contact},\n\n"
-        f"Mi nombre es David Granja y formo parte del equipo comercial de {brand_name}. Estuvimos revisando información pública de "
-        f"{analysis.company_name}, vinculada al sector {analysis.sector}, y encontramos señales que pueden tener aplicación para {product_text}.\n\n"
-        f"En particular, observamos: {evidence}.\n\n"
-        f"Somos fábrica especializada en soluciones de cerramientos y accesos automáticos para operaciones industriales, logísticas, comerciales y aeronáuticas. "
-        f"Podemos trabajar con {service_text}, además de instalación, mantenimiento preventivo y correctivo, retrofit, reparaciones y repuestos multimarca.\n\n"
-        "Nuestro interés es comprender la necesidad real y la etapa del proyecto u operación antes de proponer una solución. "
-        "¿Podrían indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? "
-        "Si resulta oportuno, podemos coordinar una conversación de 15 minutos o una visita técnica.\n\n"
-        f"Saludos cordiales,\nDavid Granja\n{brand_name}\n"
-        f"{brand.get('sales_phone', '')}\n{brand.get('sales_email', '')}\n{brand.get('website', '')}"
+        f"Estimado equipo de {company},\n\n"
+        "Es un gusto saludarles.\n\n"
+        "Mi nombre es David Granja y represento a Puertas Brasil, empresa especializada en soluciones de accesos automáticos e industriales, con fábrica ubicada en el km 13 de Ciudad del Este.\n\n"
+        f"Nos gustaría presentar nuestra empresa y ponernos a disposición de {company}.\n\n"
+        f"En operaciones del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de mercaderías y personas y la continuidad de recepción, expedición y operación. Por el perfil identificado, vemos posibles aplicaciones para {product_text}.\n\n"
+        "Adjunto nuestra carta de presentación institucional y catálogo comercial.\n\n"
+        "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?\n\n"
+        "Desde ya, agradezco mucho su orientación.\n\n"
+        f"Saludos cordiales,\nDavid Granja\n{brand_name}"
     )
     return whatsapp, subject, email
+
 
 @api_bp.post("/website-analysis/<int:analysis_id>/qualify")
 @require_permission("WRITE_CRM")
@@ -405,6 +632,7 @@ def website_analysis_qualify(analysis_id):
         opportunity=opportunity, event_type="WEBSITE_QUALIFICATION",
         description="Empresa calificada manualmente; mensajes comerciales personalizados generados",
     ))
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Empresa calificada desde su sitio", summary=f"Análisis web completado con puntuación {analysis.potential_score}/100 y {analysis.pages_analyzed} páginas analizadas."))
     db.session.commit()
     return jsonify(analysis=analysis.to_dict(), opportunity=opportunity.to_dict()), 201
 
@@ -488,6 +716,7 @@ def visit_create():
     opportunity.probability = max(opportunity.probability, 50)
     db.session.add(visit)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="VISIT", description=f"Visita registrada. Próximo paso: {data.get('nextStep') or 'por definir'}"))
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="VISIT", channel="PRESENCIAL", subject="Visita comercial registrada", summary=data.get("notes") or data.get("needs") or "Visita técnica/comercial", next_action=data.get("nextStep")))
     db.session.commit()
     return jsonify(id=visit.id, photos=[f"/api/uploads/{name}" for name in photos]), 201
 
@@ -542,6 +771,7 @@ def proposal_create(opportunity_id):
     db.session.add(proposal); db.session.flush()
     db.session.add(SalesTask(opportunity=opportunity, title="Acompañar respuesta de la propuesta comercial", channel="FOLLOW_UP", due_at=datetime.now(timezone.utc) + timedelta(days=3), sequence_step=90))
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="PROPOSAL", description=f"Propuesta {number} generada por USD {amount:,.2f}"))
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="PROPOSAL_SENT", channel="DOCUMENTO", subject=f"Propuesta {number}", summary=f"Propuesta comercial generada por USD {amount:,.2f}. Registrar el envío al cliente cuando sea efectivamente enviado.", outcome="GENERATED"))
     db.session.commit()
     return jsonify(id=proposal.id, number=number, downloadUrl=f"/api/proposals/{proposal.id}/download"), 201
 
@@ -789,6 +1019,7 @@ def company_contact_create(company_id):
         linkedin_url=data.get("linkedin"), source_url=data.get("sourceUrl"), confidence=max(0, min(100, int(data.get("confidence", 60)))),
     )
     db.session.add(contact)
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, contact_id=None, activity_type="DATA_UPDATE", channel="CRM", subject="Contacto añadido", summary=f"Se añadió el contacto {contact.name} · {contact.role or 'cargo por validar'}", created_by=(current_user().name if current_user() else "Equipo comercial")))
     company.accessibility_score = min(100, (company.accessibility_score or 0) + 15)
     company.last_enriched_at = datetime.now(timezone.utc)
     for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
@@ -944,3 +1175,43 @@ def _health():
 @api_bp.record_once
 def register_health(state):
     state.app.add_url_rule("/health", "health", _health)
+
+
+@api_bp.get("/opportunities/<int:opportunity_id>/similar")
+def opportunity_similar(opportunity_id):
+    tenant = current_tenant()
+    target = Opportunity.query.filter_by(id=opportunity_id, tenant_id=tenant.id).first_or_404()
+    target_products = set(target.products or [])
+    target_sector = (target.project.company.sector or "").strip().lower()
+    target_type = (target.project.project_type or "").strip().lower()
+    candidates = Opportunity.query.filter(
+        Opportunity.tenant_id == tenant.id, Opportunity.id != target.id,
+        ~Opportunity.status.in_({"DESCARTADO", "PERDIDO"})
+    ).order_by(Opportunity.score.desc()).limit(250).all()
+    ranked = []
+    for row in candidates:
+        similarity = 0
+        reasons = []
+        sector = (row.project.company.sector or "").strip().lower()
+        if target_sector and sector == target_sector:
+            similarity += 45; reasons.append("mismo sector")
+        elif target_sector and sector and (target_sector in sector or sector in target_sector):
+            similarity += 25; reasons.append("sector relacionado")
+        project_type = (row.project.project_type or "").strip().lower()
+        if target_type and project_type == target_type:
+            similarity += 15; reasons.append("tipo de proyecto similar")
+        overlap = target_products.intersection(set(row.products or []))
+        if overlap:
+            similarity += min(25, 8 + len(overlap) * 6); reasons.append("productos coincidentes")
+        if target.project.department and row.project.department == target.project.department:
+            similarity += 8; reasons.append("misma región")
+        if target.project.city and row.project.city == target.project.city:
+            similarity += 7; reasons.append("misma ciudad")
+        if similarity >= 25:
+            ranked.append((similarity, row, reasons))
+    ranked.sort(key=lambda item: (item[0], item[1].score), reverse=True)
+    return jsonify([{
+        "id": row.id, "company": row.project.company.name, "sector": row.project.company.sector,
+        "project": row.project.name, "score": row.score, "similarity": similarity,
+        "reasons": reasons[:3], "salesReady": row.sales_ready
+    } for similarity, row, reasons in ranked[:6]])

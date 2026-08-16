@@ -57,6 +57,15 @@ class Company(db.Model):
     email_business = db.Column(db.String(240))
     linkedin_url = db.Column(db.String(700))
     registration_id = db.Column(db.String(120), index=True)
+    legal_name = db.Column(db.String(300))
+    ruc = db.Column(db.String(80), index=True)
+    founded_year = db.Column(db.Integer)
+    headquarters = db.Column(db.String(260))
+    owners = db.Column(db.JSON, nullable=False, default=list)
+    operation_plants = db.Column(db.JSON, nullable=False, default=list)
+    key_activities = db.Column(db.JSON, nullable=False, default=list)
+    commercial_notes = db.Column(db.Text)
+    data_sources = db.Column(db.JSON, nullable=False, default=list)
     identity_confidence = db.Column(db.Integer, nullable=False, default=50)
     company_size = db.Column(db.String(80))
     employee_estimate = db.Column(db.Integer)
@@ -76,6 +85,7 @@ class Company(db.Model):
     projects = db.relationship("Project", back_populates="company", cascade="all, delete-orphan")
     aliases = db.relationship("CompanyAlias", back_populates="company", cascade="all, delete-orphan")
     contacts = db.relationship("Contact", back_populates="company", cascade="all, delete-orphan")
+    activities = db.relationship("CompanyActivity", back_populates="company", cascade="all, delete-orphan")
     tenant = db.relationship("Tenant")
     __table_args__ = (db.CheckConstraint("identity_confidence BETWEEN 0 AND 100", name="ck_company_identity_confidence"),)
 
@@ -117,6 +127,42 @@ class Contact(db.Model):
         db.CheckConstraint("influence_score BETWEEN 0 AND 100", name="ck_contact_influence"),
         db.CheckConstraint("confidence BETWEEN 0 AND 100", name="ck_contact_confidence"),
     )
+
+
+class CompanyActivity(db.Model):
+    __tablename__ = "company_activities"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
+    contact_id = db.Column(db.Integer, db.ForeignKey("contacts.id", ondelete="SET NULL"), index=True)
+    activity_type = db.Column(db.String(50), nullable=False, index=True)
+    channel = db.Column(db.String(40), index=True)
+    direction = db.Column(db.String(20), nullable=False, default="OUTBOUND")
+    subject = db.Column(db.String(400))
+    summary = db.Column(db.Text)
+    outcome = db.Column(db.String(80), index=True)
+    next_action = db.Column(db.String(400))
+    next_action_at = db.Column(db.DateTime(timezone=True), index=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    created_by = db.Column(db.String(180), nullable=False, default="Equipo comercial")
+    extra_data = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    company = db.relationship("Company", back_populates="activities")
+    contact = db.relationship("Contact")
+    opportunity = db.relationship("Opportunity")
+
+    def to_dict(self):
+        return {
+            "id": self.id, "companyId": self.company_id, "opportunityId": self.opportunity_id,
+            "contactId": self.contact_id, "contact": self.contact.name if self.contact else None,
+            "type": self.activity_type, "channel": self.channel, "direction": self.direction,
+            "subject": self.subject, "summary": self.summary, "outcome": self.outcome,
+            "nextAction": self.next_action,
+            "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
+            "occurredAt": self.occurred_at.isoformat() if self.occurred_at else None,
+            "createdBy": self.created_by, "extra": self.extra_data or {},
+        }
 
 
 class Watchlist(db.Model):
@@ -248,7 +294,8 @@ class Opportunity(db.Model):
             "Agronegocio": ["Polvo y clima", "Grandes vanos", "Protección de equipos"],
         }.get(sector, ["Seguridad de accesos", "Continuidad operativa", "Mantenimiento preventivo"])
         return {
-            "id": self.id, "company": self.project.company.name, "sector": sector,
+            "id": self.id, "companyId": self.project.company.id, "company": self.project.company.name, "sector": sector,
+            "legalName": self.project.company.legal_name, "ruc": self.project.company.ruc or self.project.company.registration_id,
             "origin": self.project.company.origin_country or "No informado", "project": self.project.name,
             "city": self.project.city, "department": self.project.department, "stage": self.project.stage or "No informado",
             "investment": self.project.investment or "No divulgado", "event": self.event_type, "score": self.score,

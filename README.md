@@ -127,3 +127,21 @@ A V6 prioriza velocidade, leitura e execução comercial sem depender de APIs de
 
 ### Sem dependências pagas
 Não há integração obrigatória com OpenAI, Google Maps ou serviços de IA. O scoring continua explicável e baseado em evidências, regras comerciais e dados do próprio radar.
+
+## V7 · Ficha empresarial 360° e historial comercial
+
+La V7 convierte cada empresa del CRM en una cuenta comercial completa. Desde **CRM → Ficha 360°** se puede consultar y editar razón social, RUC, sector, sedes, plantas, propietarios, actividades, contactos, proyectos, oportunidades, historial e información comercial.
+
+### Cómo alimentar el historial
+
+No es necesario escribir un informe después de cada paso. Use **Registrar interacción** para guardar en pocos segundos: llamada, correo enviado, WhatsApp, reunión, visita, propuesta, respuesta, seguimiento, nota o actualización de datos. La fecha/hora se guarda automáticamente. Cuando corresponda, registre resultado, resumen y próxima acción.
+
+Registrar correo/WhatsApp/llamada mueve automáticamente una oportunidad nueva o calificada a **Contacto realizado**. Registrar una respuesta cambia a **Respondió**; una visita/reunión cambia a **Visita** y una propuesta enviada cambia a **Presupuesto**.
+
+### Mensajes contextuales
+
+La pestaña **Mensajes** de la ficha 360° genera una presentación institucional basada en la empresa y el destinatario. La redacción cambia cuando el contacto pertenece a Marketing/Comunicación, Compras, Mantenimiento/Ingeniería/Proyectos, Operaciones/Logística o Dirección. Si existe un nombre de contacto, se utiliza en la apertura. El modelo parte de la presentación institucional de Puertas Brasil y menciona carta de presentación y catálogo comercial.
+
+### Datos que se completan manualmente
+
+Los datos que no puedan inferirse con seguridad desde fuentes públicas —por ejemplo RUC, razón social exacta, propietarios, plantas de operación o información obtenida en una llamada— se completan en **Datos empresariales** dentro de la ficha 360°. Esto evita inventar información y mantiene trazabilidad comercial.

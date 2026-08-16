@@ -1,5 +1,5 @@
 const leads = Array.isArray(window.RADAR_LEADS) ? window.RADAR_LEADS : [];
-const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Industrial Revenue Radar";
+const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Radar Comercial Industrial";
 let selected = leads[0] || null;
 let level = "ALL";
 let selectedChannel = "whatsapp";
@@ -99,7 +99,7 @@ function contactMessage(lead, channel = selectedChannel) {
   const context = lead.whyNow || `${lead.company} presenta una operación que puede requerir soluciones de acceso industrial.`;
   const next = lead.nextBestAction || "validar el responsable técnico y el cronograma de la operación";
   const role = "Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos";
-  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, retrofit y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
+  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, modernización y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
   if (channel === "call") return `GUION DE LLAMADA\n\n1. Presentarse como David Granja, de ${brandName}.\n2. Mencionar el contexto: ${context}\n3. Pedir al responsable de ${role}.\n4. Validar etapa, cronograma, accesos industriales, áreas de carga y necesidades de ${products}.\n5. Objetivo de la llamada: ${next}.\n6. Cerrar proponiendo visita técnica o conversación de 15 minutos.`;
   if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuvimos conociendo la operación de ${lead.company} y vimos un posible encaje para ${products}. Me gustaría conectar con la persona responsable de ${role} para entender la etapa actual y evaluar si podemos aportar una solución técnica. ¿Podría orientarme con el contacto adecuado?`;
   return `Hola, ¿cómo está? Soy David Granja, de ${brandName}. Estuve conociendo la operación de ${lead.company} y detectamos un posible encaje para ${products}. ${context}\n\nQuisiera hablar con la persona responsable de ${role} para entender la etapa actual y verificar si podemos aportar una solución adecuada. ¿Podría indicarme con quién debería conversar?`;
@@ -117,7 +117,7 @@ function renderCrm() {
       <div class="crm-card-top"><span class="avatar">${escapeHtml(initials(lead.company))}</span><div><h3>${escapeHtml(lead.company)}</h3><p>${escapeHtml(lead.sector)} · ${escapeHtml(lead.city)}</p></div>${tag(lead.level, lead.score)}</div>
       <strong>${escapeHtml(lead.project)}</strong><small><i class="bi bi-geo-alt"></i> ${escapeHtml(address)}</small>
       <div class="crm-flags"><span class="${lead.contactVerified ? "verified" : "pending"}"><i class="bi bi-${lead.contactVerified ? "person-check-fill" : "person-exclamation"}"></i> ${lead.contactVerified ? "Contacto validado" : "Validar contacto"}</span>${lead.nextActionAt ? `<span><i class="bi bi-calendar-event"></i> ${new Date(lead.nextActionAt).toLocaleDateString("es-PY")}</span>` : ""}</div>
-      <div class="crm-card-actions"><button class="open-crm-detail"><i class="bi bi-eye"></i> Ver ficha</button><label><input class="visit-check" type="checkbox" ${visitSelection.has(String(lead.id)) ? "checked" : ""}> Incluir en visita</label></div>
+      <div class="crm-card-actions"><button class="open-company-dossier"><i class="bi bi-building"></i> Ficha 360°</button><label><input class="visit-check" type="checkbox" ${visitSelection.has(String(lead.id)) ? "checked" : ""}> Incluir en visita</label></div>
     </article>`;
   }).join("") || '<div class="empty-signals"><strong>No hay empresas en este estado.</strong></div>';
 }
@@ -181,7 +181,7 @@ async function loadTimeline() {
   activateTab("timeline");
   if (!selected) return;
   if (selected.demo) {
-    $("timelineList").innerHTML = "<article><i></i><small>DESCUBRIMIENTO</small><strong>Evento demostrativo identificado por el radar</strong></article>";
+    $("timelineList").innerHTML = "<article><i></i><small>DESCUBRIMIENTO</small><strong>Evento de demostración identificado por el radar</strong></article>";
     return;
   }
   try {
@@ -213,7 +213,7 @@ $("crmGrid").addEventListener("click", (event) => {
   if (!lead) return;
   if (event.target.closest(".open-crm-detail")) {
     selectLead(lead);
-    $("drawer").scrollIntoView({ behavior: "smooth", block: "start" });
+    document.body.classList.add("drawer-open");
   }
   if (event.target.matches(".visit-check")) {
     if (event.target.checked) visitSelection.add(String(lead.id)); else visitSelection.delete(String(lead.id));
@@ -231,7 +231,7 @@ document.querySelectorAll(".tabs button").forEach((button) => {
 $("status").addEventListener("change", async (event) => {
   if (!selected) return;
   if (selected.demo) {
-    toast("DATOS DEMO: registre una oportunidad para guardarla en el CRM");
+    toast("DATOS DE DEMOSTRACIÓN: registre una oportunidad para guardarla en el CRM");
     event.target.value = selected.status || "NOVO";
     return;
   }
@@ -287,7 +287,7 @@ $("kanbanBoard").addEventListener("change", async (event) => {
   if (!event.target.matches(".kanban-status")) return;
   const card = event.target.closest(".kanban-card");
   const lead = leads.find((item) => String(item.id) === card.dataset.id);
-  if (!lead || lead.demo) return toast("Los datos demostrativos no se pueden mover");
+  if (!lead || lead.demo) return toast("Los datos de demostracións no se pueden mover");
   const oldStatus = lead.status;
   const response = await fetch(`/api/opportunities/${lead.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: event.target.value }) });
   if (!response.ok) { event.target.value = oldStatus; return toast("No se pudo mover la oportunidad"); }
@@ -518,18 +518,21 @@ function renderWebsiteAnalysis(analysis) {
   const list = (values, fallback = "No encontrado") => Array.isArray(values) && values.length ? values.map(escapeHtml).join(", ") : fallback;
   const decision = analysis.decision || "PENDING";
   const decisionLabel = { QUALIFIED: "CALIFICADA", DISQUALIFIED: "DESCALIFICADA", PENDING: "PENDIENTE" }[decision];
+  const scanMode = analysis.scanMode || (analysis.status === "QUICK" ? "quick" : "deep");
+  const scanLabel = scanMode === "quick" ? "QUICK SCAN" : (analysis.cached ? "CACHE RECIENTE" : "ANÁLISIS PROFUNDO");
   const decisionActions = decision === "PENDING"
     ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
     : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
+  const deepAction = scanMode === "quick" ? '<button class="deep-analysis"><i class="bi bi-arrow-repeat"></i> Profundizar ahora</button>' : '';
   const drafts = decision === "QUALIFIED" ? `
     <div class="outreach-drafts">
       <div><b>Mensaje para WhatsApp</b><textarea readonly>${escapeHtml(analysis.whatsappMessage || "")}</textarea><button class="copy-draft">Copiar WhatsApp</button></div>
       <div><b>Correo personalizado · ${escapeHtml(analysis.emailSubject || "")}</b><textarea readonly>${escapeHtml(analysis.emailBody || "")}</textarea><button class="copy-draft">Copiar correo</button></div>
     </div>` : "";
   return `
-    <article class="analysis-card" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
+    <article class="analysis-card ${scanMode === "quick" ? "quick-result" : "deep-result"}" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
       <div class="analysis-score"><strong>${Number(analysis.score) || 0}</strong><small>${escapeHtml(analysis.level)}</small></div>
-      <div class="analysis-main"><span class="source-type">${Number(analysis.pagesAnalyzed) || 0} PÁGINAS ANALIZADAS · ${decisionLabel}</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
+      <div class="analysis-main"><span class="source-type"><i class="bi ${scanMode === "quick" ? "bi-lightning-charge" : "bi-check2-circle"}"></i> ${scanLabel} · ${Number(analysis.pagesAnalyzed) || 0} PÁGINAS · ${decisionLabel}</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
       <div class="analysis-grid">
         <div><b>Contacto</b><span>${list(analysis.emails)}</span><span>${list(analysis.phones)}</span>${analysis.whatsapp ? `<span>WhatsApp: ${escapeHtml(analysis.whatsapp)}</span>` : ""}</div>
         <div><b>Dirección y responsables</b><span>${escapeHtml(analysis.address || "No encontrado")}</span><span>${list(analysis.contacts, "No identificado")}</span></div>
@@ -537,40 +540,87 @@ function renderWebsiteAnalysis(analysis) {
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
       <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
-      <div class="analysis-decision">${decisionActions}</div>
+      <div class="analysis-decision">${deepAction}${decisionActions}</div>
       ${drafts}
     </article>`;
+}
+
+function setScanProgress(stage, progress, message, active = true) {
+  const status = $("scanStatus"), bar = $("scanProgressBar"), label = $("scanStage"), msg = $("siteAnalysisMessage");
+  if (status) status.classList.toggle("is-scanning", active);
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  if (label) label.textContent = stage;
+  if (msg) msg.textContent = message;
+}
+
+async function deepenWebsiteAnalysis(analysisId, card = null, silent = false) {
+  if (!analysisId) return;
+  if (card) card.classList.add("is-upgrading");
+  if (!silent) setScanProgress("Análisis profundo", 62, "Revisando proyectos, noticias, infraestructura, responsables y señales comerciales…", true);
+  try {
+    const response = await fetch(`/api/website-analysis/${analysisId}/deep`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo completar el análisis profundo");
+    const current = card || document.querySelector(`.analysis-card[data-analysis-id="${analysisId}"]`);
+    if (current) current.outerHTML = renderWebsiteAnalysis(data);
+    if (!silent) setScanProgress("Completado", 100, `Análisis profundo completado: ${data.pagesAnalyzed || 0} páginas relevantes · potencial ${data.level}.`, false);
+    return data;
+  } catch (error) {
+    if (card) card.classList.remove("is-upgrading");
+    if (!silent) setScanProgress("Análisis rápido disponible", 100, error.message, false);
+    return null;
+  }
 }
 
 $("siteAnalysisForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button");
   const url = $("companyWebsite").value.trim();
+  const started = performance.now();
   button.disabled = true;
-  button.textContent = "Analizando páginas y contactos...";
-  $("siteAnalysisMessage").textContent = "Revisando información pública, responsables, contactos, infraestructura y afinidad comercial.";
+  button.querySelector("span") && (button.querySelector("span").textContent = "Escaneando…");
+  setScanProgress("Análisis rápido", 18, "Leyendo página principal y rutas esenciales para devolver una ficha inicial…", true);
+  const skeleton = document.createElement("div");
+  skeleton.className = "analysis-skeleton";
+  skeleton.innerHTML = '<i></i><div><b></b><span></span><span></span><span></span></div>';
+  $("siteAnalysisResults").prepend(skeleton);
   try {
     const response = await fetch("/api/website-analysis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, mode: "quick" }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "No se pudo analizar el sitio");
+    skeleton.remove();
     $("siteAnalysisResults").insertAdjacentHTML("afterbegin", renderWebsiteAnalysis(data));
-    $("siteAnalysisMessage").textContent = `Análisis completado: potencial ${data.level} con ${data.score} puntos.`;
-    toast("Empresa analizada y guardada en PostgreSQL");
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    if (data.cached || data.scanMode === "deep") {
+      setScanProgress("Cache reciente", 100, `Resultado reutilizado en ${seconds}s. No fue necesario descargar el sitio nuevamente.`, false);
+    } else {
+      setScanProgress("Ficha inicial lista", 48, `Análisis rápido listo en ${seconds}s. Puede seguir trabajando mientras completamos el análisis profundo.`, true);
+      const card = document.querySelector(`.analysis-card[data-analysis-id="${data.id}"]`);
+      deepenWebsiteAnalysis(data.id, card, false);
+    }
+    toast(data.cached ? "Análisis reciente recuperado del cache" : "Ficha inicial disponible");
   } catch (error) {
-    $("siteAnalysisMessage").textContent = error.message;
+    skeleton.remove();
+    setScanProgress("Error", 100, error.message, false);
   } finally {
     button.disabled = false;
-    button.textContent = "◉ Analizar empresa";
+    button.querySelector("span") && (button.querySelector("span").textContent = "Analizar empresa");
   }
 });
 
 $("siteAnalysisResults").addEventListener("click", async (event) => {
   const card = event.target.closest(".analysis-card");
   if (!card) return;
+  const deepButton = event.target.closest(".deep-analysis");
+  if (deepButton) {
+    deepButton.disabled = true;
+    await deepenWebsiteAnalysis(card.dataset.analysisId, card, false);
+    return;
+  }
   if (event.target.matches(".copy-draft")) {
     const text = event.target.parentElement.querySelector("textarea").value;
     await navigator.clipboard.writeText(text);
@@ -689,9 +739,9 @@ async function loadCommandCenter() {
     const opportunityCard = (lead) => `<article class="radar-row" data-opportunity-id="${lead.id}"><div><strong>${escapeHtml(lead.company)}</strong><span>${escapeHtml(lead.project)} · ${escapeHtml(lead.department || "")}</span></div><div class="radar-badges"><b>${Number(lead.score) || 0}</b><em>BW ${Number(lead.buyingWindow) || 0}</em><em>↑ ${Number(lead.momentum) || 0}</em></div><p>${escapeHtml(lead.whyNow || "Señal comercial prioritaria")}</p><small>${escapeHtml(lead.nextBestAction || "Validar responsables y cronograma")}</small></article>`;
     $("hotNowList").innerHTML = (data.hotNow || []).map(opportunityCard).join("") || '<p>No hay oportunidades HOT en este momento.</p>';
     $("momentumList").innerHTML = (data.momentum || []).map(opportunityCard).join("") || '<p>No hay cuentas acelerando.</p>';
-    $("researchQueue").innerHTML = (data.researchQueue || []).map((row) => `<article class="radar-row"><div><strong>${escapeHtml(row.company)}</strong><span>Fit ${row.fit} · Acceso ${row.accessibility}</span></div><p>Falta: ${escapeHtml((row.missing || []).join(", ") || "enriquecimiento general")}</p></article>`).join("") || '<p>No hay cuentas pendientes de enriquecimiento.</p>';
+    $("researchQueue").innerHTML = (data.researchQueue || []).map((row) => `<article class="radar-row"><div><strong>${escapeHtml(row.company)}</strong><span>Afinidad ${row.fit} · Acceso ${row.accessibility}</span></div><p>Falta: ${escapeHtml((row.missing || []).join(", ") || "enriquecimiento general")}</p></article>`).join("") || '<p>No hay cuentas pendientes de enriquecimiento.</p>';
   } catch (_error) {
-    $("hotNowList").innerHTML = '<p>No se pudo cargar el Command Center.</p>';
+    $("hotNowList").innerHTML = '<p>No se pudo cargar el Centro de inteligencia.</p>';
   }
 }
 
