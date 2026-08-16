@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from io import BytesIO
+from email.message import EmailMessage
+from email.policy import SMTP
 from uuid import uuid4
 from urllib.parse import urlparse
 
@@ -83,12 +86,12 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
     }
     body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
-    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company_name}"
+    subject = "Puertas Brasil Paraguay | Primer Contacto"
     if channel.upper() == "WHATSAPP":
         body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
     elif channel.upper() == "CALL":
         body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
-    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name}
+    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name, "recipientEmail": email}
 
 
 
@@ -549,6 +552,69 @@ def company_contextual_message(company_id):
     if opportunity is None:
         opportunity=Opportunity.query.join(Project).filter(Project.company_id==company.id, Opportunity.tenant_id==tenant.id).order_by(Opportunity.score.desc()).first()
     return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity))
+
+
+@api_bp.post("/companies/<int:company_id>/email-draft")
+@require_permission("WRITE_CRM")
+def company_email_draft(company_id):
+    """Genera un archivo .eml listo para abrir en Outlook con la carta institucional adjunta."""
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    data = request.get_json(silent=True) or {}
+
+    contact = None
+    if data.get("contactId"):
+        contact = Contact.query.filter_by(
+            id=data.get("contactId"), tenant_id=tenant.id, company_id=company.id
+        ).first()
+
+    opportunity = Opportunity.query.join(Project).filter(
+        Project.company_id == company.id, Opportunity.tenant_id == tenant.id
+    ).order_by(Opportunity.score.desc()).first()
+
+    generated = _company_message(company, contact, "EMAIL", opportunity)
+    recipient = str(data.get("recipient") or generated.get("recipientEmail") or "").strip()
+    subject = str(data.get("subject") or generated.get("subject") or "Puertas Brasil Paraguay | Primer Contacto").strip()
+    body = str(data.get("body") or generated.get("body") or "").strip()
+
+    if not recipient or "@" not in recipient:
+        return jsonify(
+            error="No hay un correo electrónico válido para el destinatario.",
+            action="Seleccione un contacto con correo o complete el correo general de la empresa en la Ficha 360°."
+        ), 400
+
+    attachment_path = Path(current_app.root_path) / "assets" / "Carta de presentacion - Puertas Brasil.pdf"
+    if not attachment_path.exists():
+        current_app.logger.error("Carta institucional no encontrada: %s", attachment_path)
+        return jsonify(
+            error="La carta institucional no está disponible en el servidor.",
+            action="Verifique que el PDF institucional esté incluido en app/assets/."
+        ), 500
+
+    msg = EmailMessage(policy=SMTP)
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg["X-Unsent"] = "1"
+    # No se fija From: Outlook utilizará la cuenta configurada por el usuario al abrir el borrador.
+    msg.set_content(body)
+    pdf_bytes = attachment_path.read_bytes()
+    msg.add_attachment(
+        pdf_bytes, maintype="application", subtype="pdf",
+        filename="Carta de presentacion - Puertas Brasil.pdf"
+    )
+
+    buffer = BytesIO(msg.as_bytes())
+    buffer.seek(0)
+    safe_company = secure_filename(company.name or "empresa")[:60] or "empresa"
+    filename = f"Puertas_Brasil_Primer_Contacto_{safe_company}.eml"
+    _audit("PREPARE", "EMAIL_DRAFT", company.id, {
+        "recipient": recipient, "subject": subject, "contactId": contact.id if contact else None,
+        "attachment": "Carta de presentacion - Puertas Brasil.pdf"
+    })
+    db.session.commit()
+    return send_file(
+        buffer, mimetype="message/rfc822", as_attachment=True, download_name=filename, max_age=0
+    )
 
 
 @api_bp.get("/exports/status")
