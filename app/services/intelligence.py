@@ -259,9 +259,11 @@ def company_completeness(company):
         "location": bool(company.city or company.address),
         "sector": bool(company.sector),
         "identity": int(company.identity_confidence or 0) >= 65,
+        "legalName": bool(company.legal_name),
+        "ruc": bool(company.ruc or company.registration_id),
         "decisionMaker": bool(company.contacts),
     }
-    weights = {"website": 12, "phone": 13, "email": 13, "whatsapp": 12, "location": 10, "sector": 10, "identity": 10, "decisionMaker": 20}
+    weights = {"website": 10, "phone": 10, "email": 12, "whatsapp": 8, "location": 10, "sector": 10, "identity": 8, "legalName": 8, "ruc": 10, "decisionMaker": 14}
     score = sum(weights[key] for key, present in checks.items() if present)
     missing = [key for key, present in checks.items() if not present]
     return min(100, score), missing

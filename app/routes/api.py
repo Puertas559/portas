@@ -53,10 +53,57 @@ def _department_context(contact=None, email=None):
     return "GENERAL"
 
 
+
+def _email_profile(email):
+    value=(email or "").strip().lower()
+    local=value.split("@",1)[0] if "@" in value else value
+    region=None
+    for token,label in (("asuncion","Asunción"),("cde","Ciudad del Este"),("ciudaddeleste","Ciudad del Este"),("este","Ciudad del Este"),("hernandarias","Hernandarias"),("encarnacion","Encarnación")):
+        if token in local:
+            region=label; break
+    rules=[
+        (("mantenimiento","mant","ingenier","tecnico","tecnica","infraestructura","proyecto"),"Área técnica / Mantenimiento / Ingeniería","TECHNICAL_INFLUENCER",88),
+        (("compra","compras","procurement","abastecimiento","supply"),"Compras / Abastecimiento","BUYER",90),
+        (("operacion","operaciones","logistica","logistica","deposito","expedicion"),"Operaciones / Logística","USER",84),
+        (("gerencia","gerente","direccion","director","directorio","ceo","administracion"),"Gerencia / Dirección","DECISION_MAKER",82),
+        (("marketing","mercadeo","comunicacion","prensa"),"Marketing / Comunicación","GATEKEEPER",82),
+        (("venta","ventas","comercial","sales"),"Ventas / Comercial","GATEKEEPER",80),
+        (("rrhh","recursoshumanos","talento","jobs","empleo"),"Recursos Humanos","GATEKEEPER",72),
+        (("info","contacto","contact","hola","recepcion","sac","atencion"),"Correo general / Recepción","GATEKEEPER",68),
+    ]
+    label="Correo general"; buying="GATEKEEPER"; confidence=62
+    compact=local.replace("_","").replace("-","").replace(".","")
+    for keys,found_label,found_buying,found_conf in rules:
+        if any(k.replace("_","").replace("-","") in compact for k in keys):
+            label,buying,confidence=found_label,found_buying,found_conf; break
+    if region: label=f"{label} · {region}"
+    dept=_department_context(None,value)
+    return {"label":label,"buyingRole":buying,"confidence":confidence,"department":dept,"region":region}
+
+
+def _sync_discovered_contacts(company, analysis):
+    tenant=current_tenant()
+    created=[]
+    existing={str(c.email or "").strip().casefold():c for c in Contact.query.filter_by(tenant_id=tenant.id,company_id=company.id).all() if c.email}
+    for email in analysis.emails or []:
+        key=str(email).strip().casefold()
+        if not key or "@" not in key: continue
+        profile=_email_profile(key)
+        row=existing.get(key)
+        if row:
+            if not row.role: row.role=profile["label"]
+            if row.buying_role in (None,"","UNKNOWN"): row.buying_role=profile["buyingRole"]
+            row.confidence=max(row.confidence or 0,profile["confidence"]); row.source_url=row.source_url or analysis.url
+            continue
+        row=Contact(tenant_id=tenant.id,company_id=company.id,name=profile["label"],role=profile["label"],buying_role=profile["buyingRole"],email=key,source_url=analysis.url,confidence=profile["confidence"],status="ACTIVE")
+        db.session.add(row); existing[key]=row; created.append(key)
+    return created
+
 def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
     company_name = company.name
     contact_name = contact.name.strip() if contact and contact.name else ""
     email = (contact.email if contact else None) or company.email_business or company.email or ""
+    whatsapp = (contact.whatsapp if contact else None) or (contact.phone if contact else None) or company.whatsapp or company.phone_business or company.phone or ""
     dept = _department_context(contact, email)
     greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
     sector = company.sector or "su operación"
@@ -83,12 +130,13 @@ def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
         "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
     }
     body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
-    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company_name}"
+    subject = "Puertas Brasil Paraguay | Primer Contacto"
     if channel.upper() == "WHATSAPP":
         body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
     elif channel.upper() == "CALL":
         body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
-    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name}
+    destination = whatsapp if channel.upper() == "WHATSAPP" else (email if channel.upper() == "EMAIL" else (whatsapp or email))
+    return {"subject": subject, "body": body, "department": dept, "recipient": destination, "recipientLabel": contact_name or company_name, "channel": channel.upper()}
 
 
 
@@ -219,6 +267,7 @@ def _auto_sync_existing_company(analysis):
     if not company:
         return None
     result=_merge_company_enrichment(company, analysis)
+    result["contactsCreated"]=_sync_discovered_contacts(company, analysis)
     db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Enriquecimiento automático", summary=f"El sitio fue revisado automáticamente. {len(result['updated'])} campos fueron completados y {len(result['reviewRequired'])} requieren revisión.", extra_data=result))
     db.session.commit()
     return {"companyId":company.id, **result}
@@ -421,6 +470,14 @@ def company_dossier(company_id):
     contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
     projects = Project.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(Project.updated_at.desc()).all()
     opportunities = Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).order_by(Opportunity.updated_at.desc()).all()
+    # Backfill para empresas calificadas antes de V13: transforma todos los correos del análisis original en destinatarios del CRM.
+    if opportunities:
+        analysis = WebsiteAnalysis.query.filter(WebsiteAnalysis.tenant_id==tenant.id, WebsiteAnalysis.opportunity_id.in_([o.id for o in opportunities])).order_by(WebsiteAnalysis.created_at.desc()).first()
+        if analysis and analysis.emails:
+            created=_sync_discovered_contacts(company,analysis)
+            if created:
+                db.session.commit()
+                contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
     activities = CompanyActivity.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(CompanyActivity.occurred_at.desc()).limit(200).all()
     completeness, missing = company_completeness(company)
     last_contact = activities[0].occurred_at if activities else None
@@ -438,6 +495,8 @@ def company_dossier(company_id):
             "momentum": company.momentum_score, "completeness": completeness, "missing": missing,
             "lastEnrichedAt": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
             "lastContactAt": last_contact.isoformat() if last_contact else None,
+            "discoveredEmails": sorted({x for x in ([company.email_business, company.email] + [c.email for c in contacts]) if x}),
+            "rucSource": next((x for x in (company.data_sources or []) if isinstance(x, dict) and x.get("type") in {"DNIT_RUC","RUC_OFFICIAL"}), None),
         },
         contacts=[{
             "id": c.id, "name": c.name, "role": c.role, "buyingRole": c.buying_role, "influence": c.influence_score,
@@ -741,7 +800,7 @@ def _commercial_messages(analysis):
         f"Por el perfil de su operación en {sector}, vemos posibles aplicaciones para {product_text}. "
         "¿Podría indicarme el nombre o contacto directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos? Muchas gracias."
     )
-    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company}"
+    subject = "Puertas Brasil Paraguay | Primer Contacto"
     email = (
         f"Estimado equipo de {company},\n\n"
         "Es un gusto saludarles.\n\n"
@@ -791,13 +850,14 @@ def website_analysis_qualify(analysis_id):
     presence["lastVerifiedAt"] = datetime.now(timezone.utc).isoformat()
     opportunity.project.company.digital_presence = presence
     auto_fill = _merge_company_enrichment(opportunity.project.company, analysis, source_label="Calificación automática desde sitio")
+    discovered_contacts = _sync_discovered_contacts(opportunity.project.company, analysis)
     opportunity.project.company.data_completeness_score = company_completeness(opportunity.project.company)[0]
     lead_readiness(opportunity)
     db.session.add(TimelineEvent(
         opportunity=opportunity, event_type="WEBSITE_QUALIFICATION",
         description="Empresa calificada manualmente; mensajes comerciales personalizados generados",
     ))
-    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Empresa calificada desde su sitio", summary=f"Análisis web completado con puntuación {analysis.potential_score}/100 y {analysis.pages_analyzed} páginas analizadas."))
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Empresa calificada desde su sitio", summary=f"Análisis web completado con puntuación {analysis.potential_score}/100 y {analysis.pages_analyzed} páginas analizadas. {len(discovered_contacts)} correo(s) convertidos en destinatarios."))
     db.session.commit()
     return jsonify(analysis=analysis.to_dict(), opportunity=opportunity.to_dict()), 201
 
@@ -1157,6 +1217,31 @@ def radar_command_center():
     )
 
 
+@api_bp.post("/companies/<int:company_id>/archive")
+@require_permission("WRITE_CRM")
+def company_archive(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id,tenant_id=tenant.id,status="ACTIVE").first_or_404()
+    company.status="ARCHIVED"; company.deleted_at=datetime.now(timezone.utc)
+    for op in Opportunity.query.join(Project).filter(Project.company_id==company.id,Opportunity.tenant_id==tenant.id).all():
+        if op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="DESCARTADO"
+    _audit("ARCHIVE","COMPANY",company.id,{"name":company.name})
+    db.session.commit()
+    return jsonify(ok=True,companyId=company.id,status=company.status)
+
+
+@api_bp.delete("/companies/<int:company_id>")
+@require_permission("MANAGE_USERS")
+def company_delete(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id,tenant_id=tenant.id).first_or_404()
+    name=company.name; cid=company.id
+    _audit("DELETE","COMPANY",cid,{"name":name})
+    # Delete dependent opportunities/projects using ORM cascades. Activities and contacts cascade with Company.
+    db.session.delete(company); db.session.commit()
+    return jsonify(ok=True,companyId=cid,name=name)
+
+
 @api_bp.get("/companies/<int:company_id>/contacts")
 def company_contacts(company_id):
     tenant = current_tenant()
@@ -1256,6 +1341,7 @@ def company_auto_enrich(company_id):
         from ..services.site_analyzer import analyze_website
         analysis=analyze_website(company.website,max_pages=18 if deep else 4,use_sitemap=deep,request_timeout=12 if deep else 8,status="COMPLETED" if deep else "QUICK")
         result=_merge_company_enrichment(company,analysis,overwrite=overwrite,source_label="Actualización automática de empresa existente")
+        result["contactsCreated"]=_sync_discovered_contacts(company,analysis)
         db.session.add(CompanyActivity(tenant_id=tenant.id,company_id=company.id,activity_type="DATA_UPDATE",channel="SITIO_WEB",subject="Actualización automática de ficha 360°",summary=f"Se completaron {len(result['updated'])} campos. {len(result['reviewRequired'])} dato(s) quedaron pendientes de revisión.",extra_data=result))
         _audit("AUTO_ENRICH","COMPANY",company.id,result)
         db.session.commit()

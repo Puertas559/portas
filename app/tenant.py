@@ -81,11 +81,8 @@ def bootstrap_tenant():
     seed_products(tenant)
     email = normalize_email(os.getenv("ADMIN_EMAIL"))
     password = os.getenv("ADMIN_PASSWORD", "")
-    if current_app.config["AUTH_REQUIRED"] and not User.query.filter_by(tenant_id=tenant.id, status="ACTIVE").first():
-        if not email or not password:
-            raise RuntimeError("AUTH_REQUIRED exige ADMIN_EMAIL y ADMIN_PASSWORD antes del despliegue")
-        if current_app.config["SECRET_KEY"] == "development-only-change-me":
-            raise RuntimeError("AUTH_REQUIRED exige una SECRET_KEY segura")
+    # Si no existen usuarios todavía, el primer administrador puede crearse desde /setup.
+    # Las variables ADMIN_* siguen siendo compatibles para un bootstrap automático.
     if email and password and not User.query.filter_by(tenant_id=tenant.id, normalized_email=email).first():
         db.session.add(User(
             tenant_id=tenant.id,

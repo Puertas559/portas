@@ -224,6 +224,7 @@ class PageParser(HTMLParser):
         self.links = []
         self.title = ""
         self.meta = []
+        self.site_names = []
         self.canonical = None
         self._in_title = False
         self._skip = 0
@@ -243,6 +244,8 @@ class PageParser(HTMLParser):
             key = (attrs.get("name") or attrs.get("property") or "").lower()
             if key in {"description", "og:description", "og:title", "twitter:description", "twitter:title"}:
                 self.meta.append(attrs.get("content"))
+            if key in {"og:site_name", "application-name", "apple-mobile-web-app-title"}:
+                self.site_names.append(attrs.get("content"))
 
     def handle_endtag(self, tag):
         if tag in {"script", "style", "noscript", "svg"} and self._skip:
@@ -300,15 +303,43 @@ def _unique(values):
     return list(dict.fromkeys(value.strip() for value in values if value and value.strip()))
 
 
-def _best_company_name(titles, host, structured_names=None):
+def _best_company_name(titles, host, structured_names=None, site_names=None):
+    generic={
+        "inicio","home","contacto","contact","contato","nosotros","quienes somos","quiénes somos",
+        "nuestra historia","historia","about us","empresa","productos","servicios","sucursales","ubicaciones",
+        "trabaja con nosotros","blog","noticias","news","bienvenidos","bienvenido"
+    }
+    def clean(value):
+        value=re.sub(r"\s+"," ",str(value or "")).strip(" -|–—•·:")
+        value=re.sub(r"^(?:contacto|contact|inicio|home|nuestra historia|historia|nosotros|quienes somos|quiénes somos)\s*[-|–—•·:]+\s*","",value,flags=re.I)
+        return value.strip(" -|–—•·:")
+    # Organization/LocalBusiness JSON-LD is the strongest public signal.
     for candidate in structured_names or []:
-        candidate = re.sub(r"\s+", " ", str(candidate)).strip()
-        if 2 < len(candidate) < 120:
+        candidate=clean(candidate)
+        if 2 < len(candidate) < 120 and candidate.casefold() not in generic:
             return candidate
+    # og:site_name / application-name usually represents the brand, independently of the page path.
+    for candidate in site_names or []:
+        candidate=clean(candidate)
+        if 2 < len(candidate) < 120 and candidate.casefold() not in generic:
+            return candidate
+    stem=host.removeprefix("www.").split(".")[0].replace("-","").replace("_","").casefold()
+    candidates=[]
     for title in titles:
-        candidate = re.split(r"[|–—•]", title)[0].strip(" -")
-        if 2 < len(candidate) < 100 and candidate.lower() not in {"inicio", "home", "contacto", "bienvenidos"}:
-            return candidate
+        parts=[clean(x) for x in re.split(r"[|–—•·]",title) if clean(x)]
+        for idx,candidate in enumerate(parts):
+            low=candidate.casefold()
+            if not (2 < len(candidate) < 100) or low in generic:
+                continue
+            compact=re.sub(r"[^a-z0-9]","",low)
+            score=10
+            if stem and (stem in compact or compact in stem): score+=45
+            if idx==len(parts)-1: score+=10  # brand is commonly the title suffix
+            if any(word in low for word in ("contacto","historia","producto","servicio","sucursal","inicio")): score-=25
+            candidates.append((score,candidate))
+    if candidates:
+        candidates.sort(key=lambda x:(-x[0],len(x[1])))
+        return candidates[0][1]
     return host.removeprefix("www.").split(".")[0].replace("-", " ").title()
 
 
@@ -622,7 +653,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
     if use_sitemap:
         for candidate in _sitemap_urls(normalized, host, timeout=min(request_timeout, 8)):
             queue.append((_link_priority(candidate), candidate))
-    seen, queued, documents, titles, all_links, raw_pages, meta_text = set(), {normalized}, [], [], [], [], []
+    seen, queued, documents, titles, site_names, all_links, raw_pages, meta_text = set(), {normalized}, [], [], [], [], [], []
     canonical_urls, redirects, fetch_errors = [], [], []
 
     while queue and len(documents) < max_pages:
@@ -659,6 +690,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
         if parser.title.strip():
             titles.append(parser.title.strip())
         meta_text.extend(parser.meta)
+        site_names.extend(parser.site_names)
         for href, label in parser.links:
             absolute = urljoin(final_url, href)
             link_parsed = urlparse(absolute)
@@ -763,7 +795,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
         alt_host = urlparse(alt).hostname or ""
         if alt_host and alt_host != host:
             alternative_sites.append({"url": alt, "host": alt_host, "confidence": 90 if _domain_stem(alt_host) == _domain_stem(host) else 76, "reason": "Redirección o URL canónica detectada por el sitio", "verified": True})
-    enrichment = _build_enrichment(text, documents, structured, analysis.company_name if analysis and analysis.company_name else _best_company_name(titles, host, structured["names"]), sector, _extract_address(text, structured["addresses"]), social, products, normalized, host)
+    enrichment = _build_enrichment(text, documents, structured, analysis.company_name if analysis and analysis.company_name else _best_company_name(titles, host, structured["names"], site_names), sector, _extract_address(text, structured["addresses"]), social, products, normalized, host)
     diagnostics = {
         "requestedUrl": requested_url, "resolvedUrl": normalized, "host": host,
         "pagesAnalyzed": len(documents), "urlsAttempted": len(seen), "fetchErrors": fetch_errors[:12],
@@ -772,7 +804,7 @@ def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=
     if analysis is None:
         analysis = WebsiteAnalysis(tenant_id=current_tenant().id, url=normalized)
     analysis.url = normalized
-    analysis.company_name = _best_company_name(titles, host, structured["names"])
+    analysis.company_name = _best_company_name(titles, host, structured["names"], site_names)
     analysis.sector = sector
     analysis.address = _extract_address(text, structured["addresses"])
     analysis.phones = phones

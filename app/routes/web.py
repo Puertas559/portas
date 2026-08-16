@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import CollectorRun, Opportunity, ProspectSignal, WebsiteAnalysis
-from ..tenant import current_tenant
+from ..tenant import current_tenant, current_user
 
 web_bp = Blueprint("web", __name__)
 
@@ -15,6 +15,7 @@ DEMO = [
 @web_bp.get("/")
 def index():
     tenant = current_tenant()
+    user = current_user()
     try:
         rows = Opportunity.query.filter_by(tenant_id=tenant.id).order_by(Opportunity.score.desc()).limit(100).all()
         leads = [row.to_dict() for row in rows]
@@ -31,4 +32,4 @@ def index():
     except SQLAlchemyError:
         website_analyses = []
     demo_mode = not leads
-    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {})
+    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {}, user=user)

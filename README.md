@@ -25,10 +25,10 @@ DATA_DIR=/data
 RAILWAY_RUN_UID=0
 WEB_CONCURRENCY=1
 COLLECTOR_ENABLED=true
-COLLECTOR_INTERVAL_MINUTES=5
+COLLECTOR_INTERVAL_MINUTES=60
 COLLECTOR_MIN_SCORE=60
 COLLECTOR_EXTRA_FEEDS=
-AUTH_REQUIRED=false
+AUTH_REQUIRED=true
 ADMIN_EMAIL=
 ADMIN_PASSWORD=
 ADMIN_NAME=Administrador
@@ -90,7 +90,7 @@ Sin PostgreSQL local, la aplicación utiliza SQLite únicamente para desarrollo.
 
 ## Seguridad
 
-La plataforma dispone de autenticación por sesión, aislamiento por tenant y roles `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. Para evitar bloquear el despliegue actual, active `AUTH_REQUIRED=true` solamente después de configurar `ADMIN_EMAIL`, `ADMIN_PASSWORD` y una `SECRET_KEY` fuerte. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
+La plataforma usa autenticación por sesión, aislamiento por tenant y roles `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. `AUTH_REQUIRED=true` es el modo recomendado. Si no existe ningún usuario, el primer acceso redirige a `/setup` para crear el administrador general; después, nuevos usuarios se crean desde **Usuarios y accesos**. La aplicación genera y persiste una clave de sesión en `DATA_DIR` cuando `SECRET_KEY` no fue definida. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
 
 ## Sales Workspace V5
 
@@ -162,3 +162,14 @@ Los datos que no puedan inferirse con seguridad desde fuentes públicas —por e
 - Cada ejecución registra fuente, fecha, campos actualizados, campos preservados, confianza y datos que requieren revisión.
 - Se detectan y consolidan presencia digital, sitio oficial, dominios alternativos y perfiles corporativos (LinkedIn, Facebook, Instagram y YouTube cuando están enlazados desde el sitio).
 - El analizador intenta extraer razón social, RUC, año de fundación, propietarios/fundadores mencionados, plantas/unidades operativas, actividades, ubicación y canales de contacto. Los datos de menor confianza quedan marcados para revisión antes de usarlos comercialmente.
+
+
+## V13 - administración, identidad y contacto inmediato
+- Login corporativo Puertas Brasil PY con presentación visual y fotografías institucionales.
+- Primer administrador mediante `/setup`; administración de usuarios, roles y activación/desactivación desde el panel.
+- Al clasificar una empresa se abre la Ficha 360° en **Mensajes**.
+- Cada correo descubierto se convierte en destinatario separado y se clasifica por área probable (Compras, Ventas, Mantenimiento, Operaciones, Gerencia, Marketing, etc.).
+- Mensajes muestran el correo/teléfono exacto del destinatario y botones para copiar destinatario, asunto, mensaje o todo.
+- Identificación de empresa prioriza datos estructurados y `og:site_name` antes del título de una página de contacto/historia.
+- La Ficha 360° permite archivar empresas; el administrador también puede eliminarlas definitivamente.
+- RUC y razón social extraídos del sitio cuando existe evidencia suficiente; la ficha enlaza la consulta oficial de DNIT para verificación.

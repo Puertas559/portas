@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v8">
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v8">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
+<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260816-v13">
 </head>
 <body>
 <div class="app">
@@ -35,6 +36,7 @@
       <a href="#prioridades" data-module-target="oportunidades"><i class="bi bi-bullseye"></i><span>Oportunidades</span></a>
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
+      {% if user and user.role == 'ADMIN' %}<p>4 · ADMINISTRACIÓN</p><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
     </nav>
     <div class="radar-status"><i></i><span><b>Radar activo</b><small>Flask · PostgreSQL</small></span></div>
   </aside>
@@ -44,7 +46,7 @@
 
     <header class="topbar workspace-topbar">
       <div><small>PUERTAS BRASIL · CENTRO DE TRABAJO COMERCIAL</small><strong id="workspaceModuleTitle">Calificar por sitio</strong></div>
-      <div class="workspace-top-actions"><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button></div>
+      <div class="workspace-top-actions"><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
     </header>
 
     <section class="today-hub app-module" data-module="hoy" id="hoy">
@@ -101,6 +103,7 @@
     <section class="signals app-module" data-module="radar" id="alertas"><div class="section-head"><div><p class="eyebrow">MOVIMIENTO DEL MERCADO</p><h2>Señales monitoreadas</h2></div><span>Últimos 30 días</span></div><div class="signal-grid"><article>▤ <span><small>Nuevas fábricas</small><b>06</b></span></article><article>▰ <span><small>Obras y naves</small><b>11</b></span></article><article>↗ <span><small>Inversiones</small><b>08</b></span></article><article>⇥ <span><small>Empresas entrantes</small><b>05</b></span></article><article>▣ <span><small>Activos industriales</small><b>14</b></span></article></div></section>
 
     <section class="site-triage app-module module-active" data-module="triage" id="triage">
+      {% if user %}<div class="welcome-radar"><div><small>CENTRO DE TRABAJO COMERCIAL</small><h1>Bienvenido, {{ user.name.split(' ')[0] }}.</h1><p>Su radar está listo. Pegue el sitio de la próxima empresa y avance directamente hasta el contacto.</p></div><div class="welcome-flow"><span>01 <b>Analizar</b></span><i class="bi bi-arrow-right"></i><span>02 <b>Clasificar</b></span><i class="bi bi-arrow-right"></i><span>03 <b>Contactar</b></span></div></div>{% endif %}
       <div class="capture-head"><div><p class="eyebrow">CALIFICACIÓN COMERCIAL MINUCIOSA</p><h2>Analizar el sitio de una empresa</h2><p>Obtiene datos públicos de contacto y estima el potencial según el portafolio configurado del centro comercial.</p></div></div>
       <form id="siteAnalysisForm" class="site-form"><label for="companyWebsite">Sitio web de la empresa</label><div><input id="companyWebsite" name="url" type="text" inputmode="url" autocomplete="url" placeholder="empresa.com.py" required><button class="primary scan-button" type="submit"><i class="bi bi-search"></i><span>Analizar empresa</span></button></div><small><b>Análisis rápido</b> devuelve los datos esenciales primero. El análisis profundo continúa después sin bloquear su trabajo.</small></form>
       <div class="scan-status" id="scanStatus" aria-live="polite"><div class="scan-status-head"><span><i class="bi bi-speedometer2"></i> Motor de análisis</span><strong id="scanStage">Listo</strong></div><div class="scan-progress"><i id="scanProgressBar"></i></div><small id="siteAnalysisMessage">Ingrese un sitio para iniciar la investigación comercial.</small></div>
@@ -127,6 +130,15 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
       <div class="smart-list-tabs" id="smartListTabs"><button data-smart="hotWithoutDecisionMaker">Alta prioridad sin decisor</button><button data-smart="buyingWindow">Ventana de compra</button><button data-smart="followUpDue">Seguimientos</button><button data-smart="proposalStalled">Propuestas paradas</button><button data-smart="staleData">Datos vencidos</button></div>
       <div class="readiness-grid" id="smartListResults"></div>
     </section>
+
+    {% if user and user.role == 'ADMIN' %}
+    <section class="app-module admin-hub" data-module="admin" id="admin">
+      <div class="section-head"><div><p class="eyebrow">ADMINISTRACIÓN GENERAL</p><h2>Usuarios y accesos</h2><p>Controle quién puede entrar al Radar Comercial y qué nivel de acceso tiene cada persona.</p></div><button class="primary" id="openCreateUser"><i class="bi bi-person-plus"></i> Nuevo usuario</button></div>
+      <div class="admin-summary"><article><small>USUARIOS ACTIVOS</small><b id="adminActiveUsers">—</b></article><article><small>ADMINISTRADORES</small><b id="adminAdmins">—</b></article><article><small>ÚLTIMO ACCESO</small><b id="adminLastLogin">—</b></article></div>
+      <div class="admin-user-list" id="adminUserList"><p>Cargando usuarios...</p></div>
+      <dialog id="createUserDialog" class="activity-dialog"><form id="createUserForm"><div class="modal-head"><div><p class="eyebrow">NUEVO ACCESO</p><h2>Crear usuario</h2><p>El administrador define el acceso inicial.</p></div><button type="button" id="closeCreateUser">×</button></div><div class="form-grid"><label>Nombre completo<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option value="SALES">Comercial</option><option value="MANAGER">Gerente</option><option value="VIEWER">Solo consulta</option><option value="ADMIN">Administrador</option></select></label><label>Contraseña inicial<input name="password" type="password" minlength="10" required></label></div><button class="primary submit">Crear acceso</button><p id="createUserMessage"></p></form></dialog>
+    </section>
+    {% endif %}
 
     <section class="capture app-module" data-module="captacion" id="captacion">
       <div class="capture-head"><div><p class="eyebrow">PROSPECCIÓN AUTÓNOMA</p><h2>Captación automática</h2><p>Solo proyectos con evidencia concreta de fábrica, depósito, doca, frigorífico, hangar o acceso industrial.</p></div><button class="primary" id="runCollector">⚙ Ejecutar búsqueda ahora</button></div>
@@ -175,7 +187,7 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <dialog id="companyDossierDialog" class="dossier-dialog">
   <div class="dossier-shell">
-    <header class="dossier-header"><div><p>FICHA EMPRESARIAL 360°</p><h2 id="dossierCompanyName">Empresa</h2><span id="dossierCompanyMeta">Cargando información...</span></div><div class="dossier-header-actions"><button id="dossierLogActivity" class="primary"><i class="bi bi-plus-circle"></i> Registrar interacción</button><button id="closeDossier" class="icon-close" aria-label="Cerrar">×</button></div></header>
+    <header class="dossier-header"><div><p>FICHA EMPRESARIAL 360°</p><h2 id="dossierCompanyName">Empresa</h2><span id="dossierCompanyMeta">Cargando información...</span></div><div class="dossier-header-actions"><div class="dossier-danger-menu"><button id="archiveCompany" class="company-action-button"><i class="bi bi-archive"></i> Archivar</button>{% if user and user.role == 'ADMIN' %}<button id="deleteCompany" class="company-action-button danger"><i class="bi bi-trash3"></i> Eliminar</button>{% endif %}</div><button id="dossierLogActivity" class="primary"><i class="bi bi-plus-circle"></i> Registrar interacción</button><button id="closeDossier" class="icon-close" aria-label="Cerrar">×</button></div></header>
     <div class="dossier-kpis" id="dossierKpis"></div>
     <nav class="dossier-tabs" id="dossierTabs"><button class="active" data-dossier-tab="summary">Resumen</button><button data-dossier-tab="profile">Datos empresariales</button><button data-dossier-tab="contacts">Contactos</button><button data-dossier-tab="activity">Actividad</button><button data-dossier-tab="business">Negocios</button><button data-dossier-tab="digital">Presencia digital</button><button data-dossier-tab="messages">Mensajes</button></nav>
     <main class="dossier-content">
@@ -202,9 +214,10 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 </dialog>
 
 <div class="toast" id="toast"></div>
-<script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }};</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260816-v12"></script>
-<script src="{{ url_for('static', filename='workspace.js') }}?v=20260816-v12"></script>
-<script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v12"></script>
+<script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260816-v13"></script>
+<script src="{{ url_for('static', filename='workspace.js') }}?v=20260816-v13"></script>
+<script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v13"></script>
+{% if user and user.role == 'ADMIN' %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
 </body>
 </html>
