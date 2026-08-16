@@ -95,21 +95,14 @@ function renderKanban() {
 }
 
 function contactMessage(lead, channel = selectedChannel) {
-  const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos industriales";
-  const sector = lead.sector && lead.sector !== "Por validar" ? lead.sector : "su operación";
-  const location = [lead.city, lead.department].filter(Boolean).join(", ");
-  const project = lead.project && !String(lead.project).toLowerCase().includes("calificación comercial desde") ? lead.project : "su operación actual";
-  const why = (lead.whyNow || lead.evidence || "").replace(/\s+/g, " ").trim();
-  const context = why ? why.slice(0, 230).replace(/[.;,:\s]+$/, "") : `identificamos afinidad entre ${sector} y nuestro portafolio`;
-  const place = location ? ` en ${location}` : "";
-
-  if (channel === "email") return `Asunto: ${lead.company} | Accesos industriales y soporte técnico\n\nEstimados señores,\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}.\n\nAntes de entrar en contacto revisamos información pública de ${lead.company}. ${context}. Por el perfil de ${project}${place}, vemos posible aplicación de ${products}.\n\nNuestro objetivo no es enviar una presentación genérica, sino entender si existe actualmente algún proyecto, ampliación, necesidad de mantenimiento, retrofit o mejora de accesos en el que podamos aportar técnicamente.\n\n¿Podrían indicarme quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos? Con una breve conversación podemos validar el escenario y, si tiene sentido, coordinar una visita técnica.\n\nQuedo a disposición.\n\nAtentamente,\nDavid Granja\n${brandName}`;
-
-  if (channel === "call") return `GUION EJECUTIVO DE LLAMADA\n\n1. Presentación: “Buenos días, habla David Granja, de ${brandName}.”\n\n2. Contexto: “Estamos haciendo un trabajo de prospección técnica en empresas del sector ${sector}${place} y revisamos la operación de ${lead.company}.”\n\n3. Motivo concreto: “${context}.”\n\n4. Validación: “Quisiera saber si tienen actualmente proyectos, ampliaciones, mantenimiento o mejoras de accesos industriales relacionados con ${products}.”\n\n5. Derivación: “¿Quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos con quien debería conversar?”\n\n6. CTA: solicitar contacto directo o una conversación de 10 minutos; no intentar cotizar en la primera llamada.`;
-
-  if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuve revisando la operación de ${lead.company}${place} y encontré una posible afinidad con ${products}. ${context}. Me gustaría conectar para entender quién lidera Mantenimiento, Ingeniería, Infraestructura u Operaciones y verificar si existe algún proyecto donde podamos aportar técnicamente.`;
-
-  return `Hola, buen día. Soy David Granja, de ${brandName}. Estuve revisando la operación de ${lead.company}${place} y encontré un punto que puede ser relevante: ${context}. Por el perfil de la empresa, vemos posible aplicación de ${products}. No quisiera enviarle una presentación genérica; prefiero entender primero si existe algún proyecto, ampliación, necesidad de mantenimiento o mejora de accesos en curso. ¿Me podría indicar quién es la persona responsable de Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos para conversar brevemente?`;
+  const products = (lead.products || []).slice(0, 3).join(", ") || "soluciones de accesos automáticos";
+  const context = lead.whyNow || `${lead.company} presenta una operación que puede requerir soluciones de acceso industrial.`;
+  const next = lead.nextBestAction || "validar el responsable técnico y el cronograma de la operación";
+  const role = "Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos";
+  if (channel === "email") return `Asunto: ${brandName} | Soluciones industriales para ${lead.company}\n\nEstimado equipo de ${lead.company},\n\nMi nombre es David Granja y formo parte del equipo comercial de ${brandName}. Estuvimos revisando información pública sobre su operación en ${lead.city || "Paraguay"} y detectamos un contexto que puede tener aplicación para ${products}.\n\n${context}\n\nSomos fábrica especializada en soluciones de accesos automáticos para operaciones industriales, logísticas y comerciales. Nuestro objetivo no es enviar un catálogo genérico, sino entender la etapa y las necesidades de la operación para evaluar una solución adecuada, incluyendo instalación, mantenimiento, retrofit y soporte técnico.\n\n¿Podrían indicarme quién es la persona responsable de ${role}? Me gustaría coordinar una conversación breve para ${next}.\n\nQuedo a disposición.\n\nSaludos cordiales,\nDavid Granja\n${brandName}`;
+  if (channel === "call") return `GUION DE LLAMADA\n\n1. Presentarse como David Granja, de ${brandName}.\n2. Mencionar el contexto: ${context}\n3. Pedir al responsable de ${role}.\n4. Validar etapa, cronograma, accesos industriales, áreas de carga y necesidades de ${products}.\n5. Objetivo de la llamada: ${next}.\n6. Cerrar proponiendo visita técnica o conversación de 15 minutos.`;
+  if (channel === "linkedin") return `Hola. Soy David Granja, de ${brandName}. Estuvimos conociendo la operación de ${lead.company} y vimos un posible encaje para ${products}. Me gustaría conectar con la persona responsable de ${role} para entender la etapa actual y evaluar si podemos aportar una solución técnica. ¿Podría orientarme con el contacto adecuado?`;
+  return `Hola, ¿cómo está? Soy David Granja, de ${brandName}. Estuve conociendo la operación de ${lead.company} y detectamos un posible encaje para ${products}. ${context}\n\nQuisiera hablar con la persona responsable de ${role} para entender la etapa actual y verificar si podemos aportar una solución adecuada. ¿Podría indicarme con quién debería conversar?`;
 }
 
 function renderCrm() {
@@ -179,7 +172,7 @@ function activateTab(tabName) {
   document.querySelectorAll(".tabs button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
-  ["overview", "evidence", "timeline"].forEach((name) => {
+  ["overview", "committee", "evidence", "timeline"].forEach((name) => {
     $(name + "Panel").classList.toggle("hidden", name !== tabName);
   });
 }
@@ -525,59 +518,109 @@ function renderWebsiteAnalysis(analysis) {
   const list = (values, fallback = "No encontrado") => Array.isArray(values) && values.length ? values.map(escapeHtml).join(", ") : fallback;
   const decision = analysis.decision || "PENDING";
   const decisionLabel = { QUALIFIED: "CALIFICADA", DISQUALIFIED: "DESCALIFICADA", PENDING: "PENDIENTE" }[decision];
+  const scanMode = analysis.scanMode || (analysis.status === "QUICK" ? "quick" : "deep");
+  const scanLabel = scanMode === "quick" ? "QUICK SCAN" : (analysis.cached ? "CACHE RECIENTE" : "ANÁLISIS PROFUNDO");
   const decisionActions = decision === "PENDING"
     ? '<button class="qualify-analysis">Clasificar e ingresar al CRM</button><button class="disqualify-analysis">Desclasificar</button>'
     : `<strong>${decision === "QUALIFIED" ? "✓ Empresa ingresada al CRM" : "Empresa desclasificada"}</strong>`;
+  const deepAction = scanMode === "quick" ? '<button class="deep-analysis"><i class="bi bi-arrow-repeat"></i> Profundizar ahora</button>' : '';
   const drafts = decision === "QUALIFIED" ? `
     <div class="outreach-drafts">
       <div><b>Mensaje para WhatsApp</b><textarea readonly>${escapeHtml(analysis.whatsappMessage || "")}</textarea><button class="copy-draft">Copiar WhatsApp</button></div>
       <div><b>Correo personalizado · ${escapeHtml(analysis.emailSubject || "")}</b><textarea readonly>${escapeHtml(analysis.emailBody || "")}</textarea><button class="copy-draft">Copiar correo</button></div>
     </div>` : "";
   return `
-    <article class="analysis-card" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
+    <article class="analysis-card ${scanMode === "quick" ? "quick-result" : "deep-result"}" data-analysis-id="${escapeHtml(analysis.id)}" data-decision="${escapeHtml(decision)}">
       <div class="analysis-score"><strong>${Number(analysis.score) || 0}</strong><small>${escapeHtml(analysis.level)}</small></div>
-      <div class="analysis-main"><span class="source-type">${Number(analysis.pagesAnalyzed) || 0} PÁGINAS ANALIZADAS · ${decisionLabel}</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
+      <div class="analysis-main"><span class="source-type"><i class="bi ${scanMode === "quick" ? "bi-lightning-charge" : "bi-check2-circle"}"></i> ${scanLabel} · ${Number(analysis.pagesAnalyzed) || 0} PÁGINAS · ${decisionLabel}</span><h3>${escapeHtml(analysis.company)}</h3><p><b>Sector:</b> ${escapeHtml(analysis.sector)} · <b>Tamaño:</b> ${escapeHtml(analysis.companySize)}</p><a href="${escapeHtml(analysis.url)}" target="_blank" rel="noopener">Abrir sitio ↗</a></div>
       <div class="analysis-grid">
         <div><b>Contacto</b><span>${list(analysis.emails)}</span><span>${list(analysis.phones)}</span>${analysis.whatsapp ? `<span>WhatsApp: ${escapeHtml(analysis.whatsapp)}</span>` : ""}</div>
         <div><b>Dirección y responsables</b><span>${escapeHtml(analysis.address || "No encontrado")}</span><span>${list(analysis.contacts, "No identificado")}</span></div>
         <div><b>Productos probables</b><span>${list(analysis.products, "Requiere validación")}</span></div>
         <div><b>Servicios recomendados</b><span>${list(analysis.services)}</span></div>
       </div>
-      <div class="analysis-reasons"><b>Inteligencia comercial detectada</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span>${analysis.summary ? `<p>${escapeHtml(analysis.summary)}</p>` : ""}</div>
-      <div class="analysis-decision">${decisionActions}</div>
+      <div class="analysis-reasons"><b>Razones de la calificación</b><span>${list(analysis.reasons, "Sin evidencia suficiente")}</span></div>
+      <div class="analysis-decision">${deepAction}${decisionActions}</div>
       ${drafts}
     </article>`;
+}
+
+function setScanProgress(stage, progress, message, active = true) {
+  const status = $("scanStatus"), bar = $("scanProgressBar"), label = $("scanStage"), msg = $("siteAnalysisMessage");
+  if (status) status.classList.toggle("is-scanning", active);
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  if (label) label.textContent = stage;
+  if (msg) msg.textContent = message;
+}
+
+async function deepenWebsiteAnalysis(analysisId, card = null, silent = false) {
+  if (!analysisId) return;
+  if (card) card.classList.add("is-upgrading");
+  if (!silent) setScanProgress("Análisis profundo", 62, "Revisando proyectos, noticias, infraestructura, responsables y señales comerciales…", true);
+  try {
+    const response = await fetch(`/api/website-analysis/${analysisId}/deep`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo completar el análisis profundo");
+    const current = card || document.querySelector(`.analysis-card[data-analysis-id="${analysisId}"]`);
+    if (current) current.outerHTML = renderWebsiteAnalysis(data);
+    if (!silent) setScanProgress("Completado", 100, `Análisis profundo completado: ${data.pagesAnalyzed || 0} páginas relevantes · potencial ${data.level}.`, false);
+    return data;
+  } catch (error) {
+    if (card) card.classList.remove("is-upgrading");
+    if (!silent) setScanProgress("Quick Scan disponible", 100, error.message, false);
+    return null;
+  }
 }
 
 $("siteAnalysisForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button");
   const url = $("companyWebsite").value.trim();
+  const started = performance.now();
   button.disabled = true;
-  button.textContent = "Analizando páginas y contactos...";
-  $("siteAnalysisMessage").textContent = "Revisando información pública, responsables, contactos, infraestructura y afinidad comercial.";
+  button.querySelector("span") && (button.querySelector("span").textContent = "Escaneando…");
+  setScanProgress("Quick Scan", 18, "Leyendo página principal y rutas esenciales para devolver una ficha inicial…", true);
+  const skeleton = document.createElement("div");
+  skeleton.className = "analysis-skeleton";
+  skeleton.innerHTML = '<i></i><div><b></b><span></span><span></span><span></span></div>';
+  $("siteAnalysisResults").prepend(skeleton);
   try {
     const response = await fetch("/api/website-analysis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, mode: "quick" }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "No se pudo analizar el sitio");
+    skeleton.remove();
     $("siteAnalysisResults").insertAdjacentHTML("afterbegin", renderWebsiteAnalysis(data));
-    $("siteAnalysisMessage").textContent = `Análisis completado: potencial ${data.level} con ${data.score} puntos.`;
-    toast("Empresa analizada y guardada en PostgreSQL");
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    if (data.cached || data.scanMode === "deep") {
+      setScanProgress("Cache reciente", 100, `Resultado reutilizado en ${seconds}s. No fue necesario descargar el sitio nuevamente.`, false);
+    } else {
+      setScanProgress("Ficha inicial lista", 48, `Quick Scan listo en ${seconds}s. Puede seguir trabajando mientras completamos el análisis profundo.`, true);
+      const card = document.querySelector(`.analysis-card[data-analysis-id="${data.id}"]`);
+      deepenWebsiteAnalysis(data.id, card, false);
+    }
+    toast(data.cached ? "Análisis reciente recuperado del cache" : "Ficha inicial disponible");
   } catch (error) {
-    $("siteAnalysisMessage").textContent = error.message;
+    skeleton.remove();
+    setScanProgress("Error", 100, error.message, false);
   } finally {
     button.disabled = false;
-    button.textContent = "◉ Analizar empresa";
+    button.querySelector("span") && (button.querySelector("span").textContent = "Analizar empresa");
   }
 });
 
 $("siteAnalysisResults").addEventListener("click", async (event) => {
   const card = event.target.closest(".analysis-card");
   if (!card) return;
+  const deepButton = event.target.closest(".deep-analysis");
+  if (deepButton) {
+    deepButton.disabled = true;
+    await deepenWebsiteAnalysis(card.dataset.analysisId, card, false);
+    return;
+  }
   if (event.target.matches(".copy-draft")) {
     const text = event.target.parentElement.querySelector("textarea").value;
     await navigator.clipboard.writeText(text);
@@ -709,44 +752,6 @@ $("refreshCommandCenter").addEventListener("click", loadCommandCenter);
   const lead = leads.find((item) => String(item.id) === row.dataset.opportunityId);
   if (lead) { selectLead(lead); $("drawer").scrollIntoView({ behavior: "smooth", block: "start" }); }
 }));
-
-
-// Productividad por teclado: Enter ejecuta la acción principal del contexto activo.
-function clickOnEnter(inputId, buttonId) {
-  const input = $(inputId);
-  const button = $(buttonId);
-  if (!input || !button) return;
-  input.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-    event.preventDefault();
-    if (!button.disabled) button.click();
-  });
-}
-
-["search", "searchCity"].forEach((id) => clickOnEnter(id, "findCompanies"));
-["searchRegion", "searchIndustry"].forEach((id) => {
-  const control = $(id);
-  if (!control) return;
-  control.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.isComposing) {
-      event.preventDefault();
-      $("findCompanies").click();
-    }
-  });
-});
-clickOnEnter("routeOrigin", "buildRoute");
-clickOnEnter("dealOwner", "saveDealData");
-clickOnEnter("dealValue", "saveDealData");
-clickOnEnter("dealProbability", "saveDealData");
-clickOnEnter("followUpDate", "scheduleFollowUp");
-
-// Ctrl/Cmd + Enter copia el mensaje comercial desde el panel lateral.
-$("approach").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    event.preventDefault();
-    $("copyApproach").click();
-  }
-});
 
 render();
 if (selected) selectLead(selected);

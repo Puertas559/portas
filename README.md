@@ -107,3 +107,23 @@ Principais recursos V5:
 - Ações em massa para cadência, monitoramento e qualificação.
 - Métricas de cobertura de decisores, completude, resposta, win rate e pipeline.
 - Google Maps/Places removido do produto; empresas encontradas manualmente podem ser qualificadas pelo site e levadas ao CRM.
+
+## Sales Workspace V6 — Performance & Clarity (sem IA)
+
+A V6 prioriza velocidade, leitura e execução comercial sem depender de APIs de IA.
+
+### Qualificação em duas etapas
+- **Quick Scan**: até 3 páginas essenciais, timeout reduzido e resposta inicial rápida.
+- **Deep Scan**: até 18 páginas relevantes, executado depois da ficha inicial sem bloquear a interface.
+- **Cache de 12 horas**: análises profundas recentes são reutilizadas automaticamente.
+- **Lote paralelo**: até 4 Quick Scans simultâneos para listas de até 25 sites.
+
+### Operação
+- Barra de progresso, skeleton loading e estados de análise.
+- Atalho `/` para voltar ao qualificador e focar o campo de site.
+- `Esc` fecha a ficha lateral.
+- Contas semelhantes calculadas localmente por setor, produto, tipo de projeto e região.
+- Captador automático recomendado a cada 60 minutos para reduzir carga e ruído.
+
+### Sem dependências pagas
+Não há integração obrigatória com OpenAI, Google Maps ou serviços de IA. O scoring continua explicável e baseado em evidências, regras comerciais e dados do próprio radar.

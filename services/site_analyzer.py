@@ -130,12 +130,12 @@ def _normalize_url(value):
     return parsed._replace(fragment="").geturl()
 
 
-def _fetch_resource(url, accepted=("html", "xml", "text")):
+def _fetch_resource(url, accepted=("html", "xml", "text"), timeout=20):
     request = Request(url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml,text/xml,text/plain;q=0.9,*/*;q=0.1",
     })
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=timeout) as response:
         content_type = response.headers.get("Content-Type", "").lower()
         if accepted and not any(kind in content_type for kind in accepted):
             raise ValueError("El recurso no contiene contenido analizable")
@@ -143,8 +143,8 @@ def _fetch_resource(url, accepted=("html", "xml", "text")):
         return response.read(MAX_BYTES).decode(charset, errors="replace"), response.geturl(), content_type
 
 
-def _fetch_page(url):
-    raw, final_url, content_type = _fetch_resource(url, accepted=("html", "xhtml"))
+def _fetch_page(url, timeout=20):
+    raw, final_url, content_type = _fetch_resource(url, accepted=("html", "xhtml"), timeout=timeout)
     return raw, final_url, content_type
 
 
@@ -211,12 +211,12 @@ def _same_host(url, host):
     return candidate == expected
 
 
-def _sitemap_urls(base_url, host):
+def _sitemap_urls(base_url, host, timeout=8):
     candidates = [urljoin(base_url, "/sitemap.xml"), urljoin(base_url, "/sitemap_index.xml")]
     found = []
     for sitemap_url in candidates:
         try:
-            raw, _, _ = _fetch_resource(sitemap_url, accepted=("xml", "text"))
+            raw, _, _ = _fetch_resource(sitemap_url, accepted=("xml", "text"), timeout=timeout)
         except Exception:
             continue
         for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>", raw, re.I | re.S):
@@ -306,23 +306,28 @@ def _signal_excerpt(documents, terms):
     return _unique(snippets)[:6]
 
 
-def analyze_website(url):
+def normalize_website_url(url):
+    return _normalize_url(url)
+
+
+def analyze_website(url, max_pages=MAX_PAGES, use_sitemap=True, request_timeout=20, analysis=None, status="COMPLETED"):
     normalized = _normalize_url(url)
     parsed = urlparse(normalized)
     host = parsed.hostname
     queue = [(1000, normalized)]
-    for candidate in _sitemap_urls(normalized, host):
-        queue.append((_link_priority(candidate), candidate))
+    if use_sitemap:
+        for candidate in _sitemap_urls(normalized, host, timeout=min(request_timeout, 8)):
+            queue.append((_link_priority(candidate), candidate))
     seen, queued, documents, titles, all_links, raw_pages, meta_text = set(), {normalized}, [], [], [], [], []
 
-    while queue and len(documents) < MAX_PAGES:
+    while queue and len(documents) < max_pages:
         queue.sort(key=lambda item: item[0], reverse=True)
         _, current = queue.pop(0)
         if current in seen:
             continue
         seen.add(current)
         try:
-            raw, final_url, _ = _fetch_page(current)
+            raw, final_url, _ = _fetch_page(current, timeout=request_timeout)
         except Exception:
             if not documents:
                 raise
@@ -437,26 +442,26 @@ def analyze_website(url):
     summary_parts.append(f"Cobertura: {len(documents)} páginas relevantes analizadas de {len(seen)} URLs intentadas.")
     summary = " ".join(summary_parts)[:2200]
 
-    analysis = WebsiteAnalysis(
-        tenant_id=current_tenant().id,
-        url=normalized,
-        company_name=_best_company_name(titles, host, structured["names"]),
-        sector=sector,
-        address=_extract_address(text, structured["addresses"]),
-        phones=phones,
-        whatsapp=whatsapp,
-        emails=emails,
-        contacts=contacts,
-        social_links=social,
-        company_size=_estimate_size(text, structured["employees"]),
-        potential_score=score,
-        potential_level=level,
-        products=products,
-        services=_unique(services),
-        reasons=reasons,
-        pages_analyzed=len(documents),
-        summary=summary or "No se encontró texto público suficiente para una calificación profunda.",
-    )
+    if analysis is None:
+        analysis = WebsiteAnalysis(tenant_id=current_tenant().id, url=normalized)
+    analysis.url = normalized
+    analysis.company_name = _best_company_name(titles, host, structured["names"])
+    analysis.sector = sector
+    analysis.address = _extract_address(text, structured["addresses"])
+    analysis.phones = phones
+    analysis.whatsapp = whatsapp
+    analysis.emails = emails
+    analysis.contacts = contacts
+    analysis.social_links = social
+    analysis.company_size = _estimate_size(text, structured["employees"])
+    analysis.potential_score = score
+    analysis.potential_level = level
+    analysis.products = products
+    analysis.services = _unique(services)
+    analysis.reasons = reasons
+    analysis.pages_analyzed = len(documents)
+    analysis.summary = summary or "No se encontró texto público suficiente para una calificación profunda."
+    analysis.status = status
     db.session.add(analysis)
     db.session.commit()
     return analysis
