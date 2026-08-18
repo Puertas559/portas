@@ -11,6 +11,7 @@
   const icons={CALL:"telephone",EMAIL_SENT:"envelope-check",WHATSAPP_SENT:"whatsapp",VISIT:"geo-alt",MEETING:"people",PROPOSAL_SENT:"file-earmark-check",FOLLOW_UP:"arrow-repeat",NOTE:"journal-text",REPLY:"reply",DATA_UPDATE:"database-check"};
   let dossier=null;
   let currentCompanyId=null;
+  let preferredMessageContactId=null;
 
   async function resolveCompanyId(lead){
     if(lead?.companyId)return lead.companyId;
@@ -77,7 +78,7 @@
     const contacts=dossier.contacts||[];
     const generalEmail=dossier.company?.email||'';
     const companyWhatsapp=dossier.company?.whatsapp||dossier.company?.phone||'';
-    const options=contacts.map(c=>`<option value="${c.id}">${esc(c.role||c.name||'Contacto')} · ${esc(c.email||c.whatsapp||c.phone||'sin dato directo')}</option>`).join('');
+    const options=contacts.map(c=>`<option value="${c.id}">${esc(c.name||c.role||'Contacto')}${c.role?` · ${esc(c.role)}`:''} · ${esc(c.email||c.whatsapp||c.phone||'sin dato directo')}</option>`).join('');
     $("dossierMessages").innerHTML=`<div class="message-builder"><div class="message-controls"><label>Destinatario<select id="messageContact"><option value="">Equipo / contacto general${generalEmail?` · ${esc(generalEmail)}`:''}</option>${options}</select></label><label>Canal<select id="messageChannel"><option value="EMAIL">Correo</option><option value="WHATSAPP">WhatsApp</option><option value="CALL">Guion de llamada</option></select></label><button id="generateContextMessage" class="primary">Generar mensaje contextual</button><small>El Radar adapta la redacción según el correo, área, cargo y contexto detectado.</small></div><div class="message-preview"><div class="message-destination"><label id="messageDestinationLabel">Correo del destinatario<input id="messageRecipient" readonly placeholder="No encontrado"></label><button id="copyMessageRecipient" class="message-copy-small"><i class="bi bi-copy"></i> Copiar</button></div><div class="message-recipient-info" id="messageRecipientInfo">Seleccione un destinatario para ver el contacto exacto.</div><label>Asunto<input id="messageSubject" readonly></label><label>Mensaje<textarea id="messageBody"></textarea></label><div class="message-actions"><button id="copyMessageSubject"><i class="bi bi-copy"></i> Copiar asunto</button><button id="copyContextMessage"><i class="bi bi-copy"></i> Copiar mensaje</button><button id="copyAllMessage"><i class="bi bi-clipboard-check"></i> Copiar todo</button><a class="message-attachment-link" href="/static/documents/Carta%20de%20presentacion%20-%20Puertas%20Brasil.pdf" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf"></i> Abrir carta institucional</a><button id="registerMessageSent" class="primary"><i class="bi bi-check2-circle"></i> Registrar como enviado</button></div></div></div>`;
     $("generateContextMessage")?.addEventListener('click',generateMessage);
     $("messageContact")?.addEventListener('change',generateMessage);
@@ -87,6 +88,9 @@
     $("copyContextMessage")?.addEventListener('click',()=>navigator.clipboard.writeText($("messageBody").value||''));
     $("copyAllMessage")?.addEventListener('click',()=>navigator.clipboard.writeText([`Destinatario: ${$("messageRecipient").value||''}`,`Asunto: ${$("messageSubject").value||''}`,'',$("messageBody").value||''].join('\n')));
     $("registerMessageSent")?.addEventListener('click',registerMessageSent);
+    const preferred=preferredMessageContactId && contacts.some(c=>String(c.id)===String(preferredMessageContactId)) ? String(preferredMessageContactId) : null;
+    if(preferred && $("messageContact")) $("messageContact").value=preferred;
+    preferredMessageContactId=null;
     generateMessage();
   }
   async function generateMessage(){const channel=$("messageChannel")?.value||'EMAIL';const r=await fetch(`/api/companies/${currentCompanyId}/message`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contactId:$("messageContact")?.value||null,channel})});const d=await r.json();if(!r.ok)return;$("messageSubject").value=channel==='EMAIL'?(d.subject||''):'';$("messageBody").value=d.body||'';$("messageRecipient").value=d.recipient||'';$("messageDestinationLabel").firstChild.textContent=channel==='EMAIL'?'Correo del destinatario':channel==='WHATSAPP'?'WhatsApp / teléfono':'Contacto para la llamada';$("messageRecipientInfo").textContent=`${d.recipientLabel||'Contacto general'} · ${d.department||'GENERAL'}${d.recipient?' · contacto listo para copiar':' · contacto no encontrado; revise Contactos o Datos empresariales'}`;}
@@ -94,7 +98,14 @@
   function fillActivityContacts(){const sel=$("activityContactId");if(!sel)return;sel.innerHTML='<option value="">Contacto general</option>'+list(dossier.contacts).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.role||'Cargo por validar')}</option>`).join('');}
   function openActivity(){if(!currentCompanyId)return;$("activityCompanyId").value=currentCompanyId;$("activityCompanyLabel").textContent=dossier?.company?.name||'';fillActivityContacts();$("activityDialog").showModal();}
   async function createActivity(payload){const r=await fetch(`/api/companies/${currentCompanyId}/activities`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok){alert('No se pudo registrar la interacción.');return false;}await reloadDossier();return true;}
-  async function reloadDossier(){const r=await fetch(`/api/companies/${currentCompanyId}/dossier`);if(r.ok){dossier=await r.json();renderAll();}}
+  async function reloadDossier(preferredContactId=null){if(preferredContactId)preferredMessageContactId=String(preferredContactId);const r=await fetch(`/api/companies/${currentCompanyId}/dossier`);if(r.ok){dossier=await r.json();renderAll();}}
+
+  async function refreshAfterContactChange(detail={}){
+    if(!currentCompanyId || String(detail.companyId||'')!==String(currentCompanyId)) return;
+    await reloadDossier(detail.contactId||null);
+    activateDossierTab('messages');
+  }
+  window.addEventListener('radar:contact-updated',e=>refreshAfterContactChange(e.detail||{}));
 
   async function archiveCurrentCompany(){if(!currentCompanyId||!dossier?.company)return;const ok=window.confirm(`¿Archivar ${dossier.company.name}? La empresa saldrá del CRM activo, pero conservará el historial para auditoría.`);if(!ok)return;const r=await fetch(`/api/companies/${currentCompanyId}/archive`,{method:'POST'});const d=await r.json();if(!r.ok){alert(d.error||'No se pudo archivar la empresa.');return;}$("companyDossierDialog").close();window.location.reload();}
   async function deleteCurrentCompany(){if(!currentCompanyId||!dossier?.company)return;const typed=window.prompt(`Eliminación definitiva de ${dossier.company.name}. Para confirmar, escriba ELIMINAR.`);if(typed!=='ELIMINAR')return;const r=await fetch(`/api/companies/${currentCompanyId}`,{method:'DELETE'});const d=await r.json();if(!r.ok){alert(d.error||'No se pudo eliminar la empresa.');return;}$("companyDossierDialog").close();window.location.reload();}
