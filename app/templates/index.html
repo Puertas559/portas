@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v8">
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v8">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
-<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260816-v13">
+<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260818-v14">
 </head>
 <body>
 <div class="app">
@@ -35,6 +35,7 @@
       <a href="#captacion" data-module-target="captacion"><i class="bi bi-database-add"></i><span>Captación</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a>
       <a href="#prioridades" data-module-target="oportunidades"><i class="bi bi-bullseye"></i><span>Oportunidades</span></a>
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
+      <a href="#reportes" data-module-target="reportes"><i class="bi bi-file-earmark-bar-graph"></i><span>Reportes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
       {% if user and user.role == 'ADMIN' %}<p>4 · ADMINISTRACIÓN</p><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
     </nav>
@@ -65,6 +66,16 @@
     <section class="search-results hidden" id="companySearchResults">
       <div class="section-head"><div><p class="eyebrow">DESCUBRIMIENTO EMPRESARIAL</p><h2>Empresas encontradas</h2><p id="companySearchMessage">Resultados públicos para validar comercialmente.</p></div><button class="icon-close" id="closeCompanySearch" aria-label="Cerrar resultados"><i class="bi bi-x-lg"></i></button></div>
       <div class="company-result-grid" id="companyResultGrid"></div>
+    </section>
+
+    <section class="app-module reports-module" data-module="reportes" id="reportes">
+      <div class="section-head reports-head"><div><p class="eyebrow">GESTIÓN Y TRAZABILIDAD</p><h2>Reportes comerciales</h2><p>Todo lo realizado por el equipo, consolidado en una vista ejecutiva y listo para compartir.</p></div><div class="report-actions"><button class="secondary" id="reportCopy"><i class="bi bi-clipboard"></i> Copiar resumen</button><button class="secondary" id="reportCsv"><i class="bi bi-filetype-csv"></i> Exportar CSV</button><button class="primary" id="reportPdf"><i class="bi bi-file-earmark-pdf"></i> Generar PDF</button></div></div>
+      <div class="report-filterbar"><label>Período<select id="reportPeriod"><option value="all">Todo hasta ahora</option><option value="today">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Período personalizado</option></select></label><label class="report-custom" hidden>Desde<input type="date" id="reportStart"></label><label class="report-custom" hidden>Hasta<input type="date" id="reportEnd"></label><label>Responsable<select id="reportUser"><option value="">Todo el equipo</option></select></label><button class="secondary" id="reportRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button></div>
+      <div class="report-brand-preview"><img src="{{ url_for('static', filename='puertas-brasil-logo-oficial.jpg') }}" alt="Puertas Brasil"><div><small>INFORME EJECUTIVO</small><strong>Puertas Brasil PY · Radar Comercial</strong><span>El PDF se genera con identidad visual, logo, período y responsable.</span></div></div>
+      <div class="report-kpis" id="reportKpis"></div>
+      <article class="report-summary-card"><div><small>RESUMEN DEL PERÍODO</small><h3>Actividad comercial consolidada</h3></div><p id="reportSummary">Cargando actividad...</p></article>
+      <div class="report-funnel" id="reportFunnel"></div>
+      <div class="report-table-wrap"><div class="report-table-head"><div><small>DETALLE</small><h3>Actividad por empresa</h3></div><span id="reportCount">—</span></div><div class="report-table" id="reportActivity"><p>Cargando registros...</p></div></div>
     </section>
 
     <section class="metrics app-module performance-module" data-module="metrics" id="metrics">
@@ -216,7 +227,7 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
 <script src="{{ url_for('static', filename='app.js') }}?v=20260816-v13"></script>
-<script src="{{ url_for('static', filename='workspace.js') }}?v=20260816-v13"></script>
+<script src="{{ url_for('static', filename='workspace.js') }}?v=20260818-v14"></script>
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v13"></script>
 {% if user and user.role == 'ADMIN' %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
 </body>

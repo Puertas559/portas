@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import csv
+import io
 from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlparse
@@ -1034,6 +1036,236 @@ def commercial_metrics():
     )
 
 
+
+def _report_period():
+    """Resolve a report window from query params. Defaults to all activity so far."""
+    now = datetime.now(timezone.utc)
+    preset = (request.args.get("period") or "all").strip().lower()
+    start = end = None
+    if preset == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "week":
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "custom":
+        try:
+            raw_start = (request.args.get("start") or "").strip()
+            raw_end = (request.args.get("end") or "").strip()
+            start = datetime.fromisoformat(raw_start).replace(tzinfo=timezone.utc) if raw_start else None
+            end = (datetime.fromisoformat(raw_end).replace(tzinfo=timezone.utc) + timedelta(days=1)) if raw_end else now
+        except ValueError:
+            start, end = None, now
+    return preset, start, end or now
+
+
+def _apply_period(query, column, start, end):
+    if start is not None:
+        query = query.filter(column >= start)
+    if end is not None:
+        query = query.filter(column < end)
+    return query
+
+
+def _build_activity_report():
+    tenant = current_tenant()
+    user_filter = (request.args.get("user") or "").strip()
+    preset, start, end = _report_period()
+
+    analyses_q = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id)
+    analyses_q = _apply_period(analyses_q, WebsiteAnalysis.created_at, start, end)
+    analyses = analyses_q.all()
+
+    activities_q = CompanyActivity.query.filter_by(tenant_id=tenant.id)
+    activities_q = _apply_period(activities_q, CompanyActivity.occurred_at, start, end)
+    if user_filter:
+        activities_q = activities_q.filter(CompanyActivity.created_by == user_filter)
+    activities = activities_q.order_by(CompanyActivity.occurred_at.desc()).all()
+
+    opportunities_q = Opportunity.query.filter_by(tenant_id=tenant.id)
+    opportunities_q = _apply_period(opportunities_q, Opportunity.discovered_at, start, end)
+    opportunities = opportunities_q.all()
+
+    proposals_q = Proposal.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    proposals_q = _apply_period(proposals_q, Proposal.created_at, start, end)
+    proposals = proposals_q.all()
+
+    tasks_q = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    if user_filter:
+        tasks_q = tasks_q.filter(Opportunity.owner_name == user_filter)
+    pending_tasks = tasks_q.filter(SalesTask.status == "PENDING").count()
+    overdue_tasks = tasks_q.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
+
+    type_counts = {}
+    channel_counts = {}
+    for a in activities:
+        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
+        if a.channel:
+            channel_counts[a.channel] = channel_counts.get(a.channel, 0) + 1
+
+    classified = sum(1 for a in analyses if a.decision == "QUALIFIED")
+    disqualified = sum(1 for a in analyses if a.decision == "DISQUALIFIED")
+    email_count = type_counts.get("EMAIL_SENT", 0)
+    whatsapp_count = type_counts.get("WHATSAPP_SENT", 0)
+    calls = type_counts.get("CALL", 0)
+    replies = type_counts.get("REPLY", 0)
+    meetings = type_counts.get("MEETING", 0)
+    visits = type_counts.get("VISIT", 0)
+    proposal_events = type_counts.get("PROPOSAL_SENT", 0)
+    wins = sum(1 for o in opportunities if o.status == "GANHO")
+    losses = sum(1 for o in opportunities if o.status == "PERDIDO")
+
+    touched_company_ids = sorted({a.company_id for a in activities})
+    contacts_identified = Contact.query.filter(Contact.tenant_id == tenant.id, Contact.company_id.in_(touched_company_ids)).count() if touched_company_ids else 0
+
+    metrics = {
+        "analysed": len(analyses), "classified": classified, "disqualified": disqualified,
+        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls, "replies": replies,
+        "meetings": meetings, "visits": visits, "proposals": max(len(proposals), proposal_events),
+        "opportunities": len(opportunities), "wins": wins, "losses": losses,
+        "contacts": contacts_identified, "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
+    }
+
+    summary = (
+        f"Durante el período fueron analizadas {metrics['analysed']} empresas; {metrics['classified']} fueron clasificadas y "
+        f"{metrics['disqualified']} descartadas. Se registraron {metrics['emails']} correos, {metrics['whatsapps']} WhatsApps "
+        f"y {metrics['calls']} llamadas. Hubo {metrics['replies']} respuestas, {metrics['meetings']} reuniones, "
+        f"{metrics['visits']} visitas y {metrics['proposals']} propuestas. Actualmente existen "
+        f"{metrics['pendingFollowups']} seguimientos pendientes, de los cuales {metrics['overdueFollowups']} están vencidos."
+    )
+
+    rows=[]
+    for a in activities[:300]:
+        rows.append({
+            "date": a.occurred_at.isoformat() if a.occurred_at else None,
+            "company": a.company.name if a.company else "Empresa",
+            "type": a.activity_type, "channel": a.channel, "subject": a.subject or "",
+            "summary": a.summary or "", "outcome": a.outcome or "", "nextAction": a.next_action or "",
+            "createdBy": a.created_by or "Equipo comercial",
+        })
+    users = sorted({a.created_by for a in CompanyActivity.query.filter_by(tenant_id=tenant.id).all() if a.created_by})
+    return {
+        "period": preset,
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "user": user_filter,
+        "metrics": metrics,
+        "summary": summary,
+        "activities": rows,
+        "users": users,
+    }
+
+
+@api_bp.get("/reports/activity")
+@require_permission("READ_INTELLIGENCE")
+def report_activity():
+    return jsonify(_build_activity_report())
+
+
+@api_bp.get("/reports/activity.csv")
+@require_permission("READ_INTELLIGENCE")
+def report_activity_csv():
+    data = _build_activity_report()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fecha", "Empresa", "Tipo", "Canal", "Asunto", "Resumen", "Resultado", "Próxima acción", "Responsable"])
+    for row in data["activities"]:
+        writer.writerow([row["date"], row["company"], row["type"], row["channel"], row["subject"], row["summary"], row["outcome"], row["nextAction"], row["createdBy"]])
+    stream = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    stream.seek(0)
+    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-actividad-comercial.csv")
+
+
+@api_bp.get("/reports/activity.pdf")
+@require_permission("READ_INTELLIGENCE")
+def report_activity_pdf():
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
+
+    data = _build_activity_report()
+    tenant = current_tenant()
+    user = current_user()
+    brand = tenant.settings or {}
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15*mm, leftMargin=15*mm, topMargin=17*mm, bottomMargin=17*mm)
+    styles = getSampleStyleSheet()
+    green = colors.HexColor("#075C43")
+    dark = colors.HexColor("#15382D")
+    muted = colors.HexColor("#667D74")
+    yellow = colors.HexColor("#F2C94C")
+    light = colors.HexColor("#F2F7F5")
+    line = colors.HexColor("#D8E7E1")
+    styles.add(ParagraphStyle(name="PBTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=22, leading=25, textColor=dark, alignment=TA_LEFT, spaceAfter=4))
+    styles.add(ParagraphStyle(name="PBSub", parent=styles["Normal"], fontSize=9.5, leading=13, textColor=muted, spaceAfter=10))
+    styles.add(ParagraphStyle(name="PBH2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, leading=15, textColor=green, spaceBefore=8, spaceAfter=7))
+    styles.add(ParagraphStyle(name="PBBody", parent=styles["BodyText"], fontSize=9, leading=13, textColor=dark))
+    styles.add(ParagraphStyle(name="PBSmall", parent=styles["BodyText"], fontSize=7.7, leading=10, textColor=dark))
+
+    story=[]
+    logo_path = Path(current_app.root_path) / "static" / "puertas-brasil-logo-oficial.jpg"
+    header_cells=[]
+    if logo_path.exists():
+        header_cells.append(Image(str(logo_path), width=46*mm, height=18*mm, kind="proportional"))
+    else:
+        header_cells.append(Paragraph("<b>PUERTAS BRASIL PY</b>", styles["PBH2"]))
+    header_cells.append(Paragraph("<b>RADAR COMERCIAL</b><br/><font color='#667D74'>Inteligencia industrial para prospección</font>", styles["PBBody"]))
+    header=Table([header_cells], colWidths=[80*mm, 95*mm])
+    header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LINEBELOW",(0,0),(-1,-1),1,green),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    story += [header, Spacer(1, 7*mm), Paragraph("Informe de actividad comercial", styles["PBTitle"])]
+    start_label = data['start'][:10] if data['start'] else "Inicio de la operación"
+    end_label = data['end'][:10] if data['end'] else datetime.now(timezone.utc).date().isoformat()
+    responsible = data['user'] or (user.name if user else "Equipo comercial")
+    story.append(Paragraph(f"Período: <b>{start_label}</b> a <b>{end_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Responsable/filtro: <b>{responsible}</b>", styles["PBSub"]))
+    story.append(Paragraph(data["summary"], styles["PBBody"]))
+    story.append(Spacer(1, 5*mm))
+
+    m=data["metrics"]
+    cards=[
+        ("Empresas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Correos",m["emails"]),("WhatsApps",m["whatsapps"]),
+        ("Respuestas",m["replies"]),("Reuniones",m["meetings"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
+    ]
+    card_rows=[]
+    for i in range(0,len(cards),4):
+        row=[]
+        for label,value in cards[i:i+4]:
+            row.append(Paragraph(f"<font size='16'><b>{value}</b></font><br/><font color='#667D74' size='7'>{label.upper()}</font>", styles["PBBody"]))
+        card_rows.append(row)
+    table=Table(card_rows, colWidths=[43.5*mm]*4, rowHeights=[21*mm]*len(card_rows), hAlign='LEFT')
+    table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),light),("BOX",(0,0),(-1,-1),0.5,line),("INNERGRID",(0,0),(-1,-1),0.5,colors.white),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),7)]))
+    story += [table, Spacer(1, 6*mm), Paragraph("Actividad registrada", styles["PBH2"])]
+
+    rows=[["Fecha","Empresa","Actividad","Canal","Responsable"]]
+    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT":"Visita","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
+    for row in data["activities"][:120]:
+        date=(row["date"] or "")[:10]
+        rows.append([Paragraph(date,styles["PBSmall"]),Paragraph(row["company"],styles["PBSmall"]),Paragraph(type_names.get(row["type"],row["type"]),styles["PBSmall"]),Paragraph(row["channel"] or "—",styles["PBSmall"]),Paragraph(row["createdBy"],styles["PBSmall"])])
+    act=Table(rows, repeatRows=1, colWidths=[22*mm,57*mm,39*mm,27*mm,30*mm], hAlign='LEFT')
+    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    story.append(act)
+    story.append(Spacer(1, 6*mm))
+    story.append(Paragraph("Este informe fue generado por Puertas Brasil PY - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado.", styles["PBSub"]))
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        width, _ = A4
+        canvas.setStrokeColor(line); canvas.line(15*mm, 12*mm, width-15*mm, 12*mm)
+        canvas.setFillColor(muted); canvas.setFont("Helvetica", 7.5)
+        footer_text = " · ".join(filter(None,[brand.get("sales_phone"),brand.get("sales_email"),brand.get("website")]))
+        canvas.drawString(15*mm, 7.5*mm, footer_text[:110])
+        canvas.drawRightString(width-15*mm, 7.5*mm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    buffer.seek(0)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="Informe-Comercial-Puertas-Brasil.pdf")
+
 def _pagination():
     try:
         page = max(1, int(request.args.get("page", 1)))
@@ -1275,7 +1507,11 @@ def company_contact_create(company_id):
     for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
         lead_readiness(opportunity)
     db.session.commit()
-    return jsonify(id=contact.id, companyId=company.id), 201
+    return jsonify(
+        id=contact.id, companyId=company.id, name=contact.name, role=contact.role,
+        buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
+        whatsapp=contact.whatsapp, confidence=contact.confidence
+    ), 201
 
 
 @api_bp.post("/companies/<int:company_id>/watch")
