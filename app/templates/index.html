@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es-PY">
+<html lang="{{ brand.get('language','es-PY') }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -13,12 +13,12 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
 <link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260818-v14">
 </head>
-<body>
+<body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
   <aside class="sidebar">
-    <a class="brand brand-logo" href="/" aria-label="Puertas Brasil — inicio">
-      <span class="brand-logo-frame"><img src="{{ url_for('static', filename='puertas-brasil-logo-oficial.jpg') }}?v=1" alt="Puertas Brasil"></span>
-      <span class="brand-product"><b>Radar Comercial</b><small>Inteligencia industrial · PY</small></span>
+    <a class="brand brand-logo" href="/" aria-label="{{ brand.get('brand_name', tenant.name) }} — inicio">
+      <span class="brand-logo-frame"><img src="{{ url_for('static', filename=brand.get('logo_file','puertas-brasil-logo-oficial.jpg')) }}?v=hg1" alt="{{ brand.get('brand_name', tenant.name) }}"></span>
+      <span class="brand-product"><b>Radar Comercial</b><small>{{ "Inteligência industrial · BR" if brand.get("language") == "pt-BR" else "Inteligencia industrial · PY" }}</small></span>
     </a>
     <nav class="workflow-nav">
       <p>1 · CALIFICAR</p>
@@ -37,7 +37,7 @@
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
       <a href="#reportes" data-module-target="reportes"><i class="bi bi-file-earmark-bar-graph"></i><span>Reportes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
-      {% if user and user.role == 'ADMIN' %}<p>4 · ADMINISTRACIÓN</p><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
+      {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<p>4 · ADMINISTRACIÓN</p><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
     </nav>
     <div class="radar-status"><i></i><span><b>Radar activo</b><small>Flask · PostgreSQL</small></span></div>
   </aside>
@@ -46,8 +46,8 @@
     <div class="compat-hidden" aria-hidden="true"><input id="search"><input id="searchCity"><select id="searchRegion"><option value=""></option></select><select id="searchIndustry"><option value=""></option></select><button id="findCompanies" type="button"></button></div>
 
     <header class="topbar workspace-topbar">
-      <div><small>PUERTAS BRASIL · CENTRO DE TRABAJO COMERCIAL</small><strong id="workspaceModuleTitle">Calificar por sitio</strong></div>
-      <div class="workspace-top-actions"><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
+      <div><small>{{ brand.get("brand_name", tenant.name)|upper }} · {{ "CENTRO DE TRABALHO COMERCIAL" if brand.get("language") == "pt-BR" else "CENTRO DE TRABAJO COMERCIAL" }}</small><strong id="workspaceModuleTitle">{{ "Qualificar por site" if brand.get("language") == "pt-BR" else "Calificar por sitio" }}</strong></div>
+      <div class="workspace-top-actions"><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px">← HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
     </header>
 
     <section class="today-hub app-module" data-module="hoy" id="hoy">
@@ -71,7 +71,7 @@
     <section class="app-module reports-module" data-module="reportes" id="reportes">
       <div class="section-head reports-head"><div><p class="eyebrow">GESTIÓN Y TRAZABILIDAD</p><h2>Reportes comerciales</h2><p>Todo lo realizado por el equipo, consolidado en una vista ejecutiva y listo para compartir.</p></div><div class="report-actions"><button class="secondary" id="reportCopy"><i class="bi bi-clipboard"></i> Copiar resumen</button><button class="secondary" id="reportCsv"><i class="bi bi-filetype-csv"></i> Exportar CSV</button><button class="primary" id="reportPdf"><i class="bi bi-file-earmark-pdf"></i> Generar PDF</button></div></div>
       <div class="report-filterbar"><label>Período<select id="reportPeriod"><option value="all">Todo hasta ahora</option><option value="today">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Período personalizado</option></select></label><label class="report-custom" hidden>Desde<input type="date" id="reportStart"></label><label class="report-custom" hidden>Hasta<input type="date" id="reportEnd"></label><label>Responsable<select id="reportUser"><option value="">Todo el equipo</option></select></label><button class="secondary" id="reportRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button></div>
-      <div class="report-brand-preview"><img src="{{ url_for('static', filename='puertas-brasil-logo-oficial.jpg') }}" alt="Puertas Brasil"><div><small>INFORME EJECUTIVO</small><strong>Puertas Brasil PY · Radar Comercial</strong><span>El PDF se genera con identidad visual, logo, período y responsable.</span></div></div>
+      <div class="report-brand-preview"><img src="{{ url_for('static', filename=brand.get('logo_file','puertas-brasil-logo-oficial.jpg')) }}" alt="Puertas Brasil"><div><small>INFORME EJECUTIVO</small><strong>{{ brand.get("brand_name", tenant.name) }} · Radar Comercial</strong><span>El PDF se genera con identidad visual, logo, período y responsable.</span></div></div>
       <div class="report-kpis" id="reportKpis"></div>
       <article class="report-summary-card"><div><small>RESUMEN DEL PERÍODO</small><h3>Actividad comercial consolidada</h3></div><p id="reportSummary">Cargando actividad...</p></article>
       <div class="report-funnel" id="reportFunnel"></div>
@@ -142,7 +142,7 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
       <div class="readiness-grid" id="smartListResults"></div>
     </section>
 
-    {% if user and user.role == 'ADMIN' %}
+    {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}
     <section class="app-module admin-hub" data-module="admin" id="admin">
       <div class="section-head"><div><p class="eyebrow">ADMINISTRACIÓN GENERAL</p><h2>Usuarios y accesos</h2><p>Controle quién puede entrar al Radar Comercial y qué nivel de acceso tiene cada persona.</p></div><button class="primary" id="openCreateUser"><i class="bi bi-person-plus"></i> Nuevo usuario</button></div>
       <div class="admin-summary"><article><small>USUARIOS ACTIVOS</small><b id="adminActiveUsers">—</b></article><article><small>ADMINISTRADORES</small><b id="adminAdmins">—</b></article><article><small>ÚLTIMO ACCESO</small><b id="adminLastLogin">—</b></article></div>
@@ -198,7 +198,7 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <dialog id="companyDossierDialog" class="dossier-dialog">
   <div class="dossier-shell">
-    <header class="dossier-header"><div><p>FICHA EMPRESARIAL 360°</p><h2 id="dossierCompanyName">Empresa</h2><span id="dossierCompanyMeta">Cargando información...</span></div><div class="dossier-header-actions"><div class="dossier-danger-menu"><button id="archiveCompany" class="company-action-button"><i class="bi bi-archive"></i> Archivar</button>{% if user and user.role == 'ADMIN' %}<button id="deleteCompany" class="company-action-button danger"><i class="bi bi-trash3"></i> Eliminar</button>{% endif %}</div><button id="dossierLogActivity" class="primary"><i class="bi bi-plus-circle"></i> Registrar interacción</button><button id="closeDossier" class="icon-close" aria-label="Cerrar">×</button></div></header>
+    <header class="dossier-header"><div><p>FICHA EMPRESARIAL 360°</p><h2 id="dossierCompanyName">Empresa</h2><span id="dossierCompanyMeta">Cargando información...</span></div><div class="dossier-header-actions"><div class="dossier-danger-menu"><button id="archiveCompany" class="company-action-button"><i class="bi bi-archive"></i> Archivar</button>{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<button id="deleteCompany" class="company-action-button danger"><i class="bi bi-trash3"></i> Eliminar</button>{% endif %}</div><button id="dossierLogActivity" class="primary"><i class="bi bi-plus-circle"></i> Registrar interacción</button><button id="closeDossier" class="icon-close" aria-label="Cerrar">×</button></div></header>
     <div class="dossier-kpis" id="dossierKpis"></div>
     <nav class="dossier-tabs" id="dossierTabs"><button class="active" data-dossier-tab="summary">Resumen</button><button data-dossier-tab="profile">Datos empresariales</button><button data-dossier-tab="contacts">Contactos</button><button data-dossier-tab="activity">Actividad</button><button data-dossier-tab="business">Negocios</button><button data-dossier-tab="digital">Presencia digital</button><button data-dossier-tab="messages">Mensajes</button></nav>
     <main class="dossier-content">
@@ -229,6 +229,6 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 <script src="{{ url_for('static', filename='app.js') }}?v=20260816-v13"></script>
 <script src="{{ url_for('static', filename='workspace.js') }}?v=20260818-v14"></script>
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v13"></script>
-{% if user and user.role == 'ADMIN' %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
-</body>
+{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=hg1"></script></body>
 </html>

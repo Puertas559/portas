@@ -102,41 +102,63 @@ def _sync_discovered_contacts(company, analysis):
     return created
 
 def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
+    brand = current_tenant().settings or {}
+    is_pt = brand.get("language") == "pt-BR"
+    brand_name = brand.get("brand_short") or brand.get("brand_name") or current_tenant().name
     company_name = company.name
     contact_name = contact.name.strip() if contact and contact.name else ""
     email = (contact.email if contact else None) or company.email_business or company.email or ""
     whatsapp = (contact.whatsapp if contact else None) or (contact.phone if contact else None) or company.whatsapp or company.phone_business or company.phone or ""
     dept = _department_context(contact, email)
-    greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
-    sector = company.sector or "su operación"
+    sector = company.sector or ("sua operação" if is_pt else "su operación")
     products = (opportunity.products if opportunity else []) or []
-    product_phrase = ", ".join(products[:3]) if products else "soluciones de accesos automáticos e industriales"
-    intro = (
-        "Mi nombre es David Granja y represento a Puertas Brasil, empresa especializada en soluciones de accesos automáticos e industriales, "
-        "con fábrica ubicada en el km 13 de Ciudad del Este."
-    )
-    context_map = {
-        "MARKETING": "Entiendo que este contacto corresponde al área de Marketing o Comunicación. Mi intención es presentar brevemente nuestra empresa y solicitar su orientación para llegar al responsable técnico adecuado.",
-        "COMPRAS": "Nos gustaría quedar registrados como proveedor y conocer el canal correcto para futuras cotizaciones, homologaciones o procesos de compra relacionados con accesos industriales.",
-        "TECNICO": f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
-        "OPERACIONES": f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
-        "DIRECCION": "Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
-        "GENERAL": f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
-    }
-    ask_map = {
-        "MARKETING": "¿Podría indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-        "COMPRAS": "¿Podría indicarme quién gestiona Compras o Abastecimiento y quién valida técnicamente este tipo de solución en Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos?",
-        "TECNICO": "¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
-        "OPERACIONES": "¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos para conversar brevemente sobre estas necesidades?",
-        "DIRECCION": "¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
-        "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-    }
-    body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
-    subject = "Puertas Brasil Paraguay | Primer Contacto"
-    if channel.upper() == "WHATSAPP":
-        body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
-    elif channel.upper() == "CALL":
-        body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
+    product_phrase = ", ".join(products[:3]) if products else ("soluções de acessos automáticos e industriais" if is_pt else "soluciones de accesos automáticos e industriales")
+    if is_pt:
+        greeting = f"Prezado(a) {contact_name}," if contact_name else f"Prezada equipe da {company_name},"
+        intro = f"Meu nome é David Granja e represento a {brand_name}, empresa especializada em soluções de acessos automáticos e industriais."
+        context_map = {
+            "MARKETING":"Entendo que este contato corresponde à área de Marketing ou Comunicação. Gostaria de apresentar brevemente nossa empresa e solicitar sua orientação para chegar ao responsável técnico adequado.",
+            "COMPRAS":"Gostaríamos de nos apresentar como fornecedor e entender o canal correto para futuras cotações, homologações ou processos de compra relacionados a acessos industriais.",
+            "TECNICO":f"Pelo perfil da operação, vemos possíveis aplicações para {product_phrase}, além de instalação, manutenção preventiva, corretiva e modernização de equipamentos existentes.",
+            "OPERACIONES":f"Em operações como a da {company_name}, os acessos podem influenciar o fluxo de mercadorias, segurança, carga e descarga e continuidade operacional.",
+            "DIRECCION":"Gostaríamos de apresentar nossa capacidade e avaliar aderência a projetos atuais ou futuros de infraestrutura, expansão, logística ou manutenção.",
+            "GENERAL":f"Em empresas do segmento {sector}, os acessos podem influenciar a segurança, o fluxo de pessoas e mercadorias e a continuidade da operação.",
+        }
+        ask_map={
+            "MARKETING":"Poderia me indicar o nome e o contato direto do responsável por Manutenção, Infraestrutura, Operações, Logística, Engenharia ou Projetos?",
+            "COMPRAS":"Poderia me indicar quem responde por Compras/Abastecimento e quem faz a validação técnica desse tipo de solução?",
+            "TECNICO":"Seria possível coordenarmos uma breve conversa para entender a operação atual, prioridades e eventuais projetos em que possamos contribuir?",
+            "OPERACIONES":"Poderia me indicar o responsável por Operações, Logística, Manutenção, Infraestrutura ou Projetos?",
+            "DIRECCION":"Com quem de Manutenção, Engenharia, Infraestrutura, Operações, Logística ou Projetos seria adequado seguir esta conversa?",
+            "GENERAL":"Poderiam me indicar o nome e o contato direto do responsável por Manutenção, Infraestrutura, Operações, Logística, Engenharia ou Projetos?",
+        }
+        body=f"{greeting}\n\nÉ um prazer falar com vocês.\n\n{intro}\n\nGostaríamos de apresentar nossa empresa e nos colocar à disposição da {company_name}.\n\n{context_map[dept]}\n\n{ask_map[dept]}\n\nDesde já, agradeço pela orientação.\n\nAtenciosamente,\nDavid Granja\n{brand_name}"
+        subject=brand.get("subject_first_contact") or f"{brand_name} | Primeiro Contato"
+        if channel.upper()=="WHATSAPP": body=f"Olá{(' ' + contact_name) if contact_name else ''}, tudo bem? Sou David Granja, da {brand_name}. {context_map[dept]} {ask_map[dept]} Obrigado!"
+        elif channel.upper()=="CALL": body=f"Objetivo da ligação: apresentar-se como David Granja da {brand_name}; contextualizar {company_name}; {ask_map[dept]} Registrar nome, cargo, contato direto, necessidade, prazo e próximo passo."
+    else:
+        greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
+        intro = f"Mi nombre es David Granja y represento a {brand_name}, empresa especializada en soluciones de accesos automáticos e industriales, con fábrica ubicada en el km 13 de Ciudad del Este."
+        context_map={
+            "MARKETING":"Entiendo que este contacto corresponde al área de Marketing o Comunicación. Mi intención es presentar brevemente nuestra empresa y solicitar su orientación para llegar al responsable técnico adecuado.",
+            "COMPRAS":"Nos gustaría quedar registrados como proveedor y conocer el canal correcto para futuras cotizaciones, homologaciones o procesos de compra relacionados con accesos industriales.",
+            "TECNICO":f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
+            "OPERACIONES":f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
+            "DIRECCION":"Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
+            "GENERAL":f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
+        }
+        ask_map={
+            "MARKETING":"¿Podría indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+            "COMPRAS":"¿Podría indicarme quién gestiona Compras o Abastecimiento y quién valida técnicamente este tipo de solución?",
+            "TECNICO":"¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
+            "OPERACIONES":"¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos?",
+            "DIRECCION":"¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
+            "GENERAL":"¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+        }
+        body=f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\n{brand_name}"
+        subject=brand.get("subject_first_contact") or "Puertas Brasil Paraguay | Primer Contacto"
+        if channel.upper()=="WHATSAPP": body=f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de {brand_name}. {context_map[dept]} {ask_map[dept]} Muchas gracias."
+        elif channel.upper()=="CALL": body=f"Objetivo de la llamada: presentarse como David Granja de {brand_name}; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
     destination = whatsapp if channel.upper() == "WHATSAPP" else (email if channel.upper() == "EMAIL" else (whatsapp or email))
     return {"subject": subject, "body": body, "department": dept, "recipient": destination, "recipientLabel": contact_name or company_name, "channel": channel.upper()}
 
@@ -294,7 +316,7 @@ def _create_intelligence_opportunity(data, status="NOVO"):
     company = resolve_company(
         tenant.id, data.get("company"), sector=data.get("sector"), origin_country=data.get("origin"),
         website=data.get("website"), address=data.get("address"),
-        city=data.get("city"), department=data.get("department") or data.get("region"), country=data.get("country") or "Paraguay",
+        city=data.get("city"), department=data.get("department") or data.get("region"), country=data.get("country") or (tenant.settings or {}).get("default_country", "Paraguay"),
         phone=data.get("phone"), phone_business=data.get("phone"), whatsapp=data.get("whatsapp") or data.get("phone"),
         email=data.get("email"), email_business=data.get("email"), linkedin_url=data.get("linkedin"),
         registration_id=data.get("registrationId"), description=data.get("companyDescription"),
@@ -303,7 +325,7 @@ def _create_intelligence_opportunity(data, status="NOVO"):
     project = resolve_project(
         tenant.id, company, data.get("project") or data.get("sourceTitle") or "Proyecto por validar",
         city=data.get("city") or "Por validar", department=data.get("department") or data.get("region") or "Por validar",
-        country=data.get("country") or "Paraguay", project_type=data.get("projectType") or data.get("event") or "UNKNOWN",
+        country=data.get("country") or (tenant.settings or {}).get("default_country", "Paraguay"), project_type=data.get("projectType") or data.get("event") or "UNKNOWN",
         stage=data.get("stage"), investment=data.get("investment"), investment_amount=_optional_number(data.get("investmentAmount")),
         investment_currency=(data.get("investmentCurrency") or "USD")[:3].upper(), area_m2=_optional_number(data.get("areaM2")),
         description=data.get("projectDescription"), announced_at=as_datetime(data.get("announcedAt")), started_at=as_datetime(data.get("startedAt")),
@@ -378,7 +400,7 @@ def company_search_add():
         "event": "COMPANY_DISCOVERY", "department": data.get("region") or "Por validar",
         "stage": "Prospección geográfica", "sourceName": data.get("source") or "Buscador empresarial",
         "sourceUrl": data.get("website"),
-        "evidence": f"Empresa identificada por fuente pública en {data.get('city') or 'Paraguay'}.",
+        "evidence": f"Empresa identificada por fuente pública en {data.get('city') or (tenant.settings or {}).get('default_country', 'Paraguay')}.",
         "dataConfidence": data.get("score", 55), "intent": 35, "icpFit": data.get("score", 55),
         "evidenceClassification": "FACT",
     })
@@ -802,7 +824,7 @@ def _commercial_messages(analysis):
         f"Por el perfil de su operación en {sector}, vemos posibles aplicaciones para {product_text}. "
         "¿Podría indicarme el nombre o contacto directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos? Muchas gracias."
     )
-    subject = "Puertas Brasil Paraguay | Primer Contacto"
+    subject = brand.get("subject_first_contact") or ("Tech Doors | Primeiro Contato" if brand.get("language") == "pt-BR" else "Puertas Brasil Paraguay | Primer Contacto")
     email = (
         f"Estimado equipo de {company},\n\n"
         "Es un gusto saludarles.\n\n"
@@ -1209,13 +1231,13 @@ def report_activity_pdf():
     styles.add(ParagraphStyle(name="PBSmall", parent=styles["BodyText"], fontSize=7.7, leading=10, textColor=dark))
 
     story=[]
-    logo_path = Path(current_app.root_path) / "static" / "puertas-brasil-logo-oficial.jpg"
+    logo_path = Path(current_app.root_path) / "static" / brand.get("logo_file", "puertas-brasil-logo-oficial.jpg")
     header_cells=[]
     if logo_path.exists():
         header_cells.append(Image(str(logo_path), width=46*mm, height=18*mm, kind="proportional"))
     else:
-        header_cells.append(Paragraph("<b>PUERTAS BRASIL PY</b>", styles["PBH2"]))
-    header_cells.append(Paragraph("<b>RADAR COMERCIAL</b><br/><font color='#667D74'>Inteligencia industrial para prospección</font>", styles["PBBody"]))
+        header_cells.append(Paragraph(f"<b>{brand.get('brand_name', tenant.name)}</b>", styles["PBH2"]))
+    header_cells.append(Paragraph(f"<b>RADAR COMERCIAL</b><br/><font color='#667D74'>{'Inteligência industrial para prospecção' if brand.get('language') == 'pt-BR' else 'Inteligencia industrial para prospección'}</font>", styles["PBBody"]))
     header=Table([header_cells], colWidths=[80*mm, 95*mm])
     header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LINEBELOW",(0,0),(-1,-1),1,green),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
     story += [header, Spacer(1, 7*mm), Paragraph("Informe de actividad comercial", styles["PBTitle"])]
@@ -1250,7 +1272,7 @@ def report_activity_pdf():
     act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
     story.append(act)
     story.append(Spacer(1, 6*mm))
-    story.append(Paragraph("Este informe fue generado por Puertas Brasil PY - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado.", styles["PBSub"]))
+    story.append(Paragraph((f"Este relatório foi gerado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Os dados refletem as atividades registradas no período selecionado." if brand.get("language") == "pt-BR" else f"Este informe fue generado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado."), styles["PBSub"]))
 
     def footer(canvas, doc):
         canvas.saveState()
@@ -1264,7 +1286,7 @@ def report_activity_pdf():
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     buffer.seek(0)
-    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="Informe-Comercial-Puertas-Brasil.pdf")
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=("Relatorio-Comercial-Tech-Doors.pdf" if brand.get("language") == "pt-BR" else "Informe-Comercial-Puertas-Brasil.pdf"))
 
 def _pagination():
     try:

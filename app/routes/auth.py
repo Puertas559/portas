@@ -38,14 +38,14 @@ def setup_submit():
     tenant = current_tenant()
     user = User(
         tenant_id=tenant.id, name=name, email=email, normalized_email=email,
-        password_hash=generate_password_hash(password), role="ADMIN", status="ACTIVE",
+        password_hash=generate_password_hash(password), role="GROUP_ADMIN", status="ACTIVE",
     )
     db.session.add(user)
     db.session.flush()
     db.session.add(AuditLog(tenant_id=tenant.id, user_id=user.id, action="INITIAL_ADMIN_CREATED", entity_type="USER", entity_id=str(user.id)))
     db.session.commit()
     session.clear(); session["user_id"] = user.id
-    return redirect(url_for("web.index"))
+    return redirect(url_for("web.group_home"))
 
 
 @auth_bp.get("/login")
@@ -53,20 +53,26 @@ def login_page():
     if not _has_any_user():
         return redirect(url_for("auth.setup_page"))
     if current_user():
-        return redirect(url_for("web.index"))
+        return redirect(url_for("web.group_home" if current_user().role == "GROUP_ADMIN" else "web.index"))
     return render_template("login.html", setup_mode=False, default_workspace=current_app.config["DEFAULT_TENANT_SLUG"])
 
 
 def _login():
     data = request.get_json(silent=True) if request.is_json else request.form
     email = normalize_email((data or {}).get("email"))
-    workspace = ((data or {}).get("workspace") or current_app.config["DEFAULT_TENANT_SLUG"]).strip().casefold()
-    user = User.query.join(Tenant).filter(
-        User.normalized_email == email, User.status == "ACTIVE", Tenant.slug == workspace, Tenant.status == "ACTIVE",
-    ).first()
-    if not user or not check_password_hash(user.password_hash, (data or {}).get("password", "")):
+    password = (data or {}).get("password", "")
+    candidates = User.query.join(Tenant).filter(
+        User.normalized_email == email, User.status == "ACTIVE", Tenant.status == "ACTIVE",
+    ).all()
+    user = next((u for u in candidates if check_password_hash(u.password_hash, password)), None)
+    if not user:
         return None
+    # O primeiro administrador da operação PY passa a administrar o HG Grupo.
+    if user.role == "ADMIN" and user.tenant and user.tenant.slug == "puertas-brasil-py":
+        user.role = "GROUP_ADMIN"
     session.clear(); session["user_id"] = user.id
+    if user.role == "GROUP_ADMIN":
+        session["active_tenant_id"] = user.tenant_id
     user.last_login_at = datetime.now(timezone.utc)
     db.session.add(AuditLog(tenant_id=user.tenant_id, user_id=user.id, action="LOGIN", entity_type="USER", entity_id=str(user.id)))
     db.session.commit()
@@ -78,7 +84,7 @@ def login_form():
     user = _login()
     if not user:
         return render_template("login.html", setup_mode=False, error="Correo o contraseña inválidos", default_workspace=current_app.config["DEFAULT_TENANT_SLUG"]), 401
-    return redirect(url_for("web.index"))
+    return redirect(url_for("web.group_home" if user.role == "GROUP_ADMIN" else "web.index"))
 
 
 @auth_bp.post("/api/auth/login")
@@ -151,7 +157,7 @@ def admin_users_update(user_id):
     if "role" in data:
         role = str(data["role"]).upper()
         if role not in {"ADMIN", "MANAGER", "SALES", "VIEWER"}: return jsonify(error="Rol inválido"), 400
-        if row.id == actor.id and role != "ADMIN": return jsonify(error="No puede retirar su propio acceso de administrador"), 400
+        if row.id == actor.id and role not in {"ADMIN", "GROUP_ADMIN"}: return jsonify(error="No puede retirar su propio acceso de administrador"), 400
         row.role = role
     if "status" in data:
         status = str(data["status"]).upper()

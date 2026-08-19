@@ -38,6 +38,7 @@ DEFAULT_PRODUCTS = (
 )
 
 ROLE_PERMISSIONS = {
+    "GROUP_ADMIN": {"*"},
     "ADMIN": {"*"},
     "MANAGER": {"READ_INTELLIGENCE", "WRITE_CRM", "RUN_COLLECTOR", "MANAGE_SCORING"},
     "SALES": {"READ_INTELLIGENCE", "WRITE_CRM"},
@@ -108,7 +109,16 @@ def current_tenant():
     if hasattr(g, "radar_tenant"):
         return g.radar_tenant
     user = current_user()
-    g.radar_tenant = user.tenant if user else ensure_default_tenant()
+    if not user:
+        g.radar_tenant = ensure_default_tenant()
+        return g.radar_tenant
+    active_id = session.get("active_tenant_id")
+    if user.role == "GROUP_ADMIN" and active_id:
+        tenant = db.session.get(Tenant, active_id)
+        if tenant and tenant.status == "ACTIVE":
+            g.radar_tenant = tenant
+            return tenant
+    g.radar_tenant = user.tenant
     return g.radar_tenant
 
 
@@ -129,3 +139,41 @@ def require_permission(permission):
             return function(*args, **kwargs)
         return wrapped
     return decorator
+
+GROUP_OPERATIONS = {
+    "puertas-brasil-py": {
+        "name": "Puertas Brasil PY",
+        "settings": {
+            "brand_name": "Puertas Brasil PY", "brand_short": "Puertas Brasil", "market": "Paraguay", "language": "es-PY",
+            "country_code": "PY", "theme": "puertas", "logo_file": "puertas-brasil-logo-oficial.jpg",
+            "accent": "#0b7654", "default_country": "Paraguay", "sales_phone": "+595 986 986215",
+            "sales_email": "gerenciacomercial@puertasbrasil.com.py", "website": "puertasbrasil.com.py",
+            "subject_first_contact": "Puertas Brasil Paraguay | Primer Contacto",
+        },
+    },
+    "techdoors-br": {
+        "name": "Tech Doors BR",
+        "settings": {
+            "brand_name": "Tech Doors BR", "brand_short": "Tech Doors", "market": "Brasil", "language": "pt-BR",
+            "country_code": "BR", "theme": "techdoors", "logo_file": "techdoors-logo-oficial.jpg",
+            "accent": "#ff6b00", "default_country": "Brasil", "sales_phone": "(11) 99746-8678",
+            "sales_email": "", "website": "techdoors.com.br",
+            "subject_first_contact": "Tech Doors | Primeiro Contato",
+        },
+    },
+}
+
+
+def ensure_group_operations():
+    """Garante as operações do HG Grupo sem duplicar o motor ou os dados."""
+    created = []
+    for slug, spec in GROUP_OPERATIONS.items():
+        tenant = Tenant.query.filter_by(slug=slug).first()
+        if not tenant:
+            tenant = Tenant(name=spec["name"], slug=slug, status="ACTIVE", settings=spec["settings"].copy())
+            db.session.add(tenant); db.session.flush(); seed_products(tenant); created.append(tenant)
+        else:
+            merged = dict(spec["settings"]); merged.update(tenant.settings or {})
+            tenant.settings = merged
+    db.session.commit()
+    return {t.slug: t for t in Tenant.query.filter(Tenant.slug.in_(list(GROUP_OPERATIONS))).all()}
