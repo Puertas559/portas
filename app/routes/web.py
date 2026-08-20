@@ -67,5 +67,7 @@ def index():
         website_analyses = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id).order_by(WebsiteAnalysis.created_at.desc()).limit(12).all()
     except SQLAlchemyError:
         website_analyses = []
-    demo_mode = not leads
-    return render_template("index.html", leads=leads or DEMO, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {}, user=user)
+    # Nunca injetar empresas DEMO em operações reais. Cada operação deve exibir apenas
+    # os registros pertencentes ao seu próprio tenant_id.
+    demo_mode = False
+    return render_template("index.html", leads=leads, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {}, user=user)
