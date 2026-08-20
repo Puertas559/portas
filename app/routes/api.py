@@ -1767,3 +1767,44 @@ def opportunity_similar(opportunity_id):
         "project": row.project.name, "score": row.score, "similarity": similarity,
         "reasons": reasons[:3], "salesReady": row.sales_ready
     } for similarity, row, reasons in ranked[:6]])
+
+
+# V15.3 — personalización persistente de módulos por operación
+_UI_MODULE_KEYS = [
+    "triage","research","salesready","hoy","crm","reportes","pipeline","visitas",
+    "radar","captacion","oportunidades","smartlists","metrics","admin"
+]
+
+@api_bp.route("/ui-config", methods=["GET", "PUT"])
+def ui_config():
+    tenant = current_tenant()
+    user = current_user()
+    settings = dict(tenant.settings or {})
+    saved = settings.get("ui_modules") or {}
+    if request.method == "GET":
+        return jsonify(modules=saved)
+    if not user or user.role not in {"ADMIN", "GROUP_ADMIN"}:
+        return jsonify(error="Solo administradores pueden personalizar módulos"), 403
+    payload = request.get_json(silent=True) or {}
+    incoming = payload.get("modules") or {}
+    clean = {}
+    for key in _UI_MODULE_KEYS:
+        row = incoming.get(key)
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()[:70]
+        try:
+            order = int(row.get("order", 0))
+        except (TypeError, ValueError):
+            order = 0
+        clean[key] = {
+            "label": label,
+            "visible": bool(row.get("visible", True)),
+            "order": max(-100, min(order, 100)),
+        }
+    settings["ui_modules"] = clean
+    tenant.settings = settings
+    db.session.commit()
+    _audit("UPDATE_UI_CONFIG", "TENANT", tenant.id, {"modules": list(clean)})
+    db.session.commit()
+    return jsonify(ok=True, modules=clean)

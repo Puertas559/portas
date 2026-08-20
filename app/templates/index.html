@@ -11,13 +11,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v8">
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v8">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
-<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260818-v14">
+<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260820-v15.3">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
   <aside class="sidebar">
     <a class="brand brand-logo" href="/" aria-label="{{ brand.get('brand_name', tenant.name) }} — inicio">
-      <span class="brand-logo-frame"><img src="{{ url_for('static', filename=brand.get('logo_file','puertas-brasil-logo-oficial.jpg')) }}?v=hg1" alt="{{ brand.get('brand_name', tenant.name) }}"></span>
+      <span class="brand-logo-frame brand-logo-native"><img src="{{ url_for('static', filename=('techdoors-logo-display.png' if brand.get('theme') == 'techdoors' else 'puertas-brasil-logo-display.png')) }}?v=15.3" alt="{{ brand.get('brand_name', tenant.name) }}"></span>
       <span class="brand-product"><b>Radar Comercial</b><small>{{ "Inteligência industrial · BR" if brand.get("language") == "pt-BR" else "Inteligencia industrial · PY" }}</small></span>
     </a>
     <nav class="workflow-nav">
@@ -230,5 +230,6 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 <script src="{{ url_for('static', filename='workspace.js') }}?v=20260818-v14"></script>
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v13"></script>
 {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
+<script src="{{ url_for('static', filename='ui-customizer.js') }}?v=15.3"></script>
 <script src="{{ url_for('static', filename='operation-i18n.js') }}?v=hg1"></script></body>
 </html>

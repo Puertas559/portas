@@ -34,3 +34,20 @@ body.operation-techdoors .dossier-header{background:linear-gradient(135deg,#090b
 body.operation-techdoors .dossier-header-actions .primary{background:#ff6b00!important;color:#fff!important}
 body.operation-techdoors .diagnostic-header p,body.operation-techdoors .diagnostic-section-head p{color:#d95600!important}
 body.operation-techdoors .alternative-confidence{background:#fff0e5!important;color:#d95600!important}
+\n/* V15.3 — logos oficiais normalizados apenas em orientação/canvas */
+.brand-logo{gap:18px!important;align-items:center!important}
+.brand-logo-frame.brand-logo-native{width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;overflow:visible!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;flex:0 0 auto!important}
+.brand-logo-frame.brand-logo-native img{width:auto!important;height:auto!important;max-width:148px!important;max-height:88px!important;object-fit:contain!important;transform:none!important;border-radius:0!important}
+body.operation-techdoors .brand-logo-frame.brand-logo-native{background:transparent!important;border:0!important}
+body.operation-techdoors .brand-logo-frame.brand-logo-native img{max-width:160px!important;max-height:72px!important;transform:none!important}
+.brand-product{min-width:0!important}
+
+/* Editor global de módulos — somente ADMIN/GROUP_ADMIN */
+.workflow-nav a{position:relative!important;padding-right:42px!important}
+.module-edit-inline{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:8px;display:grid!important;place-items:center;color:inherit!important;opacity:.38;transition:.18s;background:transparent!important}
+.workflow-nav a:hover .module-edit-inline{opacity:.95;background:rgba(255,255,255,.10)!important}
+.module-head-edit{margin-left:auto!important;width:38px!important;height:38px!important;border-radius:11px!important;border:1px solid #d7e2dd!important;background:#fff!important;color:#18352a!important;display:grid!important;place-items:center!important;cursor:pointer!important;box-shadow:0 5px 18px #17382b12!important}
+body.operation-techdoors .module-head-edit{color:#d95600!important;border-color:#f2d3be!important}
+.ui-editor-overlay{position:fixed;inset:0;background:rgba(5,12,10,.56);backdrop-filter:blur(5px);z-index:100000;display:none;align-items:center;justify-content:center;padding:24px}.ui-editor-overlay.open{display:flex}
+.ui-editor-card{width:min(560px,96vw);background:#fff;border-radius:22px;box-shadow:0 34px 100px #0005;padding:24px;color:#17231e}.ui-editor-card header{display:flex;align-items:center;gap:12px;margin-bottom:18px}.ui-editor-card header div{flex:1}.ui-editor-card h3{margin:0;font-size:24px}.ui-editor-card p{margin:4px 0 0;color:#64736d}.ui-editor-close{border:0;background:#eef3f1;width:38px;height:38px;border-radius:50%;cursor:pointer}.ui-editor-form{display:grid;gap:15px}.ui-editor-form label{display:grid;gap:7px;font-weight:750;font-size:13px}.ui-editor-form input[type=text]{height:46px;border:1px solid #cfdad5;border-radius:12px;padding:0 13px;font-size:15px}.ui-editor-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:5px}.ui-editor-actions button{border:1px solid #ced9d4;background:#fff;border-radius:11px;padding:11px 14px;font-weight:750;cursor:pointer}.ui-editor-actions .save{background:#0c7655;color:#fff;border-color:#0c7655}.ui-editor-actions .danger{color:#a12d2d;border-color:#efc9c9}.ui-editor-actions .restore{margin-left:auto}.ui-editor-status{font-size:12px;color:#6e7c76;min-height:18px}.module-hidden-admin{opacity:.48}.module-hidden-admin:after{content:'oculto';font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin-left:auto;border:1px solid currentColor;border-radius:999px;padding:2px 5px}
+body.operation-techdoors .ui-editor-actions .save{background:#ff6b00;border-color:#ff6b00}
