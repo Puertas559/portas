@@ -94,6 +94,17 @@ def bootstrap_tenant():
             role="ADMIN",
         ))
     db.session.commit()
+    # Limpieza conservadora e idempotente: consolida solamente duplicados con
+    # identificadores fuertes (RUC/registro, dominio o nombre normalizado exacto).
+    # Se ejecuta antes de iniciar Gunicorn porque start.sh llama bootstrap-tenant.
+    try:
+        operations = ensure_group_operations()
+        from .services.data_quality import consolidate_exact_duplicates
+        for operation in operations.values():
+            consolidate_exact_duplicates(operation.id)
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.warning("No se pudo ejecutar consolidación automática de duplicados: %s", exc)
     return tenant
 
 

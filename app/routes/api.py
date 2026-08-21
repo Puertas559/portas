@@ -1122,6 +1122,18 @@ def _apply_period(query, column, start, end):
     return query
 
 
+def _analysis_identity(analysis):
+    """Stable company identity for report counts, even before CRM classification."""
+    if analysis.opportunity and analysis.opportunity.project and analysis.opportunity.project.company:
+        return f"company:{analysis.opportunity.project.company.id}"
+    domain = _website_domain(analysis.url)
+    if domain:
+        return f"domain:{domain}"
+    from ..services.entity_resolution import normalize_name
+    name = normalize_name(analysis.company_name or "")
+    return f"name:{name}" if name else f"analysis:{analysis.id}"
+
+
 def _build_activity_report():
     tenant = current_tenant()
     user_filter = (request.args.get("user") or "").strip()
@@ -1145,83 +1157,163 @@ def _build_activity_report():
     proposals_q = _apply_period(proposals_q, Proposal.created_at, start, end)
     proposals = proposals_q.all()
 
+    # Tareas son trabajo pendiente, no empresas. Se calculan aparte y nunca
+    # alimentan KPIs de cantidad de empresas.
     tasks_q = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
     if user_filter:
         tasks_q = tasks_q.filter(Opportunity.owner_name == user_filter)
     pending_tasks = tasks_q.filter(SalesTask.status == "PENDING").count()
     overdue_tasks = tasks_q.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
 
-    type_counts = {}
-    channel_counts = {}
-    for a in activities:
-        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
-        if a.channel:
-            channel_counts[a.channel] = channel_counts.get(a.channel, 0) + 1
+    # Empresas únicas analizadas / clasificadas. Reanalizar un sitio no aumenta
+    # la cantidad de empresas del informe.
+    latest_analysis = {}
+    for analysis in sorted(analyses, key=lambda row: row.created_at or datetime.min.replace(tzinfo=timezone.utc)):
+        latest_analysis[_analysis_identity(analysis)] = analysis
+    analysed_keys = set(latest_analysis)
+    classified_keys = {key for key, analysis in latest_analysis.items() if analysis.decision == "QUALIFIED"}
+    disqualified_keys = {key for key, analysis in latest_analysis.items() if analysis.decision == "DISQUALIFIED"}
 
-    classified = sum(1 for a in analyses if a.decision == "QUALIFIED")
-    disqualified = sum(1 for a in analyses if a.decision == "DISQUALIFIED")
+    commercial_types = {"EMAIL_SENT", "WHATSAPP_SENT", "CALL", "REPLY", "MEETING", "VISIT_SCHEDULED", "VISIT", "PROPOSAL_SENT"}
+    commercial_activities = [a for a in activities if a.activity_type in commercial_types]
+    type_counts = {}
+    for a in commercial_activities:
+        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
+
     email_count = type_counts.get("EMAIL_SENT", 0)
     whatsapp_count = type_counts.get("WHATSAPP_SENT", 0)
     calls = type_counts.get("CALL", 0)
     meetings = type_counts.get("MEETING", 0)
-    proposal_events = type_counts.get("PROPOSAL_SENT", 0)
-    wins = sum(1 for o in opportunities if o.status == "GANHO")
-    losses = sum(1 for o in opportunities if o.status == "PERDIDO")
 
-    # KPI por EMPRESA, no por cantidad de eventos. Esto evita que una empresa
-    # con varias respuestas o varias actualizaciones infle el informe.
-    reply_company_ids = {a.company_id for a in activities if a.activity_type == "REPLY"}
-    visit_company_ids = {a.company_id for a in activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
-    completed_visit_company_ids = {a.company_id for a in activities if a.activity_type == "VISIT"}
+    contacted_company_ids = {a.company_id for a in commercial_activities if a.activity_type in {"EMAIL_SENT", "WHATSAPP_SENT", "CALL"}}
+    reply_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "REPLY"}
+    visit_company_ids = {a.company_id for a in commercial_activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
+    completed_visit_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "VISIT"}
+    proposal_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "PROPOSAL_SENT"}
 
-    # Compatibilidad con el historial anterior a esta corrección: si el vendedor
-    # ya avanzó la empresa en el CRM pero no se creó CompanyActivity, el estado
-    # actual también alimenta el informe. Las etapas posteriores a RESPONDEU
-    # implican que hubo respuesta; VISITA identifica visita marcada.
+    latest_opportunity_by_company = {}
+    all_tenant_opps = Opportunity.query.filter_by(tenant_id=tenant.id).order_by(Opportunity.updated_at.desc()).all()
+    for o in all_tenant_opps:
+        cid = o.project.company_id
+        latest_opportunity_by_company.setdefault(cid, o)
+
+    # Backward compatibility with stages saved before event tracking existed.
     for o in opportunities:
-        company_id = o.project.company.id
+        cid = o.project.company_id
+        if o.status in {"CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO"}:
+            contacted_company_ids.add(cid)
         if o.status in {"RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
-            reply_company_ids.add(company_id)
+            reply_company_ids.add(cid)
         if o.status == "VISITA":
-            visit_company_ids.add(company_id)
+            visit_company_ids.add(cid)
+        if o.status in {"ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+            proposal_company_ids.add(cid)
 
-    # Visitas efectivamente registradas con formulario/fotos también cuentan,
-    # incluso si la oportunidad ya avanzó después a presupuesto/negociación.
     visits_q = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
     visits_q = _apply_period(visits_q, VisitRecord.visited_at, start, end)
     if user_filter:
         visits_q = visits_q.filter(Opportunity.owner_name == user_filter)
     for visit in visits_q.all():
-        company_id = visit.opportunity.project.company.id
-        visit_company_ids.add(company_id)
-        completed_visit_company_ids.add(company_id)
+        cid = visit.opportunity.project.company_id
+        visit_company_ids.add(cid)
+        completed_visit_company_ids.add(cid)
 
-    replies = len(reply_company_ids)
-    visits = len(visit_company_ids)
-    visits_completed = len(completed_visit_company_ids)
+    for proposal in proposals:
+        proposal_company_ids.add(proposal.opportunity.project.company_id)
 
-    touched_company_ids = sorted({a.company_id for a in activities})
+    wins = {o.project.company_id for o in opportunities if o.status == "GANHO"}
+    losses = {o.project.company_id for o in opportunities if o.status == "PERDIDO"}
+
+    touched_company_ids = set(contacted_company_ids) | set(reply_company_ids) | set(visit_company_ids) | set(proposal_company_ids)
+    touched_company_ids |= {a.company_id for a in commercial_activities}
+    touched_company_ids |= {o.project.company_id for o in opportunities}
     contacts_identified = Contact.query.filter(Contact.tenant_id == tenant.id, Contact.company_id.in_(touched_company_ids)).count() if touched_company_ids else 0
 
     metrics = {
-        "analysed": len(analyses), "classified": classified, "disqualified": disqualified,
-        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls, "replies": replies,
-        "meetings": meetings, "visits": visits, "visitsScheduled": visits, "visitsCompleted": visits_completed, "proposals": max(len(proposals), proposal_events),
-        "opportunities": len(opportunities), "wins": wins, "losses": losses,
-        "contacts": contacts_identified, "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
+        "analysed": len(analysed_keys),
+        "analysesPerformed": len(analyses),
+        "classified": len(classified_keys),
+        "disqualified": len(disqualified_keys),
+        "crmCompanies": Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").count(),
+        "contactedCompanies": len(contacted_company_ids),
+        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls,
+        "replies": len(reply_company_ids), "meetings": meetings,
+        "visits": len(visit_company_ids), "visitsScheduled": len(visit_company_ids), "visitsCompleted": len(completed_visit_company_ids),
+        "proposals": len(proposal_company_ids), "opportunities": len({o.project.company_id for o in opportunities}),
+        "wins": len(wins), "losses": len(losses), "contacts": contacts_identified,
+        "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
     }
 
     summary = (
-        f"Durante el período fueron analizadas {metrics['analysed']} empresas; {metrics['classified']} fueron clasificadas y "
-        f"{metrics['disqualified']} descartadas. Se registraron {metrics['emails']} correos, {metrics['whatsapps']} WhatsApps "
-        f"y {metrics['calls']} llamadas. {metrics['replies']} empresas respondieron, se marcaron "
-        f"{metrics['visitsScheduled']} visitas ({metrics['visitsCompleted']} realizadas) y se registraron "
-        f"{metrics['proposals']} propuestas. Actualmente existen "
-        f"{metrics['pendingFollowups']} seguimientos pendientes, de los cuales {metrics['overdueFollowups']} están vencidos."
+        f"Durante el período se trabajaron {metrics['analysed']} empresas únicas ({metrics['analysesPerformed']} análisis realizados); "
+        f"{metrics['classified']} fueron clasificadas y {metrics['disqualified']} descartadas. "
+        f"Se contactaron {metrics['contactedCompanies']} empresas mediante {metrics['emails']} correos, "
+        f"{metrics['whatsapps']} WhatsApps y {metrics['calls']} llamadas. "
+        f"{metrics['replies']} empresas respondieron, se marcaron {metrics['visitsScheduled']} visitas "
+        f"({metrics['visitsCompleted']} realizadas) y {metrics['proposals']} empresas llegaron a propuesta. "
+        f"Las tareas se muestran aparte: {metrics['pendingFollowups']} pendientes y {metrics['overdueFollowups']} vencidas."
     )
 
+    # One consolidated row per company: the executive report should show the
+    # commercial state, not every internal click or website enrichment step.
+    activities_by_company = {}
+    for a in commercial_activities:
+        activities_by_company.setdefault(a.company_id, []).append(a)
+    for cid in touched_company_ids:
+        activities_by_company.setdefault(cid, [])
+
+    pending_tasks_rows = SalesTask.query.join(Opportunity).filter(
+        Opportunity.tenant_id == tenant.id, SalesTask.status == "PENDING"
+    ).order_by(SalesTask.due_at.asc()).all()
+    next_task_by_company = {}
+    for task in pending_tasks_rows:
+        cid = task.opportunity.project.company_id
+        next_task_by_company.setdefault(cid, task)
+
+    companies_rows = []
+    for cid, company_activities in activities_by_company.items():
+        company = db.session.get(Company, cid)
+        if not company or company.status != "ACTIVE":
+            continue
+        latest = company_activities[0] if company_activities else None
+        opp = latest_opportunity_by_company.get(cid)
+        channels = []
+        for a in company_activities:
+            label = a.channel or a.activity_type
+            if label and label not in channels:
+                channels.append(label)
+        next_task = next_task_by_company.get(cid)
+        next_action = ""
+        next_action_at = None
+        for a in company_activities:
+            if a.next_action:
+                next_action = a.next_action
+                next_action_at = a.next_action_at.isoformat() if a.next_action_at else None
+                break
+        if not next_action and next_task:
+            next_action = next_task.title
+            next_action_at = next_task.due_at.isoformat() if next_task.due_at else None
+        companies_rows.append({
+            "companyId": cid,
+            "company": company.name,
+            "sector": company.sector or "—",
+            "city": company.city or company.department or "—",
+            "status": opp.status if opp else "CRM",
+            "lastActivity": latest.activity_type if latest else "—",
+            "lastContactAt": latest.occurred_at.isoformat() if latest and latest.occurred_at else None,
+            "channels": channels,
+            "replied": cid in reply_company_ids,
+            "visitScheduled": cid in visit_company_ids,
+            "visitCompleted": cid in completed_visit_company_ids,
+            "proposal": cid in proposal_company_ids,
+            "nextAction": next_action,
+            "nextActionAt": next_action_at,
+            "owner": opp.owner_name if opp else (latest.created_by if latest else "Equipo comercial"),
+        })
+    companies_rows.sort(key=lambda row: row.get("lastContactAt") or "", reverse=True)
+
     rows=[]
-    for a in activities[:300]:
+    for a in commercial_activities[:300]:
         rows.append({
             "date": a.occurred_at.isoformat() if a.occurred_at else None,
             "company": a.company.name if a.company else "Empresa",
@@ -1237,6 +1329,7 @@ def _build_activity_report():
         "user": user_filter,
         "metrics": metrics,
         "summary": summary,
+        "companies": companies_rows,
         "activities": rows,
         "users": users,
     }
@@ -1254,12 +1347,17 @@ def report_activity_csv():
     data = _build_activity_report()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Fecha", "Empresa", "Tipo", "Canal", "Asunto", "Resumen", "Resultado", "Próxima acción", "Responsable"])
-    for row in data["activities"]:
-        writer.writerow([row["date"], row["company"], row["type"], row["channel"], row["subject"], row["summary"], row["outcome"], row["nextAction"], row["createdBy"]])
+    writer.writerow(["Empresa", "Sector", "Ciudad", "Estado CRM", "Último contacto", "Canales", "Respondió", "Visita marcada", "Visita realizada", "Propuesta", "Próxima acción", "Responsable"])
+    for row in data["companies"]:
+        writer.writerow([
+            row["company"], row["sector"], row["city"], row["status"], row["lastContactAt"] or "",
+            " / ".join(row["channels"]), "Sí" if row["replied"] else "No",
+            "Sí" if row["visitScheduled"] else "No", "Sí" if row["visitCompleted"] else "No",
+            "Sí" if row["proposal"] else "No", row["nextAction"], row["owner"],
+        ])
     stream = io.BytesIO(output.getvalue().encode("utf-8-sig"))
     stream.seek(0)
-    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-actividad-comercial.csv")
+    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-empresas-comercial.csv")
 
 
 @api_bp.get("/reports/activity.pdf")
@@ -1311,8 +1409,8 @@ def report_activity_pdf():
 
     m=data["metrics"]
     cards=[
-        ("Empresas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Correos",m["emails"]),("WhatsApps",m["whatsapps"]),
-        ("Empresas que respondieron",m["replies"]),("Visitas marcadas",m["visitsScheduled"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
+        ("Empresas únicas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Empresas contactadas",m["contactedCompanies"]),("Empresas que respondieron",m["replies"]),
+        ("Visitas marcadas",m["visitsScheduled"]),("Visitas realizadas",m["visitsCompleted"]),("Empresas con propuesta",m["proposals"]),("Ganadas",m["wins"]),
     ]
     card_rows=[]
     for i in range(0,len(cards),4):
@@ -1322,15 +1420,27 @@ def report_activity_pdf():
         card_rows.append(row)
     table=Table(card_rows, colWidths=[43.5*mm]*4, rowHeights=[21*mm]*len(card_rows), hAlign='LEFT')
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),light),("BOX",(0,0),(-1,-1),0.5,line),("INNERGRID",(0,0),(-1,-1),0.5,colors.white),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),7)]))
-    story += [table, Spacer(1, 6*mm), Paragraph("Actividad registrada", styles["PBH2"])]
+    task_note=Paragraph(
+        f"<b>Actividad:</b> {m['emails']} correos · {m['whatsapps']} WhatsApps · {m['calls']} llamadas &nbsp;&nbsp; "
+        f"<b>Tareas:</b> {m['pendingFollowups']} pendientes · {m['overdueFollowups']} vencidas. "
+        f"Las tareas no se contabilizan como empresas.", styles["PBSub"]
+    )
+    story += [table, Spacer(1, 3*mm), task_note, Spacer(1, 4*mm), Paragraph("Empresas trabajadas", styles["PBH2"])]
 
-    rows=[["Fecha","Empresa","Actividad","Canal","Responsable"]]
-    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT_SCHEDULED":"Visita marcada","VISIT":"Visita realizada","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
-    for row in data["activities"][:120]:
-        date=(row["date"] or "")[:10]
-        rows.append([Paragraph(date,styles["PBSmall"]),Paragraph(row["company"],styles["PBSmall"]),Paragraph(type_names.get(row["type"],row["type"]),styles["PBSmall"]),Paragraph(row["channel"] or "—",styles["PBSmall"]),Paragraph(row["createdBy"],styles["PBSmall"])])
-    act=Table(rows, repeatRows=1, colWidths=[22*mm,57*mm,39*mm,27*mm,30*mm], hAlign='LEFT')
-    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    rows=[["Empresa","Estado","Último contacto","Respuesta","Visita","Propuesta","Próxima acción"]]
+    for row in data["companies"][:160]:
+        last=(row["lastContactAt"] or "")[:10] or "—"
+        visit="Realizada" if row["visitCompleted"] else ("Marcada" if row["visitScheduled"] else "—")
+        next_action=row["nextAction"] or "—"
+        if len(next_action)>55: next_action=next_action[:52]+"..."
+        rows.append([
+            Paragraph(row["company"],styles["PBSmall"]), Paragraph(row["status"],styles["PBSmall"]),
+            Paragraph(last,styles["PBSmall"]), Paragraph("Sí" if row["replied"] else "—",styles["PBSmall"]),
+            Paragraph(visit,styles["PBSmall"]), Paragraph("Sí" if row["proposal"] else "—",styles["PBSmall"]),
+            Paragraph(next_action,styles["PBSmall"]),
+        ])
+    act=Table(rows, repeatRows=1, colWidths=[43*mm,22*mm,24*mm,17*mm,20*mm,17*mm,32*mm], hAlign='LEFT')
+    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),6.7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
     story.append(act)
     story.append(Spacer(1, 6*mm))
     story.append(Paragraph((f"Este relatório foi gerado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Os dados refletem as atividades registradas no período selecionado." if brand.get("language") == "pt-BR" else f"Este informe fue generado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado."), styles["PBSub"]))
