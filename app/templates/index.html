@@ -6,12 +6,12 @@
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Radar Comercial Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260816-v8">
-  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260816-v8">
-<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260816-v8">
-<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260820-v15.3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260821-v15.4.1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}?v=20260821-v15.4.1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260821-v15.4.1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260821-v15.4.1">
+<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260821-v15.4.1">
+<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260821-v15.4.1">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
@@ -227,10 +227,10 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260816-v13"></script>
-<script src="{{ url_for('static', filename='workspace.js') }}?v=20260818-v14"></script>
-<script src="{{ url_for('static', filename='dossier.js') }}?v=20260816-v13"></script>
-{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260816-v13"></script>{% endif %}
-<script src="{{ url_for('static', filename='ui-customizer.js') }}?v=15.3"></script>
-<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=hg1"></script></body>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260821-v15.4.1"></script>
+<script src="{{ url_for('static', filename='workspace.js') }}?v=20260821-v15.4.1"></script>
+<script src="{{ url_for('static', filename='dossier.js') }}?v=20260821-v15.4.1"></script>
+{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260821-v15.4.1"></script>{% endif %}
+<script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260821-v15.4.1"></script>
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260821-v15.4.1"></script></body>
 </html>
