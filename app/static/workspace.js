@@ -178,14 +178,14 @@
     if(period==="custom"){if($("reportStart")?.value)p.set("start",$("reportStart").value);if($("reportEnd")?.value)p.set("end",$("reportEnd").value);}
     if($("reportUser")?.value)p.set("user",$("reportUser").value); return p;
   }
-  const reportTypeLabel=(v)=>({EMAIL_SENT:"Correo enviado",WHATSAPP_SENT:"WhatsApp",CALL:"Llamada",MEETING:"Reunión",VISIT:"Visita",PROPOSAL_SENT:"Propuesta",REPLY:"Respuesta recibida",FOLLOW_UP:"Seguimiento",NOTE:"Nota",DATA_UPDATE:"Actualización"}[v]||v||"Actividad");
+  const reportTypeLabel=(v)=>({EMAIL_SENT:"Correo enviado",WHATSAPP_SENT:"WhatsApp",CALL:"Llamada",MEETING:"Reunión",VISIT_SCHEDULED:"Visita marcada",VISIT:"Visita realizada",PROPOSAL_SENT:"Propuesta",REPLY:"Respuesta recibida",FOLLOW_UP:"Seguimiento",NOTE:"Nota",DATA_UPDATE:"Actualización"}[v]||v||"Actividad");
   async function loadReports(){
     const box=$("reportActivity"), kpis=$("reportKpis"), summary=$("reportSummary"); if(box)box.innerHTML='<p>Cargando registros...</p>';
     try{const r=await fetch(`/api/reports/activity?${reportParams()}`);const d=await r.json();if(!r.ok)throw new Error(d.error||"No se pudo cargar el reporte");
       if($("reportUser") && $("reportUser").options.length<=1){(d.users||[]).forEach(u=>$("reportUser").insertAdjacentHTML("beforeend",`<option value="${esc(u)}">${esc(u)}</option>`));}
-      const m=d.metrics||{}; if(kpis)kpis.innerHTML=[["Empresas analizadas",m.analysed],["Clasificadas",m.classified],["Correos",m.emails],["WhatsApps",m.whatsapps],["Respuestas",m.replies],["Reuniones",m.meetings],["Propuestas",m.proposals],["Seguimientos pendientes",m.pendingFollowups]].map(([l,v])=>`<article><small>${esc(l.toUpperCase())}</small><strong>${Number(v)||0}</strong></article>`).join("");
+      const m=d.metrics||{}; if(kpis)kpis.innerHTML=[["Empresas analizadas",m.analysed],["Clasificadas",m.classified],["Correos",m.emails],["WhatsApps",m.whatsapps],["Empresas que respondieron",m.replies],["Visitas marcadas",m.visitsScheduled ?? m.visits],["Propuestas",m.proposals],["Seguimientos pendientes",m.pendingFollowups]].map(([l,v])=>`<article><small>${esc(l.toUpperCase())}</small><strong>${Number(v)||0}</strong></article>`).join("");
       if(summary)summary.textContent=d.summary||"Sin actividad registrada en el período.";
-      if($("reportFunnel"))$("reportFunnel").innerHTML=`<div><b>${Number(m.analysed)||0}</b><span>Analizadas</span></div><i>→</i><div><b>${Number(m.classified)||0}</b><span>Clasificadas</span></div><i>→</i><div><b>${(Number(m.emails)||0)+(Number(m.whatsapps)||0)+(Number(m.calls)||0)}</b><span>Contactos</span></div><i>→</i><div><b>${Number(m.replies)||0}</b><span>Respuestas</span></div><i>→</i><div><b>${Number(m.meetings)||0}</b><span>Reuniones</span></div><i>→</i><div><b>${Number(m.proposals)||0}</b><span>Propuestas</span></div>`;
+      if($("reportFunnel"))$("reportFunnel").innerHTML=`<div><b>${Number(m.analysed)||0}</b><span>Analizadas</span></div><i>→</i><div><b>${Number(m.classified)||0}</b><span>Clasificadas</span></div><i>→</i><div><b>${(Number(m.emails)||0)+(Number(m.whatsapps)||0)+(Number(m.calls)||0)}</b><span>Contactos</span></div><i>→</i><div><b>${Number(m.replies)||0}</b><span>Respondieron</span></div><i>→</i><div><b>${Number(m.visitsScheduled ?? m.visits)||0}</b><span>Visitas</span></div><i>→</i><div><b>${Number(m.proposals)||0}</b><span>Propuestas</span></div>`;
       const rows=d.activities||[]; if($("reportCount"))$("reportCount").textContent=`${rows.length} registros`;
       if(box)box.innerHTML=rows.length?`<div class="report-row report-row-header"><span>Fecha</span><span>Empresa</span><span>Actividad</span><span>Canal</span><span>Responsable</span></div>${rows.map(row=>`<div class="report-row"><span>${esc((row.date||"").slice(0,10))}</span><strong>${esc(row.company)}</strong><span>${esc(reportTypeLabel(row.type))}</span><span>${esc(row.channel||"—")}</span><span>${esc(row.createdBy||"Equipo comercial")}</span></div>`).join("")}`:'<p class="report-empty">No hay actividades registradas en este período.</p>';
     }catch(e){if(box)box.innerHTML=`<p class="report-empty">${esc(e.message)}</p>`;}
@@ -195,6 +195,78 @@
   $("reportCopy")?.addEventListener("click",async()=>{await navigator.clipboard.writeText($("reportSummary")?.textContent||"");toastLocal("Resumen copiado");});
   $("reportCsv")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.csv?${reportParams()}`;});
   $("reportPdf")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.pdf?${reportParams()}`;});
+
+
+
+  // V15.6 · Importación de histórico comercial
+  const importFieldLabels = {
+    company:"Empresa*", legal_name:"Razón social", ruc:"RUC / CNPJ", website:"Sitio", sector:"Sector",
+    city:"Ciudad", department:"Departamento / Estado", country:"País", company_email:"Correo general empresa",
+    company_phone:"Teléfono empresa", company_whatsapp:"WhatsApp empresa", contact_name:"Nombre del contacto",
+    contact_role:"Cargo / área", contact_email:"Correo del contacto", contact_phone:"Teléfono del contacto",
+    contact_whatsapp:"WhatsApp del contacto", date:"Fecha de interacción", channel:"Canal", status:"Estado CRM",
+    observation:"Observación / histórico", next_action:"Próxima acción", next_action_at:"Fecha próxima acción", owner:"Responsable comercial"
+  };
+  let importPreviewData = null;
+
+  function closeImportHistory(){ $("importHistoryDialog")?.close(); }
+  $("importCommercialHistory")?.addEventListener("click",()=>{
+    importPreviewData=null;
+    if($("importHistoryMapping")) $("importHistoryMapping").hidden=true;
+    if($("importHistoryResult")) $("importHistoryResult").hidden=true;
+    if($("importHistoryStatus")) $("importHistoryStatus").textContent="";
+    $("importHistoryDialog")?.showModal();
+  });
+  $("closeImportHistory")?.addEventListener("click",closeImportHistory);
+
+  function buildImportMapping(data){
+    importPreviewData=data;
+    const columns=data.columns||[];
+    const detected=data.detectedMapping||{};
+    $("importHistoryRows").textContent=`${Number(data.rowCount)||0} filas detectadas`;
+    const options=(selected)=>`<option value="">No importar</option>${columns.map(c=>`<option value="${esc(c)}" ${selected===c?"selected":""}>${esc(c)}</option>`).join("")}`;
+    $("importHistoryFields").innerHTML=Object.entries(importFieldLabels).map(([field,label])=>`<label>${esc(label)}<select data-import-field="${field}">${options(detected[field]||"")}</select></label>`).join("");
+    const sample=data.sample||[];
+    if(sample.length){
+      const visible=columns.slice(0,10);
+      $("importHistoryPreview").innerHTML=`<div class="import-preview-table"><table><thead><tr>${visible.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${sample.map(row=>`<tr>${visible.map(c=>`<td title="${esc(row[c]||"")}">${esc(row[c]||"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }else $("importHistoryPreview").innerHTML="<p>La planilla no contiene filas de datos.</p>";
+    $("importHistoryMapping").hidden=false;
+  }
+
+  $("previewImportHistory")?.addEventListener("click",async()=>{
+    const file=$("importHistoryFile")?.files?.[0];
+    if(!file) return toastLocal("Seleccione una planilla .xlsx o .csv");
+    const status=$("importHistoryStatus"); status.textContent="Analizando columnas y coincidencias…";
+    const fd=new FormData(); fd.append("file",file);
+    try{
+      const r=await fetch("/api/imports/history/preview",{method:"POST",body:fd}); const d=await r.json();
+      if(!r.ok) throw new Error(d.error||"No se pudo leer la planilla");
+      buildImportMapping(d); status.textContent="Planilla lista para revisión";
+    }catch(e){status.textContent=e.message; toastLocal(e.message);}
+  });
+
+  $("executeImportHistory")?.addEventListener("click",async()=>{
+    const file=$("importHistoryFile")?.files?.[0]; if(!file)return toastLocal("Seleccione una planilla");
+    const mapping={}; document.querySelectorAll("[data-import-field]").forEach(sel=>{if(sel.value)mapping[sel.dataset.importField]=sel.value;});
+    if(!mapping.company)return toastLocal("Seleccione la columna Empresa");
+    const button=$("executeImportHistory"); button.disabled=true; button.innerHTML='<span class="spinner-border spinner-border-sm"></span> Consolidando…';
+    const fd=new FormData(); fd.append("file",file); fd.append("mapping",JSON.stringify(mapping));
+    try{
+      const r=await fetch("/api/imports/history",{method:"POST",body:fd}); const d=await r.json();
+      if(!r.ok) throw new Error(d.error||"No se pudo importar");
+      const result=$("importHistoryResult"); result.hidden=false;
+      result.innerHTML=`<strong><i class="bi bi-check2-circle"></i> Importación consolidada</strong><p>El Radar comparó cada fila con las empresas y contactos ya existentes antes de crear nuevos registros.</p><div class="import-result-grid">
+        <article><strong>${Number(d.companiesCreated)||0}</strong><span>empresas nuevas</span></article><article><strong>${Number(d.companiesUpdated)||0}</strong><span>empresas existentes encontradas</span></article>
+        <article><strong>${Number(d.contactsCreated)||0}</strong><span>contactos nuevos</span></article><article><strong>${Number(d.contactsUpdated)||0}</strong><span>contactos completados</span></article>
+        <article><strong>${Number(d.activitiesCreated)||0}</strong><span>interacciones incorporadas</span></article><article><strong>${Number(d.opportunitiesCreated)||0}</strong><span>entradas nuevas en CRM</span></article>
+        <article><strong>${Number(d.duplicatesSkipped)||0}</strong><span>duplicados omitidos</span></article><article><strong>${(d.errors||[]).length}</strong><span>filas con revisión</span></article></div>${(d.errors||[]).length?`<div class="import-result-errors">${d.errors.slice(0,8).map(x=>`Fila ${x.row}: ${esc(x.error)}`).join("<br>")}</div>`:""}`;
+      toastLocal("Histórico importado y consolidado");
+      setTimeout(()=>location.reload(),1200);
+    }catch(e){toastLocal(e.message); if($("importHistoryStatus"))$("importHistoryStatus").textContent=e.message;}
+    finally{button.disabled=false;button.innerHTML='<i class="bi bi-database-check"></i> Importar y consolidar';}
+  });
+
 
   openModule("triage");
 })();

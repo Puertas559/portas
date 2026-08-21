@@ -168,7 +168,7 @@ function selectLead(lead) {
 
 function updateChannelAction() {
   if (!selected) return;
-  const labels = { whatsapp: "Abrir WhatsApp", email: "Redactar correo", call: "Iniciar llamada", linkedin: "Abrir LinkedIn" };
+  const labels = { whatsapp: "Enviar por WhatsApp", email: "Redactar correo", call: "Iniciar llamada", linkedin: "Abrir LinkedIn" };
   $("openChannel").innerHTML = `<i class="bi bi-box-arrow-up-right"></i> ${labels[selectedChannel]}`;
   if (selectedChannel === "linkedin") {
     $("approach").value = contactMessage(selected, "linkedin");
@@ -413,6 +413,30 @@ $("openChannel").addEventListener("click", () => {
     url = selected.linkedin || `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(selected.company)}`;
   }
   window.open(url, "_blank", "noopener");
+  const confirmButton = $("confirmChannelSent");
+  if (confirmButton) {
+    confirmButton.hidden = !["whatsapp","email"].includes(selectedChannel);
+    confirmButton.dataset.channel = selectedChannel;
+    confirmButton.dataset.companyId = String(selectedCompanyId || "");
+    confirmButton.dataset.contactId = String($("drawerMessageContact")?.value || "");
+  }
+});
+
+$("confirmChannelSent")?.addEventListener("click", async () => {
+  const companyId = Number($("confirmChannelSent").dataset.companyId || selectedCompanyId || 0);
+  if (!companyId) return toast("Empresa no localizada en el CRM");
+  const channel = $("confirmChannelSent").dataset.channel || selectedChannel;
+  const activityType = channel === "whatsapp" ? "WHATSAPP_SENT" : "EMAIL_SENT";
+  const contactId = $("confirmChannelSent").dataset.contactId || null;
+  const subject = channel === "email" ? ($("drawerMessageSubject")?.value || "Correo comercial") : "WhatsApp comercial";
+  const summary = channel === "email" ? "Correo comercial enviado desde el Radar." : "WhatsApp comercial enviado desde el Radar.";
+  try {
+    const r = await fetch(`/api/companies/${companyId}/activities`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:activityType,contactId,subject,summary,outcome:"SENT"})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || "No se pudo registrar el envío");
+    $("confirmChannelSent").hidden = true;
+    toast(channel === "whatsapp" ? "WhatsApp registrado como enviado" : "Correo registrado como enviado");
+  } catch(e) { toast(e.message); }
 });
 
 $("buildRoute").addEventListener("click", () => {

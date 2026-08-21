@@ -29,8 +29,12 @@ def normalize_domain(value):
     return hostname or None
 
 
-def _candidate_company(tenant_id, normalized, domain, registration_id, country, city):
+def _candidate_company(tenant_id, normalized, domain, registration_id, country, city, ruc=None):
     base = Company.query.filter_by(tenant_id=tenant_id, status="ACTIVE")
+    if ruc:
+        match = base.filter_by(ruc=ruc).first()
+        if match:
+            return match, 100
     if registration_id:
         match = base.filter_by(registration_id=registration_id).first()
         if match:
@@ -65,7 +69,7 @@ def resolve_company(tenant_id, name, **fields):
     country = (fields.get("country") or fields.get("origin_country") or "Paraguay").strip()
     domain = normalize_domain(fields.get("website"))
     company, confidence = _candidate_company(
-        tenant_id, normalized, domain, fields.get("registration_id"), country, fields.get("city"),
+        tenant_id, normalized, domain, fields.get("registration_id"), country, fields.get("city"), fields.get("ruc"),
     )
     if not company:
         company = Company(
@@ -86,6 +90,7 @@ def resolve_company(tenant_id, name, **fields):
         "department": "department", "description": "description", "address": "address", "phone": "phone",
         "phone_business": "phone_business", "whatsapp": "whatsapp", "email": "email",
         "email_business": "email_business", "linkedin_url": "linkedin_url", "registration_id": "registration_id",
+        "ruc": "ruc", "legal_name": "legal_name",
     }
     for incoming, attribute in mapping.items():
         value = fields.get(incoming)

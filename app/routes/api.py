@@ -440,11 +440,41 @@ def opportunity_update(opportunity_id):
     if status is not None and status not in STATUSES:
         return jsonify(error="Estado inválido"), 400
     changes = []
+    previous_status = opportunity.status
     if status is not None:
         opportunity.status = status
         changes.append(f"Estado actualizado a {status}")
         if status in {"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"}:
             SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status": "CANCELLED"})
+
+        # Mantiene el historial comercial sincronizado con el avance manual del CRM.
+        # Antes, cambiar el estado solo modificaba Opportunity.status y el reporte
+        # seguía mostrando 0 respuestas/visitas. Registramos el evento una sola vez
+        # cuando realmente hay transición de etapa.
+        if status != previous_status:
+            status_activity = {
+                "RESPONDEU": ("REPLY", "Respuesta registrada desde el CRM"),
+                "VISITA": ("VISIT_SCHEDULED", "Visita marcada desde el CRM"),
+                "ORCAMENTO": ("PROPOSAL_SENT", "Propuesta/presupuesto registrado desde el CRM"),
+            }.get(status)
+            if status_activity:
+                activity_type, subject = status_activity
+                company_id = opportunity.project.company.id
+                already_exists = CompanyActivity.query.filter_by(
+                    tenant_id=tenant.id, opportunity_id=opportunity.id, activity_type=activity_type
+                ).first()
+                if not already_exists:
+                    db.session.add(CompanyActivity(
+                        tenant_id=tenant.id,
+                        company_id=company_id,
+                        opportunity_id=opportunity.id,
+                        activity_type=activity_type,
+                        channel="CRM",
+                        direction="INBOUND" if activity_type == "REPLY" else "OUTBOUND",
+                        subject=subject,
+                        summary=f"Etapa comercial actualizada a {status}.",
+                        created_by=(current_user().name if current_user() else "Equipo comercial"),
+                    ))
     if "contactVerified" in data:
         opportunity.contact_verified = bool(data["contactVerified"])
         changes.append("Contacto validado" if opportunity.contact_verified else "Contacto pendiente de validación")
@@ -587,7 +617,7 @@ def company_activity_create(company_id):
     company=Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
     data=request.get_json(silent=True) or {}
     activity_type=str(data.get("type") or "NOTE").upper()
-    allowed={"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","FOLLOW_UP","NOTE","REPLY","DATA_UPDATE"}
+    allowed={"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","VISIT_SCHEDULED","MEETING","PROPOSAL_SENT","FOLLOW_UP","NOTE","REPLY","DATA_UPDATE"}
     if activity_type not in allowed: return jsonify(error="Tipo de interacción inválido"),400
     next_at=None
     if data.get("nextActionAt"):
@@ -609,7 +639,7 @@ def company_activity_create(company_id):
         if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","REPLY"}: op.last_contact_at=occurred
         if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT"} and op.status in {"NOVO","QUALIFICADO"}: op.status="CONTATO_REALIZADO"
         elif activity_type == "REPLY" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="RESPONDEU"
-        elif activity_type in {"VISIT","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
+        elif activity_type in {"VISIT","VISIT_SCHEDULED","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
         elif activity_type == "PROPOSAL_SENT" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="ORCAMENTO"
         if next_at: op.next_action_at=next_at
         db.session.add(TimelineEvent(opportunity=op,event_type=activity_type,description=data.get("summary") or data.get("subject") or "Interacción comercial registrada"))
@@ -1133,12 +1163,42 @@ def _build_activity_report():
     email_count = type_counts.get("EMAIL_SENT", 0)
     whatsapp_count = type_counts.get("WHATSAPP_SENT", 0)
     calls = type_counts.get("CALL", 0)
-    replies = type_counts.get("REPLY", 0)
     meetings = type_counts.get("MEETING", 0)
-    visits = type_counts.get("VISIT", 0)
     proposal_events = type_counts.get("PROPOSAL_SENT", 0)
     wins = sum(1 for o in opportunities if o.status == "GANHO")
     losses = sum(1 for o in opportunities if o.status == "PERDIDO")
+
+    # KPI por EMPRESA, no por cantidad de eventos. Esto evita que una empresa
+    # con varias respuestas o varias actualizaciones infle el informe.
+    reply_company_ids = {a.company_id for a in activities if a.activity_type == "REPLY"}
+    visit_company_ids = {a.company_id for a in activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
+    completed_visit_company_ids = {a.company_id for a in activities if a.activity_type == "VISIT"}
+
+    # Compatibilidad con el historial anterior a esta corrección: si el vendedor
+    # ya avanzó la empresa en el CRM pero no se creó CompanyActivity, el estado
+    # actual también alimenta el informe. Las etapas posteriores a RESPONDEU
+    # implican que hubo respuesta; VISITA identifica visita marcada.
+    for o in opportunities:
+        company_id = o.project.company.id
+        if o.status in {"RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+            reply_company_ids.add(company_id)
+        if o.status == "VISITA":
+            visit_company_ids.add(company_id)
+
+    # Visitas efectivamente registradas con formulario/fotos también cuentan,
+    # incluso si la oportunidad ya avanzó después a presupuesto/negociación.
+    visits_q = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    visits_q = _apply_period(visits_q, VisitRecord.visited_at, start, end)
+    if user_filter:
+        visits_q = visits_q.filter(Opportunity.owner_name == user_filter)
+    for visit in visits_q.all():
+        company_id = visit.opportunity.project.company.id
+        visit_company_ids.add(company_id)
+        completed_visit_company_ids.add(company_id)
+
+    replies = len(reply_company_ids)
+    visits = len(visit_company_ids)
+    visits_completed = len(completed_visit_company_ids)
 
     touched_company_ids = sorted({a.company_id for a in activities})
     contacts_identified = Contact.query.filter(Contact.tenant_id == tenant.id, Contact.company_id.in_(touched_company_ids)).count() if touched_company_ids else 0
@@ -1146,7 +1206,7 @@ def _build_activity_report():
     metrics = {
         "analysed": len(analyses), "classified": classified, "disqualified": disqualified,
         "emails": email_count, "whatsapps": whatsapp_count, "calls": calls, "replies": replies,
-        "meetings": meetings, "visits": visits, "proposals": max(len(proposals), proposal_events),
+        "meetings": meetings, "visits": visits, "visitsScheduled": visits, "visitsCompleted": visits_completed, "proposals": max(len(proposals), proposal_events),
         "opportunities": len(opportunities), "wins": wins, "losses": losses,
         "contacts": contacts_identified, "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
     }
@@ -1154,8 +1214,9 @@ def _build_activity_report():
     summary = (
         f"Durante el período fueron analizadas {metrics['analysed']} empresas; {metrics['classified']} fueron clasificadas y "
         f"{metrics['disqualified']} descartadas. Se registraron {metrics['emails']} correos, {metrics['whatsapps']} WhatsApps "
-        f"y {metrics['calls']} llamadas. Hubo {metrics['replies']} respuestas, {metrics['meetings']} reuniones, "
-        f"{metrics['visits']} visitas y {metrics['proposals']} propuestas. Actualmente existen "
+        f"y {metrics['calls']} llamadas. {metrics['replies']} empresas respondieron, se marcaron "
+        f"{metrics['visitsScheduled']} visitas ({metrics['visitsCompleted']} realizadas) y se registraron "
+        f"{metrics['proposals']} propuestas. Actualmente existen "
         f"{metrics['pendingFollowups']} seguimientos pendientes, de los cuales {metrics['overdueFollowups']} están vencidos."
     )
 
@@ -1251,7 +1312,7 @@ def report_activity_pdf():
     m=data["metrics"]
     cards=[
         ("Empresas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Correos",m["emails"]),("WhatsApps",m["whatsapps"]),
-        ("Respuestas",m["replies"]),("Reuniones",m["meetings"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
+        ("Empresas que respondieron",m["replies"]),("Visitas marcadas",m["visitsScheduled"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
     ]
     card_rows=[]
     for i in range(0,len(cards),4):
@@ -1264,7 +1325,7 @@ def report_activity_pdf():
     story += [table, Spacer(1, 6*mm), Paragraph("Actividad registrada", styles["PBH2"])]
 
     rows=[["Fecha","Empresa","Actividad","Canal","Responsable"]]
-    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT":"Visita","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
+    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT_SCHEDULED":"Visita marcada","VISIT":"Visita realizada","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
     for row in data["activities"][:120]:
         date=(row["date"] or "")[:10]
         rows.append([Paragraph(date,styles["PBSmall"]),Paragraph(row["company"],styles["PBSmall"]),Paragraph(type_names.get(row["type"],row["type"]),styles["PBSmall"]),Paragraph(row["channel"] or "—",styles["PBSmall"]),Paragraph(row["createdBy"],styles["PBSmall"])])
@@ -1516,8 +1577,35 @@ def company_contact_create(company_id):
     data = request.get_json(silent=True) or {}
     if not data.get("name"):
         return jsonify(error="Falta el nombre del contacto"), 400
+    # Evita duplicar personas ya registradas en la misma empresa. Email y WhatsApp
+    # son claves fuertes; nombre+cargo sirve como última coincidencia segura.
+    clean_email = str(data.get("email") or "").strip().casefold()
+    clean_phone = "".join(ch for ch in str(data.get("whatsapp") or data.get("phone") or "") if ch.isdigit())
+    clean_name = str(data.get("name") or "").strip()
+    clean_role = str(data.get("role") or "").strip()
+    existing_contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").all()
+    existing = None
+    for row in existing_contacts:
+        row_email = str(row.email or "").strip().casefold()
+        row_phone = "".join(ch for ch in str(row.whatsapp or row.phone or "") if ch.isdigit())
+        same_name = row.name.strip().casefold() == clean_name.casefold() if row.name and clean_name else False
+        same_role = str(row.role or "").strip().casefold() == clean_role.casefold() if clean_role else True
+        if (clean_email and row_email == clean_email) or (clean_phone and row_phone == clean_phone) or (same_name and same_role):
+            existing = row
+            break
+    if existing:
+        changed=[]
+        for attr,key in (("role","role"),("email","email"),("phone","phone"),("whatsapp","whatsapp"),("linkedin_url","linkedin")):
+            value=str(data.get(key) or "").strip()
+            if value and not getattr(existing,attr):
+                setattr(existing,attr,value); changed.append(key)
+        if changed:
+            existing.verified_at=datetime.now(timezone.utc)
+            db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, contact_id=existing.id, activity_type="DATA_UPDATE", channel="CRM", subject="Contacto existente completado", summary=f"Se completaron datos de {existing.name}: {', '.join(changed)}", created_by=(current_user().name if current_user() else "Equipo comercial")))
+            db.session.commit()
+        return jsonify(id=existing.id, companyId=company.id, name=existing.name, role=existing.role, buyingRole=existing.buying_role, email=existing.email, phone=existing.phone, whatsapp=existing.whatsapp, confidence=existing.confidence, duplicatePrevented=True, changed=changed), 200
     contact = Contact(
-        tenant_id=tenant.id, company_id=company.id, name=str(data["name"]).strip(), role=data.get("role"),
+        tenant_id=tenant.id, company_id=company.id, name=clean_name, role=data.get("role"),
         buying_role=(data.get("buyingRole") or "UNKNOWN").upper(), influence_score=max(0, min(100, int(data.get("influence", 50)))),
         email=data.get("email"), phone=data.get("phone"), whatsapp=data.get("whatsapp"),
         linkedin_url=data.get("linkedin"), source_url=data.get("sourceUrl"), confidence=max(0, min(100, int(data.get("confidence", 60)))),
@@ -1586,6 +1674,48 @@ def company_contact_update(company_id, contact_id):
         buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
         whatsapp=contact.whatsapp, confidence=contact.confidence, changed=changed
     )
+
+
+
+@api_bp.post("/imports/history/preview")
+@require_permission("WRITE_CRM")
+def import_history_preview():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    try:
+        from ..services.import_history import preview
+        return jsonify(preview(upload))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        current_app.logger.exception("history import preview failed")
+        return jsonify(error=f"No se pudo leer la planilla: {exc}"), 400
+
+
+@api_bp.post("/imports/history")
+@require_permission("WRITE_CRM")
+def import_history_execute():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    try:
+        import json
+        from ..services.import_history import import_rows
+        mapping = json.loads(request.form.get("mapping") or "{}")
+        tenant = current_tenant()
+        user = current_user()
+        result = import_rows(upload, mapping, tenant, user)
+        _audit("IMPORT", "COMMERCIAL_HISTORY", tenant.id, result)
+        db.session.commit()
+        return jsonify(ok=True, **result)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("history import failed")
+        return jsonify(error=f"No se pudo importar la planilla: {exc}"), 400
 
 
 @api_bp.post("/companies/<int:company_id>/watch")
