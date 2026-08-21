@@ -4,7 +4,7 @@
   const moduleTitles = {
     triage:"Calificar por sitio", research:"Cola de investigación", salesready:"Listo para ventas", hoy:"Mi día",
     crm:"CRM", pipeline:"Embudo comercial", visitas:"Visitas", radar:"Radar comercial", captacion:"Captación automática",
-    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", metrics:"Rendimiento"
+    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", reportes:"Reportes comerciales", metrics:"Rendimiento"
   };
   let workspaceData = null;
   const bulkSelection = new Set();
@@ -19,10 +19,10 @@
     window.scrollTo({top:0,behavior:"smooth"});
     if (["research","salesready","smartlists"].includes(name)) loadWorkspace();
     if (name === "metrics") loadPerformance();
+    if (name === "reportes") loadReports();
     if (name === "hoy" && typeof loadToday === "function") loadToday();
     if (name === "radar" && typeof loadCommandCenter === "function") loadCommandCenter();
   }
-  window.openWorkspaceModule = openModule;
 
   document.querySelectorAll("[data-module-target]").forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); openModule(link.dataset.moduleTarget); }));
   $("globalRefresh")?.addEventListener("click", () => {
@@ -139,7 +139,7 @@
     }catch(_){$("committeeList").innerHTML="<p>No se pudo cargar el comité.</p>"}
   }
   document.querySelector('[data-tab="committee"]')?.addEventListener("click",()=>setTimeout(loadCommittee,0));
-  $("saveContact")?.addEventListener("click",async()=>{const companyId=$("committeeList")?.dataset.companyId;if(!companyId)return toastLocal("Abra primero una oportunidad real");const name=$("contactName").value.trim();if(!name)return toastLocal("Ingrese el nombre");const phone=$("contactPhone").value.trim();const payload={name,role:$("contactRole").value.trim(),buyingRole:$("contactBuyingRole").value,email:$("contactEmail").value.trim(),phone,whatsapp:phone,influence:$("contactBuyingRole").value==="DECISION_MAKER"?90:70,confidence:70};const r=await fetch(`/api/companies/${companyId}/contacts`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});if(!r.ok)return toastLocal("No se pudo guardar el contacto");["contactName","contactRole","contactEmail","contactPhone"].forEach((id)=>$(id).value="");toastLocal("Contacto añadido al Comité de compra");loadCommittee();loadWorkspace(true)});
+  $("saveContact")?.addEventListener("click",async()=>{const companyId=$("committeeList")?.dataset.companyId;if(!companyId)return toastLocal("Abra primero una oportunidad real");const name=$("contactName").value.trim();if(!name)return toastLocal("Ingrese el nombre");const phone=$("contactPhone").value.trim();const payload={name,role:$("contactRole").value.trim(),buyingRole:$("contactBuyingRole").value,email:$("contactEmail").value.trim(),phone,whatsapp:phone,influence:$("contactBuyingRole").value==="DECISION_MAKER"?90:70,confidence:70};const r=await fetch(`/api/companies/${companyId}/contacts`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const d=await r.json().catch(()=>({}));if(!r.ok)return toastLocal(d.error||"No se pudo guardar el contacto");["contactName","contactRole","contactEmail","contactPhone"].forEach((id)=>$(id).value="");toastLocal("Contacto añadido al Comité de compra");window.dispatchEvent(new CustomEvent("radar:contact-updated",{detail:{companyId:Number(companyId),contactId:d.id,name:payload.name,email:payload.email,role:payload.role}}));loadCommittee();loadWorkspace(true)});
 
   // Keep the drawer intelligence indicators synchronized whenever a lead is selected.
   const syncDrawer=()=>{ if(!selected)return; if($("drawerReadiness"))$("drawerReadiness").textContent=`${Number(selected.leadReadiness)||0}/100`;if($("drawerCompleteness"))$("drawerCompleteness").textContent=`${Number(selected.dataCompleteness)||0}%`;if($("drawerSalesReady")){$("drawerSalesReady").textContent=selected.salesReady?"LISTO PARA VENTAS":"NO PREPARADO";$("drawerSalesReady").classList.toggle("ready",Boolean(selected.salesReady))}if($("nextBestActionText"))$("nextBestActionText").textContent=selected.nextBestAction||"Completar contacto y validar el próximo paso.";};
@@ -172,6 +172,29 @@
     if(e.key==="/" && !typing){e.preventDefault();openModule("triage");setTimeout(()=>$("companyWebsite")?.focus(),50);}
     if(e.key==="Escape" && document.body.classList.contains("drawer-open")) document.body.classList.remove("drawer-open");
   });
+
+  function reportParams(){
+    const p=new URLSearchParams(); const period=$("reportPeriod")?.value||"all"; p.set("period",period);
+    if(period==="custom"){if($("reportStart")?.value)p.set("start",$("reportStart").value);if($("reportEnd")?.value)p.set("end",$("reportEnd").value);}
+    if($("reportUser")?.value)p.set("user",$("reportUser").value); return p;
+  }
+  const reportTypeLabel=(v)=>({EMAIL_SENT:"Correo enviado",WHATSAPP_SENT:"WhatsApp",CALL:"Llamada",MEETING:"Reunión",VISIT_SCHEDULED:"Visita marcada",VISIT:"Visita realizada",PROPOSAL_SENT:"Propuesta",REPLY:"Respuesta recibida",FOLLOW_UP:"Seguimiento",NOTE:"Nota",DATA_UPDATE:"Actualización"}[v]||v||"Actividad");
+  async function loadReports(){
+    const box=$("reportActivity"), kpis=$("reportKpis"), summary=$("reportSummary"); if(box)box.innerHTML='<p>Cargando registros...</p>';
+    try{const r=await fetch(`/api/reports/activity?${reportParams()}`);const d=await r.json();if(!r.ok)throw new Error(d.error||"No se pudo cargar el reporte");
+      if($("reportUser") && $("reportUser").options.length<=1){(d.users||[]).forEach(u=>$("reportUser").insertAdjacentHTML("beforeend",`<option value="${esc(u)}">${esc(u)}</option>`));}
+      const m=d.metrics||{}; if(kpis)kpis.innerHTML=[["Empresas analizadas",m.analysed],["Clasificadas",m.classified],["Correos",m.emails],["WhatsApps",m.whatsapps],["Empresas que respondieron",m.replies],["Visitas marcadas",m.visitsScheduled ?? m.visits],["Propuestas",m.proposals],["Seguimientos pendientes",m.pendingFollowups]].map(([l,v])=>`<article><small>${esc(l.toUpperCase())}</small><strong>${Number(v)||0}</strong></article>`).join("");
+      if(summary)summary.textContent=d.summary||"Sin actividad registrada en el período.";
+      if($("reportFunnel"))$("reportFunnel").innerHTML=`<div><b>${Number(m.analysed)||0}</b><span>Analizadas</span></div><i>→</i><div><b>${Number(m.classified)||0}</b><span>Clasificadas</span></div><i>→</i><div><b>${(Number(m.emails)||0)+(Number(m.whatsapps)||0)+(Number(m.calls)||0)}</b><span>Contactos</span></div><i>→</i><div><b>${Number(m.replies)||0}</b><span>Respondieron</span></div><i>→</i><div><b>${Number(m.visitsScheduled ?? m.visits)||0}</b><span>Visitas</span></div><i>→</i><div><b>${Number(m.proposals)||0}</b><span>Propuestas</span></div>`;
+      const rows=d.activities||[]; if($("reportCount"))$("reportCount").textContent=`${rows.length} registros`;
+      if(box)box.innerHTML=rows.length?`<div class="report-row report-row-header"><span>Fecha</span><span>Empresa</span><span>Actividad</span><span>Canal</span><span>Responsable</span></div>${rows.map(row=>`<div class="report-row"><span>${esc((row.date||"").slice(0,10))}</span><strong>${esc(row.company)}</strong><span>${esc(reportTypeLabel(row.type))}</span><span>${esc(row.channel||"—")}</span><span>${esc(row.createdBy||"Equipo comercial")}</span></div>`).join("")}`:'<p class="report-empty">No hay actividades registradas en este período.</p>';
+    }catch(e){if(box)box.innerHTML=`<p class="report-empty">${esc(e.message)}</p>`;}
+  }
+  $("reportPeriod")?.addEventListener("change",()=>{document.querySelectorAll(".report-custom").forEach(el=>el.hidden=$("reportPeriod").value!=="custom");loadReports();});
+  $("reportUser")?.addEventListener("change",loadReports); $("reportRefresh")?.addEventListener("click",loadReports);
+  $("reportCopy")?.addEventListener("click",async()=>{await navigator.clipboard.writeText($("reportSummary")?.textContent||"");toastLocal("Resumen copiado");});
+  $("reportCsv")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.csv?${reportParams()}`;});
+  $("reportPdf")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.pdf?${reportParams()}`;});
 
   openModule("triage");
 })();

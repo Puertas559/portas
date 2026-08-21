@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import csv
+import io
 from pathlib import Path
-from io import BytesIO
-from email.message import EmailMessage
-from email.policy import SMTP
 from uuid import uuid4
 from urllib.parse import urlparse
 
@@ -43,126 +42,125 @@ def _optional_number(value):
 
 def _department_context(contact=None, email=None):
     blob = " ".join(filter(None, [getattr(contact, "role", None), getattr(contact, "buying_role", None), email])).lower()
-    if any(k in blob for k in ("marketing", "mercadeo", "comunicacion", "comunicación", "prensa")):
+    if any(k in blob for k in ("marketing", "mercadeo", "comunicacion", "comunicación")):
         return "MARKETING"
-    if any(k in blob for k in ("compra", "buyer", "procurement", "abastecimiento", "proveedores")):
+    if any(k in blob for k in ("compra", "buyer", "procurement", "abastecimiento")):
         return "COMPRAS"
-    if any(k in blob for k in ("mantenimiento", "maintenance", "ingenier", "engineering", "infraestructura", "proyecto", "técnic", "tecnic", "planta")):
+    if any(k in blob for k in ("mantenimiento", "ingenier", "infraestructura", "proyecto", "técnic", "tecnic")):
         return "TECNICO"
-    if any(k in blob for k in ("logistica", "logística", "operacion", "operación", "deposito", "depósito", "expedicion", "expedición", "recepcion", "recepción")):
+    if any(k in blob for k in ("logistica", "logística", "operacion", "operación", "deposito", "depósito")):
         return "OPERACIONES"
-    if any(k in blob for k in ("direccion", "dirección", "gerencia", "director", "gerente", "ceo", "administracion", "administración")):
+    if any(k in blob for k in ("direccion", "dirección", "gerencia", "director", "gerente", "ceo")):
         return "DIRECCION"
-    if any(k in blob for k in ("ventas", "venta", "comercial", "sales")):
-        return "COMERCIAL"
-    if any(k in blob for k in ("rrhh", "recursos", "talento", "people", "rh@")):
-        return "RRHH"
     return "GENERAL"
 
 
-def _email_area_label(email):
-    dept = _department_context(None, email)
-    labels = {
-        "MARKETING": "Marketing / Comunicación",
-        "COMPRAS": "Compras / Abastecimiento",
-        "TECNICO": "Área técnica / Mantenimiento / Ingeniería",
-        "OPERACIONES": "Operaciones / Logística",
-        "DIRECCION": "Gerencia / Dirección",
-        "COMERCIAL": "Ventas / Comercial",
-        "RRHH": "Recursos Humanos",
-        "GENERAL": "Correo general",
-    }
-    local = (email or "").split("@", 1)[0].replace("_", " ").replace("-", " ").strip()
-    suffix = f" · {local.title()}" if local and dept not in {"GENERAL"} else ""
-    return dept, labels.get(dept, "Correo general") + suffix
+
+def _email_profile(email):
+    value=(email or "").strip().lower()
+    local=value.split("@",1)[0] if "@" in value else value
+    region=None
+    for token,label in (("asuncion","Asunción"),("cde","Ciudad del Este"),("ciudaddeleste","Ciudad del Este"),("este","Ciudad del Este"),("hernandarias","Hernandarias"),("encarnacion","Encarnación")):
+        if token in local:
+            region=label; break
+    rules=[
+        (("mantenimiento","mant","ingenier","tecnico","tecnica","infraestructura","proyecto"),"Área técnica / Mantenimiento / Ingeniería","TECHNICAL_INFLUENCER",88),
+        (("compra","compras","procurement","abastecimiento","supply"),"Compras / Abastecimiento","BUYER",90),
+        (("operacion","operaciones","logistica","logistica","deposito","expedicion"),"Operaciones / Logística","USER",84),
+        (("gerencia","gerente","direccion","director","directorio","ceo","administracion"),"Gerencia / Dirección","DECISION_MAKER",82),
+        (("marketing","mercadeo","comunicacion","prensa"),"Marketing / Comunicación","GATEKEEPER",82),
+        (("venta","ventas","comercial","sales"),"Ventas / Comercial","GATEKEEPER",80),
+        (("rrhh","recursoshumanos","talento","jobs","empleo"),"Recursos Humanos","GATEKEEPER",72),
+        (("info","contacto","contact","hola","recepcion","sac","atencion"),"Correo general / Recepción","GATEKEEPER",68),
+    ]
+    label="Correo general"; buying="GATEKEEPER"; confidence=62
+    compact=local.replace("_","").replace("-","").replace(".","")
+    for keys,found_label,found_buying,found_conf in rules:
+        if any(k.replace("_","").replace("-","") in compact for k in keys):
+            label,buying,confidence=found_label,found_buying,found_conf; break
+    if region: label=f"{label} · {region}"
+    dept=_department_context(None,value)
+    return {"label":label,"buyingRole":buying,"confidence":confidence,"department":dept,"region":region}
 
 
-def _company_email_candidates(company, contacts=None):
-    seen = set()
-    items = []
-    def add(email, *, source, contact=None, confidence=70):
-        email = str(email or "").strip().lower()
-        if not email or "@" not in email or email in seen:
-            return
-        seen.add(email)
-        dept, label = _email_area_label(email)
-        if contact:
-            dept = _department_context(contact, email)
-            display = f"{contact.name} · {contact.role or label}"
-            confidence = max(confidence, int(contact.confidence or 0))
-        else:
-            display = f"{email} · {label}"
-        items.append({
-            "email": email, "department": dept, "label": label, "display": display,
-            "source": source, "contactId": contact.id if contact else None, "confidence": confidence,
-        })
-    for c in contacts or []:
-        add(c.email, source="Contacto CRM", contact=c, confidence=90)
-    add(company.email_business, source="Ficha empresarial", confidence=85)
-    add(company.email, source="Ficha empresarial", confidence=75)
-    opportunity_ids = [row[0] for row in db.session.query(Opportunity.id).join(Project).filter(
-        Project.company_id == company.id, Opportunity.tenant_id == company.tenant_id
-    ).all()]
-    analyses = []
-    if opportunity_ids:
-        analyses = WebsiteAnalysis.query.filter(
-            WebsiteAnalysis.tenant_id == company.tenant_id,
-            WebsiteAnalysis.opportunity_id.in_(opportunity_ids),
-            WebsiteAnalysis.status == "COMPLETED",
-        ).order_by(WebsiteAnalysis.created_at.desc()).limit(10).all()
-    domain = _website_domain(company.website or company.domain)
-    if domain:
-        more = WebsiteAnalysis.query.filter_by(tenant_id=company.tenant_id, status="COMPLETED").order_by(WebsiteAnalysis.created_at.desc()).limit(80).all()
-        analyses += [a for a in more if _website_domain(a.url) == domain]
-    for a in analyses:
-        for email in (a.emails or []):
-            add(email, source="Sitio web", confidence=78)
-    priority = {"TECNICO":0,"OPERACIONES":1,"COMPRAS":2,"DIRECCION":3,"MARKETING":4,"COMERCIAL":5,"GENERAL":6,"RRHH":7}
-    items.sort(key=lambda x: (priority.get(x["department"], 9), -x["confidence"], x["email"]))
-    return items
+def _sync_discovered_contacts(company, analysis):
+    tenant=current_tenant()
+    created=[]
+    existing={str(c.email or "").strip().casefold():c for c in Contact.query.filter_by(tenant_id=tenant.id,company_id=company.id).all() if c.email}
+    for email in analysis.emails or []:
+        key=str(email).strip().casefold()
+        if not key or "@" not in key: continue
+        profile=_email_profile(key)
+        row=existing.get(key)
+        if row:
+            if not row.role: row.role=profile["label"]
+            if row.buying_role in (None,"","UNKNOWN"): row.buying_role=profile["buyingRole"]
+            row.confidence=max(row.confidence or 0,profile["confidence"]); row.source_url=row.source_url or analysis.url
+            continue
+        row=Contact(tenant_id=tenant.id,company_id=company.id,name=profile["label"],role=profile["label"],buying_role=profile["buyingRole"],email=key,source_url=analysis.url,confidence=profile["confidence"],status="ACTIVE")
+        db.session.add(row); existing[key]=row; created.append(key)
+    return created
 
-
-def _company_message(company, contact=None, channel="EMAIL", opportunity=None, recipient_email=None, department=None):
+def _company_message(company, contact=None, channel="EMAIL", opportunity=None):
+    brand = current_tenant().settings or {}
+    is_pt = brand.get("language") == "pt-BR"
+    brand_name = brand.get("brand_short") or brand.get("brand_name") or current_tenant().name
     company_name = company.name
     contact_name = contact.name.strip() if contact and contact.name else ""
-    email = (recipient_email or (contact.email if contact else None) or company.email_business or company.email or "").strip()
-    dept = department or _department_context(contact, email)
-    greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
-    sector = company.sector or "su operación"
+    email = (contact.email if contact else None) or company.email_business or company.email or ""
+    whatsapp = (contact.whatsapp if contact else None) or (contact.phone if contact else None) or company.whatsapp or company.phone_business or company.phone or ""
+    dept = _department_context(contact, email)
+    sector = company.sector or ("sua operação" if is_pt else "su operación")
     products = (opportunity.products if opportunity else []) or []
-    product_phrase = ", ".join(products[:3]) if products else "soluciones de accesos automáticos e industriales"
-    intro = (
-        "Mi nombre es David Granja y represento a Puertas Brasil, empresa especializada en soluciones de accesos automáticos e industriales, "
-        "con fábrica ubicada en el km 13 de Ciudad del Este."
-    )
-    context_map = {
-        "MARKETING": "Entiendo que este contacto corresponde al área de Marketing o Comunicación. Mi intención es presentar brevemente nuestra empresa y solicitar su orientación para llegar al responsable técnico adecuado.",
-        "COMPRAS": "Nos gustaría quedar registrados como proveedor y conocer el canal correcto para futuras cotizaciones, homologaciones o procesos de compra relacionados con accesos industriales.",
-        "TECNICO": f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
-        "OPERACIONES": f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
-        "DIRECCION": "Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
-        "COMERCIAL": "Veo que este canal corresponde al área Comercial o de Ventas. Mi intención es presentar brevemente Puertas Brasil y solicitar su orientación para llegar al responsable interno que gestiona infraestructura, mantenimiento u operaciones.",
-        "RRHH": "Veo que este canal corresponde a Recursos Humanos. Mi intención es únicamente solicitar su orientación para identificar al responsable técnico o de infraestructura adecuado dentro de la empresa.",
-        "GENERAL": f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
-    }
-    ask_map = {
-        "MARKETING": "¿Podría indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-        "COMPRAS": "¿Podría indicarme quién gestiona Compras o Abastecimiento y quién valida técnicamente este tipo de solución en Mantenimiento, Ingeniería, Infraestructura, Operaciones o Proyectos?",
-        "TECNICO": "¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
-        "OPERACIONES": "¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos para conversar brevemente sobre estas necesidades?",
-        "DIRECCION": "¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
-        "COMERCIAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-        "RRHH": "¿Podrían indicarme, por favor, el nombre o correo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-        "GENERAL": "¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
-    }
-    body = f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\nPuertas Brasil"
-    subject = "Puertas Brasil Paraguay | Primer Contacto"
-    if channel.upper() == "WHATSAPP":
-        body = f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de Puertas Brasil. {context_map[dept]} {ask_map[dept]} Muchas gracias."
-    elif channel.upper() == "CALL":
-        body = f"Objetivo de la llamada: presentarse como David Granja de Puertas Brasil; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
-    recipient_phone = ((contact.whatsapp or contact.phone) if contact else None) or company.whatsapp or company.phone_business or company.phone or ""
-    return {"subject": subject, "body": body, "department": dept, "recipient": contact_name or company_name, "recipientEmail": email, "recipientPhone": recipient_phone}
+    product_phrase = ", ".join(products[:3]) if products else ("soluções de acessos automáticos e industriais" if is_pt else "soluciones de accesos automáticos e industriales")
+    if is_pt:
+        greeting = f"Prezado(a) {contact_name}," if contact_name else f"Prezada equipe da {company_name},"
+        intro = f"Meu nome é David Granja e represento a {brand_name}, empresa especializada em soluções de acessos automáticos e industriais."
+        context_map = {
+            "MARKETING":"Entendo que este contato corresponde à área de Marketing ou Comunicação. Gostaria de apresentar brevemente nossa empresa e solicitar sua orientação para chegar ao responsável técnico adequado.",
+            "COMPRAS":"Gostaríamos de nos apresentar como fornecedor e entender o canal correto para futuras cotações, homologações ou processos de compra relacionados a acessos industriais.",
+            "TECNICO":f"Pelo perfil da operação, vemos possíveis aplicações para {product_phrase}, além de instalação, manutenção preventiva, corretiva e modernização de equipamentos existentes.",
+            "OPERACIONES":f"Em operações como a da {company_name}, os acessos podem influenciar o fluxo de mercadorias, segurança, carga e descarga e continuidade operacional.",
+            "DIRECCION":"Gostaríamos de apresentar nossa capacidade e avaliar aderência a projetos atuais ou futuros de infraestrutura, expansão, logística ou manutenção.",
+            "GENERAL":f"Em empresas do segmento {sector}, os acessos podem influenciar a segurança, o fluxo de pessoas e mercadorias e a continuidade da operação.",
+        }
+        ask_map={
+            "MARKETING":"Poderia me indicar o nome e o contato direto do responsável por Manutenção, Infraestrutura, Operações, Logística, Engenharia ou Projetos?",
+            "COMPRAS":"Poderia me indicar quem responde por Compras/Abastecimento e quem faz a validação técnica desse tipo de solução?",
+            "TECNICO":"Seria possível coordenarmos uma breve conversa para entender a operação atual, prioridades e eventuais projetos em que possamos contribuir?",
+            "OPERACIONES":"Poderia me indicar o responsável por Operações, Logística, Manutenção, Infraestrutura ou Projetos?",
+            "DIRECCION":"Com quem de Manutenção, Engenharia, Infraestrutura, Operações, Logística ou Projetos seria adequado seguir esta conversa?",
+            "GENERAL":"Poderiam me indicar o nome e o contato direto do responsável por Manutenção, Infraestrutura, Operações, Logística, Engenharia ou Projetos?",
+        }
+        body=f"{greeting}\n\nÉ um prazer falar com vocês.\n\n{intro}\n\nGostaríamos de apresentar nossa empresa e nos colocar à disposição da {company_name}.\n\n{context_map[dept]}\n\n{ask_map[dept]}\n\nDesde já, agradeço pela orientação.\n\nAtenciosamente,\nDavid Granja\n{brand_name}"
+        subject=brand.get("subject_first_contact") or f"{brand_name} | Primeiro Contato"
+        if channel.upper()=="WHATSAPP": body=f"Olá{(' ' + contact_name) if contact_name else ''}, tudo bem? Sou David Granja, da {brand_name}. {context_map[dept]} {ask_map[dept]} Obrigado!"
+        elif channel.upper()=="CALL": body=f"Objetivo da ligação: apresentar-se como David Granja da {brand_name}; contextualizar {company_name}; {ask_map[dept]} Registrar nome, cargo, contato direto, necessidade, prazo e próximo passo."
+    else:
+        greeting = f"Estimado/a {contact_name}," if contact_name else f"Estimado equipo de {company_name},"
+        intro = f"Mi nombre es David Granja y represento a {brand_name}, empresa especializada en soluciones de accesos automáticos e industriales, con fábrica ubicada en el km 13 de Ciudad del Este."
+        context_map={
+            "MARKETING":"Entiendo que este contacto corresponde al área de Marketing o Comunicación. Mi intención es presentar brevemente nuestra empresa y solicitar su orientación para llegar al responsable técnico adecuado.",
+            "COMPRAS":"Nos gustaría quedar registrados como proveedor y conocer el canal correcto para futuras cotizaciones, homologaciones o procesos de compra relacionados con accesos industriales.",
+            "TECNICO":f"Por el perfil de su operación, vemos posibles aplicaciones para {product_phrase}, además de instalación, mantenimiento preventivo, correctivo y modernización de equipos existentes.",
+            "OPERACIONES":f"En operaciones como la de {company_name}, los accesos pueden influir directamente en el flujo de mercaderías, la seguridad, los tiempos de carga y descarga y la continuidad operacional.",
+            "DIRECCION":"Nos gustaría presentar nuestra capacidad industrial y evaluar si existe encaje para proyectos actuales o futuros de infraestructura, expansión, logística o mantenimiento.",
+            "GENERAL":f"En empresas del segmento {sector}, los accesos pueden influir en la seguridad, el flujo de personas y mercaderías y la continuidad de la operación.",
+        }
+        ask_map={
+            "MARKETING":"¿Podría indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+            "COMPRAS":"¿Podría indicarme quién gestiona Compras o Abastecimiento y quién valida técnicamente este tipo de solución?",
+            "TECNICO":"¿Sería posible coordinar una conversación breve para conocer la operación actual, prioridades y eventuales proyectos en los que podamos aportar?",
+            "OPERACIONES":"¿Podría indicarme quién es el responsable de Operaciones, Logística, Mantenimiento, Infraestructura o Proyectos?",
+            "DIRECCION":"¿Con quién de Mantenimiento, Ingeniería, Infraestructura, Operaciones, Logística o Proyectos sería conveniente continuar esta conversación?",
+            "GENERAL":"¿Podrían indicarme el nombre y el correo directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos?",
+        }
+        body=f"{greeting}\n\nEs un gusto saludarle.\n\n{intro}\n\nNos gustaría presentar nuestra empresa y ponernos a disposición de {company_name}.\n\n{context_map[dept]}\n\nAdjunto nuestra carta de presentación institucional y catálogo comercial.\n\n{ask_map[dept]}\n\nDesde ya, agradezco mucho su orientación.\n\nSaludos cordiales,\nDavid Granja\n{brand_name}"
+        subject=brand.get("subject_first_contact") or "Puertas Brasil Paraguay | Primer Contacto"
+        if channel.upper()=="WHATSAPP": body=f"Hola{(' ' + contact_name) if contact_name else ''}, ¿cómo está? Soy David Granja, de {brand_name}. {context_map[dept]} {ask_map[dept]} Muchas gracias."
+        elif channel.upper()=="CALL": body=f"Objetivo de la llamada: presentarse como David Granja de {brand_name}; contextualizar {company_name}; {ask_map[dept]} Registrar nombre, cargo, contacto directo, necesidad, plazo y próximo paso."
+    destination = whatsapp if channel.upper() == "WHATSAPP" else (email if channel.upper() == "EMAIL" else (whatsapp or email))
+    return {"subject": subject, "body": body, "department": dept, "recipient": destination, "recipientLabel": contact_name or company_name, "channel": channel.upper()}
 
 
 
@@ -293,6 +291,7 @@ def _auto_sync_existing_company(analysis):
     if not company:
         return None
     result=_merge_company_enrichment(company, analysis)
+    result["contactsCreated"]=_sync_discovered_contacts(company, analysis)
     db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Enriquecimiento automático", summary=f"El sitio fue revisado automáticamente. {len(result['updated'])} campos fueron completados y {len(result['reviewRequired'])} requieren revisión.", extra_data=result))
     db.session.commit()
     return {"companyId":company.id, **result}
@@ -317,7 +316,7 @@ def _create_intelligence_opportunity(data, status="NOVO"):
     company = resolve_company(
         tenant.id, data.get("company"), sector=data.get("sector"), origin_country=data.get("origin"),
         website=data.get("website"), address=data.get("address"),
-        city=data.get("city"), department=data.get("department") or data.get("region"), country=data.get("country") or "Paraguay",
+        city=data.get("city"), department=data.get("department") or data.get("region"), country=data.get("country") or (tenant.settings or {}).get("default_country", "Paraguay"),
         phone=data.get("phone"), phone_business=data.get("phone"), whatsapp=data.get("whatsapp") or data.get("phone"),
         email=data.get("email"), email_business=data.get("email"), linkedin_url=data.get("linkedin"),
         registration_id=data.get("registrationId"), description=data.get("companyDescription"),
@@ -326,7 +325,7 @@ def _create_intelligence_opportunity(data, status="NOVO"):
     project = resolve_project(
         tenant.id, company, data.get("project") or data.get("sourceTitle") or "Proyecto por validar",
         city=data.get("city") or "Por validar", department=data.get("department") or data.get("region") or "Por validar",
-        country=data.get("country") or "Paraguay", project_type=data.get("projectType") or data.get("event") or "UNKNOWN",
+        country=data.get("country") or (tenant.settings or {}).get("default_country", "Paraguay"), project_type=data.get("projectType") or data.get("event") or "UNKNOWN",
         stage=data.get("stage"), investment=data.get("investment"), investment_amount=_optional_number(data.get("investmentAmount")),
         investment_currency=(data.get("investmentCurrency") or "USD")[:3].upper(), area_m2=_optional_number(data.get("areaM2")),
         description=data.get("projectDescription"), announced_at=as_datetime(data.get("announcedAt")), started_at=as_datetime(data.get("startedAt")),
@@ -401,7 +400,7 @@ def company_search_add():
         "event": "COMPANY_DISCOVERY", "department": data.get("region") or "Por validar",
         "stage": "Prospección geográfica", "sourceName": data.get("source") or "Buscador empresarial",
         "sourceUrl": data.get("website"),
-        "evidence": f"Empresa identificada por fuente pública en {data.get('city') or 'Paraguay'}.",
+        "evidence": f"Empresa identificada por fuente pública en {data.get('city') or (tenant.settings or {}).get('default_country', 'Paraguay')}.",
         "dataConfidence": data.get("score", 55), "intent": 35, "icpFit": data.get("score", 55),
         "evidenceClassification": "FACT",
     })
@@ -441,11 +440,41 @@ def opportunity_update(opportunity_id):
     if status is not None and status not in STATUSES:
         return jsonify(error="Estado inválido"), 400
     changes = []
+    previous_status = opportunity.status
     if status is not None:
         opportunity.status = status
         changes.append(f"Estado actualizado a {status}")
         if status in {"RESPONDEU", "GANHO", "PERDIDO", "DESCARTADO"}:
             SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status": "CANCELLED"})
+
+        # Mantiene el historial comercial sincronizado con el avance manual del CRM.
+        # Antes, cambiar el estado solo modificaba Opportunity.status y el reporte
+        # seguía mostrando 0 respuestas/visitas. Registramos el evento una sola vez
+        # cuando realmente hay transición de etapa.
+        if status != previous_status:
+            status_activity = {
+                "RESPONDEU": ("REPLY", "Respuesta registrada desde el CRM"),
+                "VISITA": ("VISIT_SCHEDULED", "Visita marcada desde el CRM"),
+                "ORCAMENTO": ("PROPOSAL_SENT", "Propuesta/presupuesto registrado desde el CRM"),
+            }.get(status)
+            if status_activity:
+                activity_type, subject = status_activity
+                company_id = opportunity.project.company.id
+                already_exists = CompanyActivity.query.filter_by(
+                    tenant_id=tenant.id, opportunity_id=opportunity.id, activity_type=activity_type
+                ).first()
+                if not already_exists:
+                    db.session.add(CompanyActivity(
+                        tenant_id=tenant.id,
+                        company_id=company_id,
+                        opportunity_id=opportunity.id,
+                        activity_type=activity_type,
+                        channel="CRM",
+                        direction="INBOUND" if activity_type == "REPLY" else "OUTBOUND",
+                        subject=subject,
+                        summary=f"Etapa comercial actualizada a {status}.",
+                        created_by=(current_user().name if current_user() else "Equipo comercial"),
+                    ))
     if "contactVerified" in data:
         opportunity.contact_verified = bool(data["contactVerified"])
         changes.append("Contacto validado" if opportunity.contact_verified else "Contacto pendiente de validación")
@@ -495,10 +524,17 @@ def company_dossier(company_id):
     contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
     projects = Project.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(Project.updated_at.desc()).all()
     opportunities = Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).order_by(Opportunity.updated_at.desc()).all()
+    # Backfill para empresas calificadas antes de V13: transforma todos los correos del análisis original en destinatarios del CRM.
+    if opportunities:
+        analysis = WebsiteAnalysis.query.filter(WebsiteAnalysis.tenant_id==tenant.id, WebsiteAnalysis.opportunity_id.in_([o.id for o in opportunities])).order_by(WebsiteAnalysis.created_at.desc()).first()
+        if analysis and analysis.emails:
+            created=_sync_discovered_contacts(company,analysis)
+            if created:
+                db.session.commit()
+                contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").order_by(Contact.influence_score.desc()).all()
     activities = CompanyActivity.query.filter_by(tenant_id=tenant.id, company_id=company.id).order_by(CompanyActivity.occurred_at.desc()).limit(200).all()
     completeness, missing = company_completeness(company)
     last_contact = activities[0].occurred_at if activities else None
-    email_candidates = _company_email_candidates(company, contacts)
     return jsonify(
         company={
             "id": company.id, "name": company.name, "legalName": company.legal_name, "ruc": company.ruc or company.registration_id,
@@ -513,6 +549,8 @@ def company_dossier(company_id):
             "momentum": company.momentum_score, "completeness": completeness, "missing": missing,
             "lastEnrichedAt": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
             "lastContactAt": last_contact.isoformat() if last_contact else None,
+            "discoveredEmails": sorted({x for x in ([company.email_business, company.email] + [c.email for c in contacts]) if x}),
+            "rucSource": next((x for x in (company.data_sources or []) if isinstance(x, dict) and x.get("type") in {"DNIT_RUC","RUC_OFFICIAL"}), None),
         },
         contacts=[{
             "id": c.id, "name": c.name, "role": c.role, "buyingRole": c.buying_role, "influence": c.influence_score,
@@ -526,7 +564,6 @@ def company_dossier(company_id):
         } for pr in projects],
         opportunities=[op.to_dict() for op in opportunities],
         activities=[row.to_dict() for row in activities],
-        emailCandidates=email_candidates,
         stats={
             "contacts": len(contacts), "projects": len(projects), "opportunities": len(opportunities), "activities": len(activities),
             "openPipeline": round(sum(float(op.potential_deal_value or op.estimated_value or 0) for op in opportunities if op.status not in {"GANHO","PERDIDO","DESCARTADO"}), 2),
@@ -580,7 +617,7 @@ def company_activity_create(company_id):
     company=Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
     data=request.get_json(silent=True) or {}
     activity_type=str(data.get("type") or "NOTE").upper()
-    allowed={"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","FOLLOW_UP","NOTE","REPLY","DATA_UPDATE"}
+    allowed={"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","VISIT_SCHEDULED","MEETING","PROPOSAL_SENT","FOLLOW_UP","NOTE","REPLY","DATA_UPDATE"}
     if activity_type not in allowed: return jsonify(error="Tipo de interacción inválido"),400
     next_at=None
     if data.get("nextActionAt"):
@@ -602,7 +639,7 @@ def company_activity_create(company_id):
         if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT","VISIT","MEETING","PROPOSAL_SENT","REPLY"}: op.last_contact_at=occurred
         if activity_type in {"CALL","EMAIL_SENT","WHATSAPP_SENT"} and op.status in {"NOVO","QUALIFICADO"}: op.status="CONTATO_REALIZADO"
         elif activity_type == "REPLY" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="RESPONDEU"
-        elif activity_type in {"VISIT","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
+        elif activity_type in {"VISIT","VISIT_SCHEDULED","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
         elif activity_type == "PROPOSAL_SENT" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="ORCAMENTO"
         if next_at: op.next_action_at=next_at
         db.session.add(TimelineEvent(opportunity=op,event_type=activity_type,description=data.get("summary") or data.get("subject") or "Interacción comercial registrada"))
@@ -624,70 +661,7 @@ def company_contextual_message(company_id):
         opportunity=Opportunity.query.filter_by(id=data.get("opportunityId"), tenant_id=tenant.id).first()
     if opportunity is None:
         opportunity=Opportunity.query.join(Project).filter(Project.company_id==company.id, Opportunity.tenant_id==tenant.id).order_by(Opportunity.score.desc()).first()
-    return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity, recipient_email=data.get("recipientEmail"), department=data.get("department")))
-
-
-@api_bp.post("/companies/<int:company_id>/email-draft")
-@require_permission("WRITE_CRM")
-def company_email_draft(company_id):
-    """Genera un archivo .eml listo para abrir en Outlook con la carta institucional adjunta."""
-    tenant = current_tenant()
-    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
-    data = request.get_json(silent=True) or {}
-
-    contact = None
-    if data.get("contactId"):
-        contact = Contact.query.filter_by(
-            id=data.get("contactId"), tenant_id=tenant.id, company_id=company.id
-        ).first()
-
-    opportunity = Opportunity.query.join(Project).filter(
-        Project.company_id == company.id, Opportunity.tenant_id == tenant.id
-    ).order_by(Opportunity.score.desc()).first()
-
-    generated = _company_message(company, contact, "EMAIL", opportunity, recipient_email=data.get("recipient"), department=data.get("department"))
-    recipient = str(data.get("recipient") or generated.get("recipientEmail") or "").strip()
-    subject = str(data.get("subject") or generated.get("subject") or "Puertas Brasil Paraguay | Primer Contacto").strip()
-    body = str(data.get("body") or generated.get("body") or "").strip()
-
-    if not recipient or "@" not in recipient:
-        return jsonify(
-            error="No hay un correo electrónico válido para el destinatario.",
-            action="Seleccione un contacto con correo o complete el correo general de la empresa en la Ficha 360°."
-        ), 400
-
-    attachment_path = Path(current_app.root_path) / "assets" / "Carta de presentacion - Puertas Brasil.pdf"
-    if not attachment_path.exists():
-        current_app.logger.error("Carta institucional no encontrada: %s", attachment_path)
-        return jsonify(
-            error="La carta institucional no está disponible en el servidor.",
-            action="Verifique que el PDF institucional esté incluido en app/assets/."
-        ), 500
-
-    msg = EmailMessage(policy=SMTP)
-    msg["To"] = recipient
-    msg["Subject"] = subject
-    msg["X-Unsent"] = "1"
-    # No se fija From: Outlook utilizará la cuenta configurada por el usuario al abrir el borrador.
-    msg.set_content(body)
-    pdf_bytes = attachment_path.read_bytes()
-    msg.add_attachment(
-        pdf_bytes, maintype="application", subtype="pdf",
-        filename="Carta de presentacion - Puertas Brasil.pdf"
-    )
-
-    buffer = BytesIO(msg.as_bytes())
-    buffer.seek(0)
-    safe_company = secure_filename(company.name or "empresa")[:60] or "empresa"
-    filename = f"Puertas_Brasil_Primer_Contacto_{safe_company}.eml"
-    _audit("PREPARE", "EMAIL_DRAFT", company.id, {
-        "recipient": recipient, "subject": subject, "contactId": contact.id if contact else None,
-        "attachment": "Carta de presentacion - Puertas Brasil.pdf"
-    })
-    db.session.commit()
-    return send_file(
-        buffer, mimetype="message/rfc822", as_attachment=True, download_name=filename, max_age=0
-    )
+    return jsonify(_company_message(company, contact, str(data.get("channel") or "EMAIL"), opportunity))
 
 
 @api_bp.get("/exports/status")
@@ -880,7 +854,7 @@ def _commercial_messages(analysis):
         f"Por el perfil de su operación en {sector}, vemos posibles aplicaciones para {product_text}. "
         "¿Podría indicarme el nombre o contacto directo del responsable de Mantenimiento, Infraestructura, Operaciones, Logística, Ingeniería o Proyectos? Muchas gracias."
     )
-    subject = f"Puertas Brasil Paraguay | Primer Contacto — {company}"
+    subject = brand.get("subject_first_contact") or ("Tech Doors | Primeiro Contato" if brand.get("language") == "pt-BR" else "Puertas Brasil Paraguay | Primer Contacto")
     email = (
         f"Estimado equipo de {company},\n\n"
         "Es un gusto saludarles.\n\n"
@@ -930,13 +904,14 @@ def website_analysis_qualify(analysis_id):
     presence["lastVerifiedAt"] = datetime.now(timezone.utc).isoformat()
     opportunity.project.company.digital_presence = presence
     auto_fill = _merge_company_enrichment(opportunity.project.company, analysis, source_label="Calificación automática desde sitio")
+    discovered_contacts = _sync_discovered_contacts(opportunity.project.company, analysis)
     opportunity.project.company.data_completeness_score = company_completeness(opportunity.project.company)[0]
     lead_readiness(opportunity)
     db.session.add(TimelineEvent(
         opportunity=opportunity, event_type="WEBSITE_QUALIFICATION",
         description="Empresa calificada manualmente; mensajes comerciales personalizados generados",
     ))
-    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Empresa calificada desde su sitio", summary=f"Análisis web completado con puntuación {analysis.potential_score}/100 y {analysis.pages_analyzed} páginas analizadas."))
+    db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=opportunity.project.company.id, opportunity_id=opportunity.id, activity_type="DATA_UPDATE", channel="SITIO_WEB", subject="Empresa calificada desde su sitio", summary=f"Análisis web completado con puntuación {analysis.potential_score}/100 y {analysis.pages_analyzed} páginas analizadas. {len(discovered_contacts)} correo(s) convertidos en destinatarios."))
     db.session.commit()
     return jsonify(analysis=analysis.to_dict(), opportunity=opportunity.to_dict()), 201
 
@@ -1112,6 +1087,267 @@ def commercial_metrics():
         decisionMakerCoverage=round(100 * with_decision_maker / len(companies), 1) if companies else 0,
     )
 
+
+
+def _report_period():
+    """Resolve a report window from query params. Defaults to all activity so far."""
+    now = datetime.now(timezone.utc)
+    preset = (request.args.get("period") or "all").strip().lower()
+    start = end = None
+    if preset == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "week":
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif preset == "custom":
+        try:
+            raw_start = (request.args.get("start") or "").strip()
+            raw_end = (request.args.get("end") or "").strip()
+            start = datetime.fromisoformat(raw_start).replace(tzinfo=timezone.utc) if raw_start else None
+            end = (datetime.fromisoformat(raw_end).replace(tzinfo=timezone.utc) + timedelta(days=1)) if raw_end else now
+        except ValueError:
+            start, end = None, now
+    return preset, start, end or now
+
+
+def _apply_period(query, column, start, end):
+    if start is not None:
+        query = query.filter(column >= start)
+    if end is not None:
+        query = query.filter(column < end)
+    return query
+
+
+def _build_activity_report():
+    tenant = current_tenant()
+    user_filter = (request.args.get("user") or "").strip()
+    preset, start, end = _report_period()
+
+    analyses_q = WebsiteAnalysis.query.filter_by(tenant_id=tenant.id)
+    analyses_q = _apply_period(analyses_q, WebsiteAnalysis.created_at, start, end)
+    analyses = analyses_q.all()
+
+    activities_q = CompanyActivity.query.filter_by(tenant_id=tenant.id)
+    activities_q = _apply_period(activities_q, CompanyActivity.occurred_at, start, end)
+    if user_filter:
+        activities_q = activities_q.filter(CompanyActivity.created_by == user_filter)
+    activities = activities_q.order_by(CompanyActivity.occurred_at.desc()).all()
+
+    opportunities_q = Opportunity.query.filter_by(tenant_id=tenant.id)
+    opportunities_q = _apply_period(opportunities_q, Opportunity.discovered_at, start, end)
+    opportunities = opportunities_q.all()
+
+    proposals_q = Proposal.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    proposals_q = _apply_period(proposals_q, Proposal.created_at, start, end)
+    proposals = proposals_q.all()
+
+    tasks_q = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    if user_filter:
+        tasks_q = tasks_q.filter(Opportunity.owner_name == user_filter)
+    pending_tasks = tasks_q.filter(SalesTask.status == "PENDING").count()
+    overdue_tasks = tasks_q.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
+
+    type_counts = {}
+    channel_counts = {}
+    for a in activities:
+        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
+        if a.channel:
+            channel_counts[a.channel] = channel_counts.get(a.channel, 0) + 1
+
+    classified = sum(1 for a in analyses if a.decision == "QUALIFIED")
+    disqualified = sum(1 for a in analyses if a.decision == "DISQUALIFIED")
+    email_count = type_counts.get("EMAIL_SENT", 0)
+    whatsapp_count = type_counts.get("WHATSAPP_SENT", 0)
+    calls = type_counts.get("CALL", 0)
+    meetings = type_counts.get("MEETING", 0)
+    proposal_events = type_counts.get("PROPOSAL_SENT", 0)
+    wins = sum(1 for o in opportunities if o.status == "GANHO")
+    losses = sum(1 for o in opportunities if o.status == "PERDIDO")
+
+    # KPI por EMPRESA, no por cantidad de eventos. Esto evita que una empresa
+    # con varias respuestas o varias actualizaciones infle el informe.
+    reply_company_ids = {a.company_id for a in activities if a.activity_type == "REPLY"}
+    visit_company_ids = {a.company_id for a in activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
+    completed_visit_company_ids = {a.company_id for a in activities if a.activity_type == "VISIT"}
+
+    # Compatibilidad con el historial anterior a esta corrección: si el vendedor
+    # ya avanzó la empresa en el CRM pero no se creó CompanyActivity, el estado
+    # actual también alimenta el informe. Las etapas posteriores a RESPONDEU
+    # implican que hubo respuesta; VISITA identifica visita marcada.
+    for o in opportunities:
+        company_id = o.project.company.id
+        if o.status in {"RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+            reply_company_ids.add(company_id)
+        if o.status == "VISITA":
+            visit_company_ids.add(company_id)
+
+    # Visitas efectivamente registradas con formulario/fotos también cuentan,
+    # incluso si la oportunidad ya avanzó después a presupuesto/negociación.
+    visits_q = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
+    visits_q = _apply_period(visits_q, VisitRecord.visited_at, start, end)
+    if user_filter:
+        visits_q = visits_q.filter(Opportunity.owner_name == user_filter)
+    for visit in visits_q.all():
+        company_id = visit.opportunity.project.company.id
+        visit_company_ids.add(company_id)
+        completed_visit_company_ids.add(company_id)
+
+    replies = len(reply_company_ids)
+    visits = len(visit_company_ids)
+    visits_completed = len(completed_visit_company_ids)
+
+    touched_company_ids = sorted({a.company_id for a in activities})
+    contacts_identified = Contact.query.filter(Contact.tenant_id == tenant.id, Contact.company_id.in_(touched_company_ids)).count() if touched_company_ids else 0
+
+    metrics = {
+        "analysed": len(analyses), "classified": classified, "disqualified": disqualified,
+        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls, "replies": replies,
+        "meetings": meetings, "visits": visits, "visitsScheduled": visits, "visitsCompleted": visits_completed, "proposals": max(len(proposals), proposal_events),
+        "opportunities": len(opportunities), "wins": wins, "losses": losses,
+        "contacts": contacts_identified, "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
+    }
+
+    summary = (
+        f"Durante el período fueron analizadas {metrics['analysed']} empresas; {metrics['classified']} fueron clasificadas y "
+        f"{metrics['disqualified']} descartadas. Se registraron {metrics['emails']} correos, {metrics['whatsapps']} WhatsApps "
+        f"y {metrics['calls']} llamadas. {metrics['replies']} empresas respondieron, se marcaron "
+        f"{metrics['visitsScheduled']} visitas ({metrics['visitsCompleted']} realizadas) y se registraron "
+        f"{metrics['proposals']} propuestas. Actualmente existen "
+        f"{metrics['pendingFollowups']} seguimientos pendientes, de los cuales {metrics['overdueFollowups']} están vencidos."
+    )
+
+    rows=[]
+    for a in activities[:300]:
+        rows.append({
+            "date": a.occurred_at.isoformat() if a.occurred_at else None,
+            "company": a.company.name if a.company else "Empresa",
+            "type": a.activity_type, "channel": a.channel, "subject": a.subject or "",
+            "summary": a.summary or "", "outcome": a.outcome or "", "nextAction": a.next_action or "",
+            "createdBy": a.created_by or "Equipo comercial",
+        })
+    users = sorted({a.created_by for a in CompanyActivity.query.filter_by(tenant_id=tenant.id).all() if a.created_by})
+    return {
+        "period": preset,
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "user": user_filter,
+        "metrics": metrics,
+        "summary": summary,
+        "activities": rows,
+        "users": users,
+    }
+
+
+@api_bp.get("/reports/activity")
+@require_permission("READ_INTELLIGENCE")
+def report_activity():
+    return jsonify(_build_activity_report())
+
+
+@api_bp.get("/reports/activity.csv")
+@require_permission("READ_INTELLIGENCE")
+def report_activity_csv():
+    data = _build_activity_report()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fecha", "Empresa", "Tipo", "Canal", "Asunto", "Resumen", "Resultado", "Próxima acción", "Responsable"])
+    for row in data["activities"]:
+        writer.writerow([row["date"], row["company"], row["type"], row["channel"], row["subject"], row["summary"], row["outcome"], row["nextAction"], row["createdBy"]])
+    stream = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    stream.seek(0)
+    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-actividad-comercial.csv")
+
+
+@api_bp.get("/reports/activity.pdf")
+@require_permission("READ_INTELLIGENCE")
+def report_activity_pdf():
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
+
+    data = _build_activity_report()
+    tenant = current_tenant()
+    user = current_user()
+    brand = tenant.settings or {}
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15*mm, leftMargin=15*mm, topMargin=17*mm, bottomMargin=17*mm)
+    styles = getSampleStyleSheet()
+    green = colors.HexColor("#075C43")
+    dark = colors.HexColor("#15382D")
+    muted = colors.HexColor("#667D74")
+    yellow = colors.HexColor("#F2C94C")
+    light = colors.HexColor("#F2F7F5")
+    line = colors.HexColor("#D8E7E1")
+    styles.add(ParagraphStyle(name="PBTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=22, leading=25, textColor=dark, alignment=TA_LEFT, spaceAfter=4))
+    styles.add(ParagraphStyle(name="PBSub", parent=styles["Normal"], fontSize=9.5, leading=13, textColor=muted, spaceAfter=10))
+    styles.add(ParagraphStyle(name="PBH2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, leading=15, textColor=green, spaceBefore=8, spaceAfter=7))
+    styles.add(ParagraphStyle(name="PBBody", parent=styles["BodyText"], fontSize=9, leading=13, textColor=dark))
+    styles.add(ParagraphStyle(name="PBSmall", parent=styles["BodyText"], fontSize=7.7, leading=10, textColor=dark))
+
+    story=[]
+    logo_path = Path(current_app.root_path) / "static" / brand.get("logo_file", "puertas-brasil-logo-oficial.jpg")
+    header_cells=[]
+    if logo_path.exists():
+        header_cells.append(Image(str(logo_path), width=46*mm, height=18*mm, kind="proportional"))
+    else:
+        header_cells.append(Paragraph(f"<b>{brand.get('brand_name', tenant.name)}</b>", styles["PBH2"]))
+    header_cells.append(Paragraph(f"<b>RADAR COMERCIAL</b><br/><font color='#667D74'>{'Inteligência industrial para prospecção' if brand.get('language') == 'pt-BR' else 'Inteligencia industrial para prospección'}</font>", styles["PBBody"]))
+    header=Table([header_cells], colWidths=[80*mm, 95*mm])
+    header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LINEBELOW",(0,0),(-1,-1),1,green),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    story += [header, Spacer(1, 7*mm), Paragraph("Informe de actividad comercial", styles["PBTitle"])]
+    start_label = data['start'][:10] if data['start'] else "Inicio de la operación"
+    end_label = data['end'][:10] if data['end'] else datetime.now(timezone.utc).date().isoformat()
+    responsible = data['user'] or (user.name if user else "Equipo comercial")
+    story.append(Paragraph(f"Período: <b>{start_label}</b> a <b>{end_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Responsable/filtro: <b>{responsible}</b>", styles["PBSub"]))
+    story.append(Paragraph(data["summary"], styles["PBBody"]))
+    story.append(Spacer(1, 5*mm))
+
+    m=data["metrics"]
+    cards=[
+        ("Empresas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Correos",m["emails"]),("WhatsApps",m["whatsapps"]),
+        ("Empresas que respondieron",m["replies"]),("Visitas marcadas",m["visitsScheduled"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
+    ]
+    card_rows=[]
+    for i in range(0,len(cards),4):
+        row=[]
+        for label,value in cards[i:i+4]:
+            row.append(Paragraph(f"<font size='16'><b>{value}</b></font><br/><font color='#667D74' size='7'>{label.upper()}</font>", styles["PBBody"]))
+        card_rows.append(row)
+    table=Table(card_rows, colWidths=[43.5*mm]*4, rowHeights=[21*mm]*len(card_rows), hAlign='LEFT')
+    table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),light),("BOX",(0,0),(-1,-1),0.5,line),("INNERGRID",(0,0),(-1,-1),0.5,colors.white),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),7)]))
+    story += [table, Spacer(1, 6*mm), Paragraph("Actividad registrada", styles["PBH2"])]
+
+    rows=[["Fecha","Empresa","Actividad","Canal","Responsable"]]
+    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT_SCHEDULED":"Visita marcada","VISIT":"Visita realizada","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
+    for row in data["activities"][:120]:
+        date=(row["date"] or "")[:10]
+        rows.append([Paragraph(date,styles["PBSmall"]),Paragraph(row["company"],styles["PBSmall"]),Paragraph(type_names.get(row["type"],row["type"]),styles["PBSmall"]),Paragraph(row["channel"] or "—",styles["PBSmall"]),Paragraph(row["createdBy"],styles["PBSmall"])])
+    act=Table(rows, repeatRows=1, colWidths=[22*mm,57*mm,39*mm,27*mm,30*mm], hAlign='LEFT')
+    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    story.append(act)
+    story.append(Spacer(1, 6*mm))
+    story.append(Paragraph((f"Este relatório foi gerado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Os dados refletem as atividades registradas no período selecionado." if brand.get("language") == "pt-BR" else f"Este informe fue generado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado."), styles["PBSub"]))
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        width, _ = A4
+        canvas.setStrokeColor(line); canvas.line(15*mm, 12*mm, width-15*mm, 12*mm)
+        canvas.setFillColor(muted); canvas.setFont("Helvetica", 7.5)
+        footer_text = " · ".join(filter(None,[brand.get("sales_phone"),brand.get("sales_email"),brand.get("website")]))
+        canvas.drawString(15*mm, 7.5*mm, footer_text[:110])
+        canvas.drawRightString(width-15*mm, 7.5*mm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    buffer.seek(0)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=("Relatorio-Comercial-Tech-Doors.pdf" if brand.get("language") == "pt-BR" else "Informe-Comercial-Puertas-Brasil.pdf"))
 
 def _pagination():
     try:
@@ -1296,6 +1532,31 @@ def radar_command_center():
     )
 
 
+@api_bp.post("/companies/<int:company_id>/archive")
+@require_permission("WRITE_CRM")
+def company_archive(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id,tenant_id=tenant.id,status="ACTIVE").first_or_404()
+    company.status="ARCHIVED"; company.deleted_at=datetime.now(timezone.utc)
+    for op in Opportunity.query.join(Project).filter(Project.company_id==company.id,Opportunity.tenant_id==tenant.id).all():
+        if op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="DESCARTADO"
+    _audit("ARCHIVE","COMPANY",company.id,{"name":company.name})
+    db.session.commit()
+    return jsonify(ok=True,companyId=company.id,status=company.status)
+
+
+@api_bp.delete("/companies/<int:company_id>")
+@require_permission("MANAGE_USERS")
+def company_delete(company_id):
+    tenant=current_tenant()
+    company=Company.query.filter_by(id=company_id,tenant_id=tenant.id).first_or_404()
+    name=company.name; cid=company.id
+    _audit("DELETE","COMPANY",cid,{"name":name})
+    # Delete dependent opportunities/projects using ORM cascades. Activities and contacts cascade with Company.
+    db.session.delete(company); db.session.commit()
+    return jsonify(ok=True,companyId=cid,name=name)
+
+
 @api_bp.get("/companies/<int:company_id>/contacts")
 def company_contacts(company_id):
     tenant = current_tenant()
@@ -1329,7 +1590,63 @@ def company_contact_create(company_id):
     for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
         lead_readiness(opportunity)
     db.session.commit()
-    return jsonify(id=contact.id, companyId=company.id), 201
+    return jsonify(
+        id=contact.id, companyId=company.id, name=contact.name, role=contact.role,
+        buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
+        whatsapp=contact.whatsapp, confidence=contact.confidence
+    ), 201
+
+
+
+
+@api_bp.patch("/companies/<int:company_id>/contacts/<int:contact_id>")
+@require_permission("WRITE_CRM")
+def company_contact_update(company_id, contact_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    contact = Contact.query.filter_by(id=contact_id, tenant_id=tenant.id, company_id=company.id, status="ACTIVE").first_or_404()
+    data = request.get_json(silent=True) or {}
+    fields = {
+        "name": "name", "role": "role", "buyingRole": "buying_role", "email": "email",
+        "phone": "phone", "whatsapp": "whatsapp", "linkedin": "linkedin_url",
+        "influence": "influence_score", "confidence": "confidence",
+    }
+    changed=[]
+    for key, attr in fields.items():
+        if key not in data:
+            continue
+        value=data.get(key)
+        if key in {"influence", "confidence"} and value not in (None, ""):
+            try:
+                value=max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                return jsonify(error=f"Valor inválido para {key}"), 400
+        if key == "buyingRole" and value:
+            value=str(value).upper()
+        if key in {"name", "role", "email", "phone", "whatsapp", "linkedin"} and isinstance(value, str):
+            value=value.strip() or None
+        setattr(contact, attr, value)
+        changed.append(key)
+    if not changed:
+        return jsonify(error="No se recibieron cambios"), 400
+    if not contact.name:
+        return jsonify(error="El contacto necesita un nombre"), 400
+    contact.verified_at=datetime.now(timezone.utc)
+    company.last_enriched_at=datetime.now(timezone.utc)
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, contact_id=contact.id, activity_type="DATA_UPDATE", channel="CRM",
+        subject="Contacto actualizado", summary=f"Se actualizaron datos de {contact.name}: {', '.join(changed)}",
+        created_by=(current_user().name if current_user() else "Equipo comercial")
+    ))
+    for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
+        lead_readiness(opportunity)
+    _audit("UPDATE", "COMPANY_CONTACT", contact.id, {"companyId": company.id, "fields": changed})
+    db.session.commit()
+    return jsonify(
+        id=contact.id, companyId=company.id, name=contact.name, role=contact.role,
+        buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
+        whatsapp=contact.whatsapp, confidence=contact.confidence, changed=changed
+    )
 
 
 @api_bp.post("/companies/<int:company_id>/watch")
@@ -1395,6 +1712,7 @@ def company_auto_enrich(company_id):
         from ..services.site_analyzer import analyze_website
         analysis=analyze_website(company.website,max_pages=18 if deep else 4,use_sitemap=deep,request_timeout=12 if deep else 8,status="COMPLETED" if deep else "QUICK")
         result=_merge_company_enrichment(company,analysis,overwrite=overwrite,source_label="Actualización automática de empresa existente")
+        result["contactsCreated"]=_sync_discovered_contacts(company,analysis)
         db.session.add(CompanyActivity(tenant_id=tenant.id,company_id=company.id,activity_type="DATA_UPDATE",channel="SITIO_WEB",subject="Actualización automática de ficha 360°",summary=f"Se completaron {len(result['updated'])} campos. {len(result['reviewRequired'])} dato(s) quedaron pendientes de revisión.",extra_data=result))
         _audit("AUTO_ENRICH","COMPANY",company.id,result)
         db.session.commit()
@@ -1562,3 +1880,44 @@ def opportunity_similar(opportunity_id):
         "project": row.project.name, "score": row.score, "similarity": similarity,
         "reasons": reasons[:3], "salesReady": row.sales_ready
     } for similarity, row, reasons in ranked[:6]])
+
+
+# V15.3 — personalización persistente de módulos por operación
+_UI_MODULE_KEYS = [
+    "triage","research","salesready","hoy","crm","reportes","pipeline","visitas",
+    "radar","captacion","oportunidades","smartlists","metrics","admin"
+]
+
+@api_bp.route("/ui-config", methods=["GET", "PUT"])
+def ui_config():
+    tenant = current_tenant()
+    user = current_user()
+    settings = dict(tenant.settings or {})
+    saved = settings.get("ui_modules") or {}
+    if request.method == "GET":
+        return jsonify(modules=saved)
+    if not user or user.role not in {"ADMIN", "GROUP_ADMIN"}:
+        return jsonify(error="Solo administradores pueden personalizar módulos"), 403
+    payload = request.get_json(silent=True) or {}
+    incoming = payload.get("modules") or {}
+    clean = {}
+    for key in _UI_MODULE_KEYS:
+        row = incoming.get(key)
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()[:70]
+        try:
+            order = int(row.get("order", 0))
+        except (TypeError, ValueError):
+            order = 0
+        clean[key] = {
+            "label": label,
+            "visible": bool(row.get("visible", True)),
+            "order": max(-100, min(order, 100)),
+        }
+    settings["ui_modules"] = clean
+    tenant.settings = settings
+    db.session.commit()
+    _audit("UPDATE_UI_CONFIG", "TENANT", tenant.id, {"modules": list(clean)})
+    db.session.commit()
+    return jsonify(ok=True, modules=clean)
