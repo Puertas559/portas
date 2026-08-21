@@ -1536,6 +1536,58 @@ def company_contact_create(company_id):
     ), 201
 
 
+
+
+@api_bp.patch("/companies/<int:company_id>/contacts/<int:contact_id>")
+@require_permission("WRITE_CRM")
+def company_contact_update(company_id, contact_id):
+    tenant = current_tenant()
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    contact = Contact.query.filter_by(id=contact_id, tenant_id=tenant.id, company_id=company.id, status="ACTIVE").first_or_404()
+    data = request.get_json(silent=True) or {}
+    fields = {
+        "name": "name", "role": "role", "buyingRole": "buying_role", "email": "email",
+        "phone": "phone", "whatsapp": "whatsapp", "linkedin": "linkedin_url",
+        "influence": "influence_score", "confidence": "confidence",
+    }
+    changed=[]
+    for key, attr in fields.items():
+        if key not in data:
+            continue
+        value=data.get(key)
+        if key in {"influence", "confidence"} and value not in (None, ""):
+            try:
+                value=max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                return jsonify(error=f"Valor inválido para {key}"), 400
+        if key == "buyingRole" and value:
+            value=str(value).upper()
+        if key in {"name", "role", "email", "phone", "whatsapp", "linkedin"} and isinstance(value, str):
+            value=value.strip() or None
+        setattr(contact, attr, value)
+        changed.append(key)
+    if not changed:
+        return jsonify(error="No se recibieron cambios"), 400
+    if not contact.name:
+        return jsonify(error="El contacto necesita un nombre"), 400
+    contact.verified_at=datetime.now(timezone.utc)
+    company.last_enriched_at=datetime.now(timezone.utc)
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, contact_id=contact.id, activity_type="DATA_UPDATE", channel="CRM",
+        subject="Contacto actualizado", summary=f"Se actualizaron datos de {contact.name}: {', '.join(changed)}",
+        created_by=(current_user().name if current_user() else "Equipo comercial")
+    ))
+    for opportunity in Opportunity.query.join(Project).filter(Project.company_id == company.id, Opportunity.tenant_id == tenant.id).all():
+        lead_readiness(opportunity)
+    _audit("UPDATE", "COMPANY_CONTACT", contact.id, {"companyId": company.id, "fields": changed})
+    db.session.commit()
+    return jsonify(
+        id=contact.id, companyId=company.id, name=contact.name, role=contact.role,
+        buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
+        whatsapp=contact.whatsapp, confidence=contact.confidence, changed=changed
+    )
+
+
 @api_bp.post("/companies/<int:company_id>/watch")
 @require_permission("WRITE_CRM")
 def company_watch(company_id):

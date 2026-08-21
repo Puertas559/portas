@@ -3,6 +3,9 @@ const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Rada
 let selected = leads[0] || null;
 let level = "ALL";
 let selectedChannel = "whatsapp";
+let selectedCompanyId = null;
+let drawerContacts = [];
+let drawerMessageSeq = 0;
 const visitSelection = new Set();
 let discoveredCompanies = [];
 const pipelineStages = [
@@ -156,8 +159,10 @@ function selectLead(lead) {
   $("dealOwner").value = lead.owner || "Equipo comercial";
   $("dealValue").value = Number(lead.estimatedValue) || 0;
   $("dealProbability").value = Number(lead.probability) || 20;
-  $("approach").value = contactMessage(lead);
+  $("approach").value = "Cargando mensaje contextual del CRM…";
+  $("drawerMessageRecipient") && ($("drawerMessageRecipient").value = "");
   updateChannelAction();
+  loadUnifiedDrawerMessaging(lead);
   render();
 }
 
@@ -165,7 +170,63 @@ function updateChannelAction() {
   if (!selected) return;
   const labels = { whatsapp: "Abrir WhatsApp", email: "Redactar correo", call: "Iniciar llamada", linkedin: "Abrir LinkedIn" };
   $("openChannel").innerHTML = `<i class="bi bi-box-arrow-up-right"></i> ${labels[selectedChannel]}`;
-  $("approach").value = contactMessage(selected, selectedChannel);
+  if (selectedChannel === "linkedin") {
+    $("approach").value = contactMessage(selected, "linkedin");
+    if ($("drawerMessageSubjectWrap")) $("drawerMessageSubjectWrap").hidden = true;
+    if ($("drawerMessageRecipient")) $("drawerMessageRecipient").value = selected.linkedin || "";
+  } else {
+    generateUnifiedDrawerMessage();
+  }
+}
+
+async function resolveSelectedCompanyId(lead = selected) {
+  if (!lead) return null;
+  if (lead.companyId) return Number(lead.companyId);
+  const r = await fetch(`/api/companies?q=${encodeURIComponent(lead.company || "")}`);
+  const d = await r.json().catch(() => ({}));
+  const row = (d.items || []).find(x => x.name === lead.company) || (d.items || [])[0];
+  return row?.id ? Number(row.id) : null;
+}
+
+async function loadUnifiedDrawerMessaging(lead = selected, preferredContactId = null) {
+  if (!lead) return;
+  const companyId = await resolveSelectedCompanyId(lead);
+  selectedCompanyId = companyId;
+  drawerContacts = [];
+  const select = $("drawerMessageContact");
+  if (!companyId) {
+    if (select) select.innerHTML = '<option value="">Empresa no localizada</option>';
+    $("approach").value = "No se pudo localizar la empresa en el CRM.";
+    return;
+  }
+  try {
+    const r = await fetch(`/api/companies/${companyId}/contacts`);
+    drawerContacts = r.ok ? await r.json() : [];
+  } catch (_) { drawerContacts = []; }
+  if (select) {
+    select.innerHTML = '<option value="">Equipo / contacto general</option>' + drawerContacts.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.role || "Contacto")}${c.role ? ` · ${escapeHtml(c.role)}` : ""} · ${escapeHtml(c.email || c.whatsapp || c.phone || "sin contacto directo")}</option>`).join("");
+    if (preferredContactId && drawerContacts.some(c => String(c.id) === String(preferredContactId))) select.value = String(preferredContactId);
+  }
+  await generateUnifiedDrawerMessage();
+}
+
+async function generateUnifiedDrawerMessage() {
+  if (!selected || !selectedCompanyId || selectedChannel === "linkedin") return;
+  const seq = ++drawerMessageSeq;
+  const channel = { whatsapp: "WHATSAPP", email: "EMAIL", call: "CALL" }[selectedChannel] || "EMAIL";
+  const contactId = $("drawerMessageContact")?.value || null;
+  if ($("approach")) $("approach").value = "Generando mensaje contextual…";
+  try {
+    const r = await fetch(`/api/companies/${selectedCompanyId}/message`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, opportunityId: selected.id }) });
+    const d = await r.json();
+    if (!r.ok || seq !== drawerMessageSeq) return;
+    $("approach").value = d.body || "";
+    if ($("drawerMessageRecipient")) $("drawerMessageRecipient").value = d.recipient || "";
+    if ($("drawerMessageSubject")) $("drawerMessageSubject").value = channel === "EMAIL" ? (d.subject || "") : "";
+    if ($("drawerMessageSubjectWrap")) $("drawerMessageSubjectWrap").hidden = channel !== "EMAIL";
+  } catch (_) {
+    if (seq === drawerMessageSeq) $("approach").value = "No se pudo generar el mensaje desde el CRM.";
+  }
 }
 
 function activateTab(tabName) {
@@ -306,7 +367,7 @@ $("copyApproach").addEventListener("click", async () => {
 });
 
 document.querySelectorAll(".channels button").forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     document.querySelectorAll(".channels button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     selectedChannel = button.dataset.channel;
@@ -315,21 +376,39 @@ document.querySelectorAll(".channels button").forEach((button) => {
   });
 });
 
+$("drawerMessageContact")?.addEventListener("change", generateUnifiedDrawerMessage);
+$("copyDrawerRecipient")?.addEventListener("click", async () => {
+  const value = $("drawerMessageRecipient")?.value || "";
+  if (!value) return toast("No hay destinatario para copiar");
+  await navigator.clipboard.writeText(value);
+  toast("Destinatario copiado");
+});
+
+window.addEventListener("radar:contact-updated", (event) => {
+  const detail = event.detail || {};
+  if (selected && String(detail.companyId || "") === String(selectedCompanyId || selected.companyId || "")) loadUnifiedDrawerMessaging(selected, detail.contactId || null);
+});
+window.addEventListener("radar:company-contact-updated", (event) => {
+  const detail = event.detail || {};
+  if (selected && String(detail.companyId || "") === String(selectedCompanyId || selected.companyId || "")) loadUnifiedDrawerMessaging(selected);
+});
+
 $("openChannel").addEventListener("click", () => {
   if (!selected) return;
-  const message = contactMessage(selected, selectedChannel);
+  const message = $("approach")?.value || "";
+  const recipient = $("drawerMessageRecipient")?.value || "";
   let url;
   if (selectedChannel === "whatsapp") {
-    const number = String(selected.whatsapp || selected.phone || "").replace(/\D/g, "");
-    if (!number) return toast("Esta empresa todavía no tiene WhatsApp registrado");
+    const number = String(recipient).replace(/\D/g, "");
+    if (!number) return toast("Este destinatario todavía no tiene WhatsApp registrado");
     url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
   } else if (selectedChannel === "email") {
-    if (!selected.email) return toast("Esta empresa todavía no tiene correo registrado");
-    const subject = `Soluciones de accesos industriales para ${selected.company}`;
-    url = `mailto:${selected.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message.replace(/^Asunto:.*\n\n/, ""))}`;
+    if (!recipient) return toast("Este destinatario todavía no tiene correo registrado");
+    const subject = $("drawerMessageSubject")?.value || "";
+    url = `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
   } else if (selectedChannel === "call") {
-    if (!selected.phone) return toast("Esta empresa todavía no tiene teléfono registrado");
-    url = `tel:${selected.phone}`;
+    if (!recipient) return toast("Este destinatario todavía no tiene teléfono registrado");
+    url = `tel:${recipient}`;
   } else {
     url = selected.linkedin || `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(selected.company)}`;
   }
