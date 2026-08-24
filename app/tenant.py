@@ -159,8 +159,9 @@ GROUP_OPERATIONS = {
             "country_code": "PY", "theme": "puertas", "logo_file": "puertas-brasil-logo-oficial.jpg",
             "accent": "#0b7654", "default_country": "Paraguay", "sales_phone": "+595 986 986215",
             "sales_email": "gerenciacomercial@puertasbrasil.com.py", "website": "puertasbrasil.com.py",
-            "subject_first_contact": "Puertas Brasil Paraguay | Primer Contacto",
+            "subject_first_contact": "Puertas Brasil Paraguay | Primer Contacto", "radar_enabled": True,
         },
+        "status": "ACTIVE",
     },
     "techdoors-br": {
         "name": "Tech Doors BR",
@@ -169,8 +170,18 @@ GROUP_OPERATIONS = {
             "country_code": "BR", "theme": "techdoors", "logo_file": "techdoors-logo-oficial.jpg",
             "accent": "#ff6b00", "default_country": "Brasil", "sales_phone": "(11) 99746-8678",
             "sales_email": "", "website": "techdoors.com.br",
-            "subject_first_contact": "Tech Doors | Primeiro Contato",
+            "subject_first_contact": "Tech Doors | Primeiro Contato", "radar_enabled": True,
         },
+        "status": "ACTIVE",
+    },
+    "premium-portas-br": {
+        "name": "Premium Portas BR",
+        "settings": {
+            "brand_name": "Premium Portas e Portões", "brand_short": "Premium Portas", "market": "Brasil", "language": "pt-BR",
+            "country_code": "BR", "theme": "premium", "default_country": "Brasil", "sales_phone": "(47) 9 9111 5057",
+            "sales_email": "contato@premiumportas.com.br", "website": "premiumportas.com.br", "radar_enabled": False,
+        },
+        "status": "INSTITUTIONAL",
     },
 }
 
@@ -181,7 +192,7 @@ def ensure_group_operations():
     for slug, spec in GROUP_OPERATIONS.items():
         tenant = Tenant.query.filter_by(slug=slug).first()
         if not tenant:
-            tenant = Tenant(name=spec["name"], slug=slug, status="ACTIVE", settings=spec["settings"].copy())
+            tenant = Tenant(name=spec["name"], slug=slug, status=spec.get("status", "ACTIVE"), settings=spec["settings"].copy())
             db.session.add(tenant); db.session.flush(); seed_products(tenant); created.append(tenant)
         else:
             merged = dict(spec["settings"]); merged.update(tenant.settings or {})

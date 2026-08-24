@@ -6,11 +6,11 @@ from uuid import uuid4
 from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, jsonify, request, send_file, send_from_directory
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import (
-    AuditLog, CollectorRun, Company, CompanyActivity, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
+    AuditLog, CollectorRun, Company, CompanyActivity, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal, User,
     ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, Watchlist, WebsiteAnalysis,
 )
 from ..services.entity_resolution import resolve_company, resolve_project
@@ -18,7 +18,7 @@ from ..services.intelligence import as_datetime, company_completeness, lead_read
 from ..tenant import current_tenant, current_user, require_permission
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
-STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
+STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
 BUYING_STAGES = {"AWARENESS", "RESEARCH", "PROJECT_PLANNING", "SUPPLIER_DISCOVERY", "RFQ", "PROCUREMENT", "NEGOTIATION", "PURCHASE", "POSTPONED", "UNKNOWN"}
 
 
@@ -29,6 +29,41 @@ def _audit(action, entity_type, entity_id, details=None):
         tenant_id=tenant.id, user_id=user.id if user else None, action=action,
         entity_type=entity_type, entity_id=str(entity_id), details=details or {},
     ))
+
+
+
+
+def _ensure_next_action(opportunity, status=None, base_time=None):
+    """Keep one clear next commercial action aligned with the current stage."""
+    now = base_time or datetime.now(timezone.utc)
+    status = status or opportunity.status
+    rules = {
+        "NOVO": ("Validar empresa y contacto responsable", 1, "RESEARCH"),
+        "QUALIFICADO": ("Realizar primer contacto", 1, "OUTREACH"),
+        "CONTATO_REALIZADO": ("Hacer seguimiento del primer contacto", 3, "FOLLOW_UP"),
+        "RESPONDEU": ("Responder y acordar diagnóstico / próximo paso", 1, "REPLY"),
+        "DIAGNOSTICO": ("Completar diagnóstico y acordar visita / solución", 2, "DIAGNOSIS"),
+        "VISITA": ("Preparar o registrar resultado de la visita", 1, "VISIT"),
+        "ORCAMENTO": ("Hacer seguimiento de la propuesta", 4, "PROPOSAL"),
+        "NEGOCIACAO": ("Actualizar negociación y siguiente decisión", 2, "NEGOTIATION"),
+        "MONITORAMENTO": ("Revisar cuenta en seguimiento", 14, "FOLLOW_UP"),
+    }
+    if status in {"GANHO", "PERDIDO", "DESCARTADO"}:
+        SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status": "CANCELLED"})
+        opportunity.next_action_at = None
+        return None
+    rule = rules.get(status)
+    if not rule:
+        return None
+    title, days, channel = rule
+    due = now + timedelta(days=days)
+    # Cancel stale automatic tasks from earlier stages, preserving manually created tasks (sequence_step=0).
+    SalesTask.query.filter(SalesTask.opportunity_id == opportunity.id, SalesTask.status == "PENDING", SalesTask.sequence_step < 0).update({"status": "CANCELLED"}, synchronize_session=False)
+    task = SalesTask(opportunity_id=opportunity.id, title=title, channel=channel, due_at=due, status="PENDING", sequence_step=-1)
+    db.session.add(task)
+    opportunity.next_action_at = due
+    opportunity.next_best_action = title
+    return task
 
 
 def _optional_number(value):
@@ -452,6 +487,7 @@ def opportunity_update(opportunity_id):
         # seguía mostrando 0 respuestas/visitas. Registramos el evento una sola vez
         # cuando realmente hay transición de etapa.
         if status != previous_status:
+            _ensure_next_action(opportunity, status=status)
             status_activity = {
                 "RESPONDEU": ("REPLY", "Respuesta registrada desde el CRM"),
                 "VISITA": ("VISIT_SCHEDULED", "Visita marcada desde el CRM"),
@@ -641,7 +677,10 @@ def company_activity_create(company_id):
         elif activity_type == "REPLY" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="RESPONDEU"
         elif activity_type in {"VISIT","VISIT_SCHEDULED","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
         elif activity_type == "PROPOSAL_SENT" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="ORCAMENTO"
-        if next_at: op.next_action_at=next_at
+        if next_at:
+            op.next_action_at=next_at
+        else:
+            _ensure_next_action(op, status=op.status, base_time=occurred)
         db.session.add(TimelineEvent(opportunity=op,event_type=activity_type,description=data.get("summary") or data.get("subject") or "Interacción comercial registrada"))
     _audit("CREATE","COMPANY_ACTIVITY",company.id,{"type":activity_type})
     db.session.commit()
@@ -1200,9 +1239,9 @@ def _build_activity_report():
     # Backward compatibility with stages saved before event tracking existed.
     for o in opportunities:
         cid = o.project.company_id
-        if o.status in {"CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO"}:
+        if o.status in {"CONTATO_REALIZADO", "RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO"}:
             contacted_company_ids.add(cid)
-        if o.status in {"RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+        if o.status in {"RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
             reply_company_ids.add(cid)
         if o.status == "VISITA":
             visit_company_ids.add(cid)
@@ -1979,7 +2018,7 @@ def opportunity_outcome(opportunity_id):
     if outcome in {"RESPONDED", "QUOTE_SENT", "WON", "LOST", "NO_FIT"}: opportunity.last_contact_at = datetime.now(timezone.utc)
     status_map = {"RESPONDED":"RESPONDEU", "QUOTE_SENT":"ORCAMENTO", "WON":"GANHO", "LOST":"PERDIDO", "NO_FIT":"DESCARTADO", "POSTPONED":"MONITORAMENTO", "FUTURE_PROJECT":"MONITORAMENTO"}
     if outcome in status_map: opportunity.status = status_map[outcome]
-    if opportunity.status in {"GANHO", "PERDIDO", "DESCARTADO"}: SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status":"CANCELLED"})
+    _ensure_next_action(opportunity, status=opportunity.status)
     lead_readiness(opportunity)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="COMMERCIAL_RESULT", description=f"Resultado: {outcome}" + (f" · Motivo: {lost_reason}" if lost_reason else "")))
     db.session.commit(); return jsonify(opportunity.to_dict())
@@ -2001,6 +2040,78 @@ def bulk_actions():
         else: return jsonify(error="Acción masiva inválida"), 400
         lead_readiness(opportunity)
     db.session.commit(); return jsonify(updated=len(rows), action=action)
+
+
+@api_bp.get("/companies/global-search")
+def companies_global_search():
+    tenant = current_tenant()
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify(items=[])
+    like = f"%{q}%"
+    rows = Company.query.filter(
+        Company.tenant_id == tenant.id, Company.status == "ACTIVE",
+        or_(
+            Company.name.ilike(like), Company.legal_name.ilike(like), Company.ruc.ilike(like),
+            Company.registration_id.ilike(like), Company.domain.ilike(like), Company.website.ilike(like),
+            Company.email_business.ilike(like), Company.email.ilike(like),
+        )
+    ).order_by(Company.name.asc()).limit(20).all()
+    items=[]
+    for c in rows:
+        opp = Opportunity.query.join(Project).filter(Project.company_id == c.id, Opportunity.tenant_id == tenant.id).order_by(Opportunity.updated_at.desc()).first()
+        items.append({
+            "id": c.id, "name": c.name, "legalName": c.legal_name, "ruc": c.ruc or c.registration_id,
+            "domain": c.domain or c.website, "city": c.city, "sector": c.sector,
+            "status": opp.status if opp else None, "opportunityId": opp.id if opp else None,
+        })
+    return jsonify(items=items)
+
+
+@api_bp.get("/data-quality")
+def data_quality_dashboard():
+    tenant=current_tenant()
+    companies=Company.query.filter_by(tenant_id=tenant.id,status="ACTIVE").order_by(Company.name.asc()).all()
+    incomplete=[]; no_contact=[]; no_next=[]; duplicate_candidates=[]
+    seen={}
+    from ..services.entity_resolution import normalize_domain, normalize_name
+    for c in companies:
+        completeness, missing=company_completeness(c)
+        if completeness < 80:
+            incomplete.append({"id":c.id,"name":c.name,"completeness":completeness,"missing":missing})
+        active_contacts=Contact.query.filter_by(tenant_id=tenant.id,company_id=c.id,status="ACTIVE").count()
+        if not active_contacts and not (c.email_business or c.email or c.whatsapp or c.phone_business or c.phone):
+            no_contact.append({"id":c.id,"name":c.name})
+        ops=Opportunity.query.join(Project).filter(Project.company_id==c.id,Opportunity.tenant_id==tenant.id,~Opportunity.status.in_({"GANHO","PERDIDO","DESCARTADO"})).all()
+        if ops and not any(op.next_action_at for op in ops):
+            no_next.append({"id":c.id,"name":c.name,"opportunityIds":[op.id for op in ops]})
+        keys=[]
+        if c.ruc or c.registration_id: keys.append(("RUC", ''.join(ch for ch in (c.ruc or c.registration_id) if ch.isdigit())))
+        dom=normalize_domain(c.domain or c.website)
+        if dom: keys.append(("DOMINIO",dom))
+        nm=normalize_name(c.canonical_name or c.name)
+        if nm and len(nm)>=6: keys.append(("NOMBRE",nm))
+        for key in keys:
+            if not key[1]: continue
+            if key in seen and seen[key]["id"] != c.id:
+                duplicate_candidates.append({"keyType":key[0],"key":key[1],"companies":[seen[key],{"id":c.id,"name":c.name}]})
+            else: seen[key]={"id":c.id,"name":c.name}
+    return jsonify(summary={
+        "companies":len(companies),"incomplete":len(incomplete),"withoutContact":len(no_contact),
+        "withoutNextAction":len(no_next),"duplicateCandidates":len(duplicate_candidates),
+    }, incomplete=incomplete[:100], withoutContact=no_contact[:100], withoutNextAction=no_next[:100], duplicates=duplicate_candidates[:100])
+
+
+@api_bp.get("/audit-log")
+def audit_log_list():
+    tenant=current_tenant()
+    limit=min(max(int(request.args.get("limit",100)),1),300)
+    rows=AuditLog.query.filter_by(tenant_id=tenant.id).order_by(AuditLog.created_at.desc()).limit(limit).all()
+    users={u.id:u.name for u in User.query.filter_by(tenant_id=tenant.id).all()}
+    return jsonify(items=[{
+        "id":r.id,"action":r.action,"entityType":r.entity_type,"entityId":r.entity_id,"details":r.details or {},
+        "user":users.get(r.user_id,"Sistema"),"createdAt":r.created_at.isoformat() if r.created_at else None,
+    } for r in rows])
 
 
 @api_bp.get("/health")

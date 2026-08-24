@@ -1,5 +1,5 @@
 const leads = Array.isArray(window.RADAR_LEADS) ? window.RADAR_LEADS : [];
-const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Radar Comercial Industrial";
+const brandName = (window.RADAR_BRAND && window.RADAR_BRAND.brand_name) || "Radar Industrial";
 let selected = leads[0] || null;
 let level = "ALL";
 let selectedChannel = "whatsapp";
@@ -10,7 +10,7 @@ const visitSelection = new Set();
 let discoveredCompanies = [];
 const pipelineStages = [
   ["NOVO", "NUEVO"], ["QUALIFICADO", "CALIFICADO"], ["CONTATO_REALIZADO", "CONTACTADO"],
-  ["RESPONDEU", "RESPONDIÓ"], ["VISITA", "VISITA"], ["ORCAMENTO", "PRESUPUESTO"], ["NEGOCIACAO", "NEGOCIACIÓN"],
+  ["RESPONDEU", "RESPONDIÓ"], ["DIAGNOSTICO", "DIAGNÓSTICO"], ["VISITA", "VISITA"], ["ORCAMENTO", "PRESUPUESTO"], ["NEGOCIACAO", "NEGOCIACIÓN"],
 ];
 
 const $ = (id) => document.getElementById(id);

@@ -2,23 +2,32 @@
 <html lang="{{ brand.get('language','es-PY') }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
-  <title>Radar Comercial Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
+  <title>Radar Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=16.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=16.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Radar HG">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=16.0">
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260821-v15.4.1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}?v=20260821-v15.4.1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260821-v15.4.1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260821-v15.4.1">
-<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260821-v15.4.1">
-<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260821-v15.7">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260824-v16.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}?v=20260824-v16.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}?v=20260824-v16.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260824-v16.0">
+<link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260824-v16.0">
+<link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260824-v16.0">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
   <aside class="sidebar">
     <a class="brand brand-logo" href="/" aria-label="{{ brand.get('brand_name', tenant.name) }} — inicio">
       <span class="brand-logo-frame brand-logo-native"><img src="{{ url_for('static', filename=('techdoors-logo-display.png' if brand.get('theme') == 'techdoors' else 'puertas-brasil-logo-display.png')) }}?v=15.3" alt="{{ brand.get('brand_name', tenant.name) }}"></span>
-      <span class="brand-product"><b>Radar Comercial</b><small>{{ "Inteligência industrial · BR" if brand.get("language") == "pt-BR" else "Inteligencia industrial · PY" }}</small></span>
+      <span class="brand-product"><b>Radar Industrial</b><small>{{ "Inteligência industrial · BR" if brand.get("language") == "pt-BR" else "Inteligencia industrial · PY" }}</small></span>
     </a>
     <nav class="workflow-nav">
       <p>1 · CALIFICAR</p>
@@ -37,7 +46,7 @@
       <a href="#prioridades" data-module-target="oportunidades"><i class="bi bi-bullseye"></i><span>Oportunidades</span></a>
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
-      {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<p>4 · ADMINISTRACIÓN</p><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
+      {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<p>4 · GESTIÓN</p><a href="#dataquality" data-module-target="dataquality"><i class="bi bi-heart-pulse"></i><span>Calidad de datos</span></a><a href="#auditlog" data-module-target="auditlog"><i class="bi bi-clock-history"></i><span>Auditoría</span></a><a href="#admin" data-module-target="admin"><i class="bi bi-people"></i><span>Usuarios y acceso</span></a>{% endif %}
     </nav>
     <div class="radar-status"><i></i><span><b>Radar activo</b><small>Flask · PostgreSQL</small></span></div>
   </aside>
@@ -47,7 +56,7 @@
 
     <header class="topbar workspace-topbar">
       <div><small>{{ brand.get("brand_name", tenant.name)|upper }} · {{ "CENTRO DE TRABALHO COMERCIAL" if brand.get("language") == "pt-BR" else "CENTRO DE TRABAJO COMERCIAL" }}</small><strong id="workspaceModuleTitle">{{ "Qualificar por site" if brand.get("language") == "pt-BR" else "Calificar por sitio" }}</strong></div>
-      <div class="workspace-top-actions"><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px"><i class="bi bi-arrow-left"></i> HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
+      <div class="workspace-top-actions"><div class="global-company-search"><i class="bi bi-search"></i><input id="globalCompanySearch" autocomplete="off" placeholder="Buscar empresa…" aria-label="Buscar empresa"><div id="globalCompanyResults" class="global-company-results" hidden></div></div><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px"><i class="bi bi-arrow-left"></i> HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
     </header>
 
     <section class="today-hub app-module" data-module="hoy" id="hoy">
@@ -71,7 +80,7 @@
     <section class="app-module reports-module" data-module="reportes" id="reportes">
       <div class="section-head reports-head"><div><p class="eyebrow">GESTIÓN Y TRAZABILIDAD</p><h2>Reportes comerciales</h2><p>Todo lo realizado por el equipo, consolidado en una vista ejecutiva y listo para compartir.</p></div><div class="report-actions"><button class="secondary" id="reportCopy"><i class="bi bi-clipboard"></i> Copiar resumen</button><button class="secondary" id="reportCsv"><i class="bi bi-filetype-csv"></i> Exportar CSV</button><button class="primary" id="reportPdf"><i class="bi bi-file-earmark-pdf"></i> Generar PDF</button></div></div>
       <div class="report-filterbar"><label>Período<select id="reportPeriod"><option value="all">Todo hasta ahora</option><option value="today">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Período personalizado</option></select></label><label class="report-custom" hidden>Desde<input type="date" id="reportStart"></label><label class="report-custom" hidden>Hasta<input type="date" id="reportEnd"></label><label>Responsable<select id="reportUser"><option value="">Todo el equipo</option></select></label><button class="secondary" id="reportRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button></div>
-      <div class="report-brand-preview"><img src="{{ url_for('static', filename=brand.get('logo_file','puertas-brasil-logo-oficial.jpg')) }}" alt="Puertas Brasil"><div><small>INFORME EJECUTIVO</small><strong>{{ brand.get("brand_name", tenant.name) }} · Radar Comercial</strong><span>El PDF se genera con identidad visual, logo, período y responsable.</span></div></div>
+      <div class="report-brand-preview"><img src="{{ url_for('static', filename=brand.get('logo_file','puertas-brasil-logo-oficial.jpg')) }}" alt="Puertas Brasil"><div><small>INFORME EJECUTIVO</small><strong>{{ brand.get("brand_name", tenant.name) }} · Radar Industrial</strong><span>El PDF se genera con identidad visual, logo, período y responsable.</span></div></div>
       <div class="report-kpis" id="reportKpis"></div><div class="report-task-stats" id="reportTaskStats"></div>
       <article class="report-summary-card"><div><small>RESUMEN DEL PERÍODO</small><h3>Actividad comercial consolidada</h3></div><p id="reportSummary">Cargando actividad...</p></article>
       <div class="report-funnel" id="reportFunnel"></div>
@@ -97,7 +106,7 @@
     </section>
 
     <section class="crm-hub app-module" data-module="crm" id="crm">
-      <div class="crm-head"><div><p class="eyebrow">CENTRO DE OPERACIÓN COMERCIAL</p><h2><i class="bi bi-briefcase"></i> Caja CRM</h2><p>Todas las empresas clasificadas y oportunidades comerciales están reunidas aquí.</p></div><div class="crm-controls"><button id="importCommercialHistory" class="secondary-action" type="button"><i class="bi bi-file-earmark-spreadsheet"></i> Importar planilla / histórico</button><button id="autoEnrichCrm" class="secondary-action" type="button"><i class="bi bi-stars"></i> Completar CRM automáticamente</button><span id="crmEnrichProgress" class="crm-enrich-progress"></span><select id="crmStatusFilter"><option value="ALL">Todos los estados</option><option value="NOVO">Nuevo</option><option value="QUALIFICADO">Calificado</option><option value="CONTATO_REALIZADO">Contacto realizado</option><option value="RESPONDEU">Respondió</option><option value="VISITA">Visita</option><option value="ORCAMENTO">Presupuesto</option><option value="NEGOCIACAO">Negociación</option><option value="GANHO">Ganado</option><option value="MONITORAMENTO">Seguimiento</option></select><span id="crmCount">{{ leads|length }} empresas</span></div></div>
+      <div class="crm-head"><div><p class="eyebrow">CENTRO DE OPERACIÓN COMERCIAL</p><h2><i class="bi bi-briefcase"></i> Caja CRM</h2><p>Todas las empresas clasificadas y oportunidades comerciales están reunidas aquí.</p></div><div class="crm-controls"><button id="importCommercialHistory" class="secondary-action" type="button"><i class="bi bi-file-earmark-spreadsheet"></i> Importar planilla / histórico</button><button id="autoEnrichCrm" class="secondary-action" type="button"><i class="bi bi-stars"></i> Completar CRM automáticamente</button><span id="crmEnrichProgress" class="crm-enrich-progress"></span><select id="crmStatusFilter"><option value="ALL">Todos los estados</option><option value="NOVO">Nuevo</option><option value="QUALIFICADO">Calificado</option><option value="CONTATO_REALIZADO">Contacto realizado</option><option value="RESPONDEU">Respondió</option><option value="DIAGNOSTICO">Diagnóstico</option><option value="VISITA">Visita</option><option value="ORCAMENTO">Presupuesto</option><option value="NEGOCIACAO">Negociación</option><option value="GANHO">Ganado</option><option value="MONITORAMENTO">Seguimiento</option></select><span id="crmCount">{{ leads|length }} empresas</span></div></div>
       <div class="crm-grid" id="crmGrid"></div>
     </section>
 
@@ -143,8 +152,20 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
     </section>
 
     {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}
+    {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}
+    <section class="app-module management-hub" data-module="dataquality" id="dataquality">
+      <div class="section-head"><div><p class="eyebrow">GOBERNANZA DEL CRM</p><h2><i class="bi bi-heart-pulse"></i> Calidad de datos</h2><p>Detecta registros incompletos, cuentas sin contacto, oportunidades sin próxima acción y posibles duplicados.</p></div><button class="primary" id="refreshDataQuality"><i class="bi bi-arrow-clockwise"></i> Analizar base</button></div>
+      <div class="quality-metrics" id="qualityMetrics"><article><small>EMPRESAS</small><b>—</b></article><article><small>INCOMPLETAS</small><b>—</b></article><article><small>SIN CONTACTO</small><b>—</b></article><article><small>SIN PRÓXIMA ACCIÓN</small><b>—</b></article><article><small>POSIBLES DUPLICADOS</small><b>—</b></article></div>
+      <div class="quality-grid"><article><h3>Prioridades de corrección</h3><div id="qualityIssues">Cargando…</div></article><article><h3>Posibles duplicados</h3><div id="qualityDuplicates">Cargando…</div></article></div>
+    </section>
+    <section class="app-module management-hub" data-module="auditlog" id="auditlog">
+      <div class="section-head"><div><p class="eyebrow">TRAZABILIDAD</p><h2><i class="bi bi-clock-history"></i> Auditoría de cambios</h2><p>Quién cambió qué y cuándo dentro de la operación actual.</p></div><button class="primary" id="refreshAuditLog"><i class="bi bi-arrow-clockwise"></i> Actualizar</button></div>
+      <div class="audit-list" id="auditLogList">Cargando…</div>
+    </section>
+    {% endif %}
+
     <section class="app-module admin-hub" data-module="admin" id="admin">
-      <div class="section-head"><div><p class="eyebrow">ADMINISTRACIÓN GENERAL</p><h2>Usuarios y accesos</h2><p>Controle quién puede entrar al Radar Comercial y qué nivel de acceso tiene cada persona.</p></div><button class="primary" id="openCreateUser"><i class="bi bi-person-plus"></i> Nuevo usuario</button></div>
+      <div class="section-head"><div><p class="eyebrow">ADMINISTRACIÓN GENERAL</p><h2>Usuarios y accesos</h2><p>Controle quién puede entrar al Radar Industrial y qué nivel de acceso tiene cada persona.</p></div><button class="primary" id="openCreateUser"><i class="bi bi-person-plus"></i> Nuevo usuario</button></div>
       <div class="admin-summary"><article><small>USUARIOS ACTIVOS</small><b id="adminActiveUsers">—</b></article><article><small>ADMINISTRADORES</small><b id="adminAdmins">—</b></article><article><small>ÚLTIMO ACCESO</small><b id="adminLastLogin">—</b></article></div>
       <div class="admin-user-list" id="adminUserList"><p>Cargando usuarios...</p></div>
       <dialog id="createUserDialog" class="activity-dialog"><form id="createUserForm"><div class="modal-head"><div><p class="eyebrow">NUEVO ACCESO</p><h2>Crear usuario</h2><p>El administrador define el acceso inicial.</p></div><button type="button" id="closeCreateUser">×</button></div><div class="form-grid"><label>Nombre completo<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option value="SALES">Comercial</option><option value="MANAGER">Gerente</option><option value="VIEWER">Solo consulta</option><option value="ADMIN">Administrador</option></select></label><label>Contraseña inicial<input name="password" type="password" minlength="10" required></label></div><button class="primary submit">Crear acceso</button><p id="createUserMessage"></p></form></dialog>
@@ -181,7 +202,7 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
       <div class="drawer-message-unified"><label>DESTINATARIO<select id="drawerMessageContact"><option value="">Equipo / contacto general</option></select></label><div class="drawer-recipient-row"><input id="drawerMessageRecipient" readonly placeholder="Contacto no encontrado"><button type="button" id="copyDrawerRecipient" title="Copiar destinatario"><i class="bi bi-copy"></i></button></div></div>
       <div class="channels"><button class="active" data-channel="whatsapp"><i class="bi bi-whatsapp"></i><span>WhatsApp</span></button><button data-channel="email"><i class="bi bi-envelope"></i><span>Correo</span></button><button data-channel="call"><i class="bi bi-telephone"></i><span>Llamada</span></button><button data-channel="linkedin"><i class="bi bi-linkedin"></i><span>LinkedIn</span></button></div>
       <label class="drawer-message-subject" id="drawerMessageSubjectWrap" hidden>ASUNTO<input id="drawerMessageSubject" readonly></label><textarea id="approach" readonly></textarea><div class="contact-actions"><button class="copy" id="copyApproach"><i class="bi bi-copy"></i> Copiar</button><button class="primary" id="openChannel"><i class="bi bi-whatsapp"></i> Enviar por WhatsApp</button><button class="secondary-action" id="confirmChannelSent" type="button" hidden><i class="bi bi-check2-circle"></i> Registrar como enviado</button></div>
-      <label class="crm">ESTADO EN EL CRM<select id="status"><option value="NOVO">NUEVO</option><option value="QUALIFICADO">CALIFICADO</option><option value="CONTATO_REALIZADO">CONTACTO REALIZADO</option><option value="RESPONDEU">RESPONDIÓ</option><option>VISITA</option><option value="ORCAMENTO">PRESUPUESTO</option><option value="NEGOCIACAO">NEGOCIACIÓN</option><option value="GANHO">GANADO</option><option value="PERDIDO">PERDIDO</option><option value="MONITORAMENTO">SEGUIMIENTO</option><option value="DESCARTADO">DESCARTADO</option></select></label>
+      <label class="crm">ESTADO EN EL CRM<select id="status"><option value="NOVO">NUEVO</option><option value="QUALIFICADO">CALIFICADO</option><option value="CONTATO_REALIZADO">CONTACTO REALIZADO</option><option value="RESPONDEU">RESPONDIÓ</option><option value="DIAGNOSTICO">DIAGNÓSTICO</option><option>VISITA</option><option value="ORCAMENTO">PRESUPUESTO</option><option value="NEGOCIACAO">NEGOCIACIÓN</option><option value="GANHO">GANADO</option><option value="PERDIDO">PERDIDO</option><option value="MONITORAMENTO">SEGUIMIENTO</option><option value="DESCARTADO">DESCARTADO</option></select></label>
       <div class="follow-up"><label><input id="contactVerified" type="checkbox"> Contacto responsable validado</label><label>PRÓXIMO SEGUIMIENTO<input id="followUpDate" type="date"></label><button id="scheduleFollowUp"><i class="bi bi-calendar-check"></i> Programar seguimiento</button></div>
       <div class="commercial-result"><p>RESULTADO DEL CONTACTO</p><div><select id="commercialOutcome"><option value="">Registrar resultado...</option><option value="RESPONDED">Respondió</option><option value="NO_RESPONSE">No respondió</option><option value="WRONG_CONTACT">Contacto incorrecto</option><option value="FUTURE_PROJECT">Proyecto futuro</option><option value="QUOTE_SENT">Presupuesto enviado</option><option value="POSTPONED">Postergado</option><option value="WON">Ganado</option><option value="LOST">Perdido</option><option value="NO_FIT">Sin afinidad</option></select><select id="lostReason"><option value="">Motivo de pérdida...</option><option value="PRICE">Precio</option><option value="TIMING">Momento de compra</option><option value="COMPETITOR">Competidor</option><option value="NO_BUDGET">Sin presupuesto</option><option value="ALREADY_BOUGHT">Ya compró</option><option value="PROJECT_CANCELLED">Proyecto cancelado</option><option value="NO_NEED">No necesita</option></select><button id="saveOutcome">Guardar</button></div></div><div class="deal-data"><label>RESPONSABLE<input id="dealOwner" value="Equipo comercial"></label><label>VALOR ESTIMADO (USD)<input id="dealValue" type="number" min="0"></label><label>PROBABILIDAD (%)<input id="dealProbability" type="number" min="0" max="100"></label><button id="saveDealData"><i class="bi bi-floppy"></i> Guardar datos comerciales</button></div>
       <div class="execution-actions"><button id="registerVisit"><i class="bi bi-clipboard2-check"></i> Registrar visita</button><button id="createProposal"><i class="bi bi-file-earmark-pdf"></i> Crear propuesta PDF</button></div>
@@ -246,10 +267,10 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <div class="toast" id="toast"></div>
 <script>window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260821-v15.6"></script>
-<script src="{{ url_for('static', filename='workspace.js') }}?v=20260821-v15.7"></script>
-<script src="{{ url_for('static', filename='dossier.js') }}?v=20260821-v15.4.1"></script>
-{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260821-v15.4.1"></script>{% endif %}
-<script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260821-v15.4.1"></script>
-<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260821-v15.4.1"></script></body>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260824-v16.0"></script>
+<script src="{{ url_for('static', filename='workspace.js') }}?v=20260824-v16.0"></script>
+<script src="{{ url_for('static', filename='dossier.js') }}?v=20260824-v16.0"></script>
+{% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260824-v16.0"></script>{% endif %}
+<script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260824-v16.0"></script>
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=16.0"></script></body>
 </html>

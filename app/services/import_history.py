@@ -44,6 +44,7 @@ STATUS_MAP = {
     "novo": "NOVO", "nuevo": "NOVO",
     "qualificado": "QUALIFICADO", "calificado": "QUALIFICADO", "qualified": "QUALIFICADO",
     "contato realizado": "CONTATO_REALIZADO", "contacto realizado": "CONTATO_REALIZADO", "contactado": "CONTATO_REALIZADO", "contacted": "CONTATO_REALIZADO",
+    "diagnostico": "DIAGNOSTICO", "diagnóstico": "DIAGNOSTICO", "diagnosis": "DIAGNOSTICO",
     "respondeu": "RESPONDEU", "respondio": "RESPONDEU", "respondió": "RESPONDEU", "resposta": "RESPONDEU", "reply": "RESPONDEU",
     "visita": "VISITA", "visita marcada": "VISITA", "visita agendada": "VISITA", "reuniao": "VISITA", "reunião": "VISITA", "reunion": "VISITA", "reunión": "VISITA",
     "orcamento": "ORCAMENTO", "orçamento": "ORCAMENTO", "presupuesto": "ORCAMENTO", "proposta": "ORCAMENTO", "propuesta": "ORCAMENTO",
@@ -53,7 +54,7 @@ STATUS_MAP = {
     "monitoramento": "MONITORAMENTO", "seguimiento": "MONITORAMENTO", "follow up": "MONITORAMENTO", "follow-up": "MONITORAMENTO",
     "descartado": "DESCARTADO", "descartada": "DESCARTADO",
 }
-STATUS_RANK = {"NOVO": 0, "QUALIFICADO": 1, "CONTATO_REALIZADO": 2, "RESPONDEU": 3, "VISITA": 4, "ORCAMENTO": 5, "NEGOCIACAO": 6, "GANHO": 7}
+STATUS_RANK = {"NOVO": 0, "QUALIFICADO": 1, "CONTATO_REALIZADO": 2, "RESPONDEU": 3, "DIAGNOSTICO": 4, "VISITA": 5, "ORCAMENTO": 6, "NEGOCIACAO": 7, "GANHO": 8}
 
 ACTIVITY_MAP = {
     "email": "EMAIL_SENT", "e-mail": "EMAIL_SENT", "correo": "EMAIL_SENT", "correio": "EMAIL_SENT",

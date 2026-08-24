@@ -4,7 +4,7 @@
   const moduleTitles = {
     triage:"Calificar por sitio", research:"Cola de investigación", salesready:"Listo para ventas", hoy:"Mi día",
     crm:"CRM", pipeline:"Embudo comercial", visitas:"Visitas", radar:"Radar comercial", captacion:"Captación automática",
-    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", reportes:"Reportes comerciales", metrics:"Rendimiento"
+    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", reportes:"Reportes comerciales", metrics:"Rendimiento", dataquality:"Calidad de datos", auditlog:"Auditoría"
   };
   let workspaceData = null;
   const bulkSelection = new Set();
@@ -22,6 +22,8 @@
     if (name === "reportes") loadReports();
     if (name === "hoy" && typeof loadToday === "function") loadToday();
     if (name === "radar" && typeof loadCommandCenter === "function") loadCommandCenter();
+    if (name === "dataquality") loadDataQuality();
+    if (name === "auditlog") loadAuditLog();
   }
 
   document.querySelectorAll("[data-module-target]").forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); openModule(link.dataset.moduleTarget); }));
@@ -217,6 +219,41 @@
   let importPreviewData = null;
 
   function closeImportHistory(){ $("importHistoryDialog")?.close(); }
+
+  let companySearchTimer=null;
+  function companyResultHtml(row){
+    const meta=[row.legalName&&row.legalName!==row.name?row.legalName:null,row.ruc?`RUC/CNPJ ${row.ruc}`:null,row.city,row.sector].filter(Boolean).join(" · ");
+    return `<button type="button" class="global-company-result" data-company-id="${esc(row.id)}" data-company-name="${esc(row.name)}"><span><strong>${esc(row.name)}</strong><small>${esc(meta||row.domain||'Ficha empresarial')}</small></span><em>${esc(row.status||'CRM')}</em></button>`;
+  }
+  async function searchCompaniesGlobal(){
+    const input=$("globalCompanySearch"),box=$("globalCompanyResults"); if(!input||!box)return;
+    const q=input.value.trim(); if(q.length<2){box.hidden=true;box.innerHTML='';return;}
+    try{const r=await fetch(`/api/companies/global-search?q=${encodeURIComponent(q)}`);const d=await r.json();if(!r.ok)throw new Error();const rows=d.items||[];box.innerHTML=rows.map(companyResultHtml).join('')||'<div class="global-company-empty">No se encontró ninguna empresa en esta operación.</div>';box.hidden=false;}
+    catch(_){box.innerHTML='<div class="global-company-empty">No se pudo buscar ahora.</div>';box.hidden=false;}
+  }
+  $("globalCompanySearch")?.addEventListener("input",()=>{clearTimeout(companySearchTimer);companySearchTimer=setTimeout(searchCompaniesGlobal,180);});
+  $("globalCompanySearch")?.addEventListener("keydown",e=>{if(e.key==='Escape'){e.currentTarget.value='';$("globalCompanyResults").hidden=true;}});
+  $("globalCompanyResults")?.addEventListener("click",e=>{const b=e.target.closest('[data-company-id]');if(!b)return;$("globalCompanyResults").hidden=true;if(typeof window.openCompanyDossier==='function')window.openCompanyDossier({companyId:Number(b.dataset.companyId),company:b.dataset.companyName},'summary');});
+  document.addEventListener('click',e=>{if(!e.target.closest('.global-company-search')&&$("globalCompanyResults"))$("globalCompanyResults").hidden=true;});
+
+  async function loadDataQuality(){
+    const metrics=$("qualityMetrics"),issues=$("qualityIssues"),dups=$("qualityDuplicates"); if(!metrics)return;
+    try{const r=await fetch('/api/data-quality');const d=await r.json();if(!r.ok)throw new Error();const x=d.summary||{};const vals=[x.companies||0,x.incomplete||0,x.withoutContact||0,x.withoutNextAction||0,x.duplicateCandidates||0];metrics.querySelectorAll('article b').forEach((el,i)=>el.textContent=vals[i]);
+      const priority=[...(d.withoutNextAction||[]).map(x=>({...x,kind:'Sin próxima acción'})),...(d.withoutContact||[]).map(x=>({...x,kind:'Sin contacto'})),...(d.incomplete||[]).map(x=>({...x,kind:`Datos ${x.completeness}%`}))].slice(0,40);
+      issues.innerHTML=priority.map(x=>`<button class="quality-row" data-quality-company="${x.id}" data-name="${esc(x.name)}"><span><strong>${esc(x.name)}</strong><small>${esc(x.kind)}</small></span><i class="bi bi-arrow-right"></i></button>`).join('')||'<p class="quality-ok"><i class="bi bi-check-circle"></i> Sin alertas prioritarias.</p>';
+      dups.innerHTML=(d.duplicates||[]).map(x=>`<div class="duplicate-row"><strong>${esc(x.keyType)} · ${esc(x.key)}</strong><span>${x.companies.map(c=>esc(c.name)).join(' ↔ ')}</span><small>Revisión manual recomendada antes de consolidar.</small></div>`).join('')||'<p class="quality-ok"><i class="bi bi-check-circle"></i> Sin duplicados fuertes detectados.</p>';
+    }catch(_){issues.innerHTML='No se pudo analizar la base.';dups.innerHTML='—';}
+  }
+  $("refreshDataQuality")?.addEventListener('click',loadDataQuality);
+  $("qualityIssues")?.addEventListener('click',e=>{const b=e.target.closest('[data-quality-company]');if(b&&typeof window.openCompanyDossier==='function')window.openCompanyDossier({companyId:Number(b.dataset.qualityCompany),company:b.dataset.name},'summary');});
+
+  async function loadAuditLog(){
+    const box=$("auditLogList"); if(!box)return;
+    try{const r=await fetch('/api/audit-log?limit=150');const d=await r.json();if(!r.ok)throw new Error();box.innerHTML=(d.items||[]).map(x=>`<article class="audit-row"><time>${x.createdAt?new Date(x.createdAt).toLocaleString('es-PY'):'—'}</time><div><strong>${esc(x.user)} · ${esc(x.action)}</strong><span>${esc(x.entityType)} #${esc(x.entityId||'—')}</span></div><small>${esc(Object.keys(x.details||{}).slice(0,4).join(', ')||'Cambio registrado')}</small></article>`).join('')||'<p>No hay cambios registrados.</p>';}
+    catch(_){box.innerHTML='<p>No se pudo cargar la auditoría.</p>';}
+  }
+  $("refreshAuditLog")?.addEventListener('click',loadAuditLog);
+
   $("importCommercialHistory")?.addEventListener("click",()=>{
     importPreviewData=null;
     if($("importHistoryMapping")) $("importHistoryMapping").hidden=true;

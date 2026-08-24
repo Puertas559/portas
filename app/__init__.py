@@ -71,7 +71,7 @@ def create_app(test_config=None):
     def enforce_authentication():
         if not app.config["AUTH_REQUIRED"]:
             return None
-        if request.endpoint in {"auth.login_page", "auth.login_form", "auth.login_api", "auth.auth_session", "auth.setup_page", "auth.setup_submit", "api.health", "health", "static"}:
+        if request.endpoint in {"auth.login_page", "auth.login_form", "auth.login_api", "auth.auth_session", "auth.setup_page", "auth.setup_submit", "api.health", "health", "static", "web.service_worker"}:
             return None
         from .tenant import current_user
         if current_user():

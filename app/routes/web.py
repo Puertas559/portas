@@ -1,9 +1,18 @@
-from flask import Blueprint, render_template, redirect, session, url_for, abort
+from flask import Blueprint, render_template, redirect, session, url_for, abort, current_app
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import CollectorRun, Opportunity, ProspectSignal, WebsiteAnalysis, Company, Tenant
 from ..tenant import current_tenant, current_user, ensure_group_operations, seed_products
 
 web_bp = Blueprint("web", __name__)
+
+
+@web_bp.get("/service-worker.js")
+def service_worker():
+    response = current_app.send_static_file("service-worker.js")
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 DEMO = [
     {"id": 1, "company": "Logística Guaraní S.A.", "sector": "Logística", "origin": "Paraguay", "city": "Minga Guazú", "department": "Alto Paraná", "event": "NEW_LOGISTICS_CENTER", "project": "Nuevo centro logístico de 12.000 m²", "score": 94, "level": "HOT", "status": "NOVO", "products": ["Puerta seccional", "Puerta rápida", "Automatización"], "evidence": "Un comunicado empresarial informa el inicio de las obras de un nuevo centro logístico.", "stage": "Obra iniciada", "investment": "USD 8,5 millones", "demo": True},
