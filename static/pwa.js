@@ -3,6 +3,9 @@
   const root = document.documentElement;
   const body = document.body;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const mobileQuery = window.matchMedia('(max-width: 820px), (hover: none) and (pointer: coarse)');
+  const isMobileUI = () => mobileQuery.matches || Math.min(screen.width || 9999, screen.height || 9999) <= 820;
+  root.classList.toggle('pwa-touch-mobile', isMobileUI());
   root.classList.toggle('pwa-standalone', isStandalone);
 
   if ('serviceWorker' in navigator) {
@@ -17,6 +20,9 @@
   window.addEventListener('online', syncOnlineState);
   window.addEventListener('offline', syncOnlineState);
   syncOnlineState();
+  const syncMobileUI = () => root.classList.toggle('pwa-touch-mobile', isMobileUI());
+  window.addEventListener('resize', syncMobileUI, { passive: true });
+  window.addEventListener('orientationchange', syncMobileUI);
 
   const sidebar = document.querySelector('.sidebar');
   let menuButton = null;
@@ -35,7 +41,7 @@
     menuButton.addEventListener('click', () => body.classList.toggle('pwa-nav-open'));
     backdrop.addEventListener('click', closeNav);
     sidebar.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => {
-      if (window.innerWidth <= 820) closeNav();
+      if (isMobileUI()) closeNav();
     }));
   }
 
@@ -82,7 +88,7 @@
     if (body.classList.contains('pwa-search-open')) setTimeout(() => input?.focus(), 40);
   });
   document.addEventListener('click', (event) => {
-    if (window.innerWidth > 820 || !body.classList.contains('pwa-search-open')) return;
+    if (!isMobileUI() || !body.classList.contains('pwa-search-open')) return;
     if (event.target.closest('.global-company-search') || event.target.closest('[data-pwa-action="search"]')) return;
     body.classList.remove('pwa-search-open');
   });
