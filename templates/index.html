@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Radar Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=16.0">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=16.0">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260824-v16.3">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260824-v16.3">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,7 +19,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260824-v16.0">
-<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=16.2-mobile-force">
+<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260824-v16.3">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
@@ -271,5 +271,5 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260824-v16.0"></script>
 {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260824-v16.0"></script>{% endif %}
 <script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260824-v16.0"></script>
-<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=16.2-mobile-force"></script></body>
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=20260824-v16.3"></script></body>
 </html>

@@ -7,10 +7,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Radar HG">
   <meta name="format-detection" content="telephone=no">
-  <link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=16.2-mobile-force">
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-<link rel="stylesheet" href="{{ url_for('static', filename='group.css') }}?v=15.3"></head>
+<link rel="stylesheet" href="{{ url_for('static', filename='group.css') }}?v=15.3">
+<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260824-v16.3"></head>
 <body><div class="shell"><header><img src="{{ url_for('static', filename='hg-group-logo.png') }}" alt="HG Grupo"><div><small>SISTEMA CENTRAL</small><h1>Radar Industrial HG Grupo</h1><p>Duas operações ativas. Um mesmo motor. Dados totalmente isolados.</p></div><div class="user"><b>{{ user.name }}</b><span>Direção · HG Grupo</span><form method="post" action="{{ url_for('auth.logout_form') }}"><button><i class="bi bi-box-arrow-right"></i> Sair</button></form></div></header>
 <section class="hero"><div><small>VISÃO DO GRUPO</small><h2>Selecione a operação</h2><p>Usuários de cada marca entram diretamente em sua própria interface. Esta visão é exclusiva da administração do grupo.</p></div><span class="badge"><i class="bi bi-shield-lock"></i> HG GROUP ADMIN</span></section>
 <main class="grid">
@@ -18,4 +18,4 @@
 <article class="card premium"><div class="premium-logo-live premium-wordmark-only"><div class="premium-name"><strong>PREMIUM</strong><span>PORTAS E PORTÕES</span></div></div><div class="flag"><i class="bi bi-globe-americas"></i> Brasil · PT</div><h3>{{ premium.name }}</h3><p>{{ premium.description }}</p><div class="institutional"><span>Empresa do HG Grupo</span><strong><i class="bi bi-clock-history"></i> Radar ainda não ativado</strong></div><a class="secondary" href="{{ premium.website }}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Abrir site oficial</a></article>
 </main>
 <section class="isolation"><h2><i class="bi bi-shield-check"></i> Isolamento operacional</h2><div><span><i class="bi bi-check-circle"></i> Clientes separados</span><span><i class="bi bi-check-circle"></i> Contatos separados</span><span><i class="bi bi-check-circle"></i> Relatórios separados</span><span><i class="bi bi-check-circle"></i> Usuários separados</span><span><i class="bi bi-check-circle"></i> Branding próprio</span><span><i class="bi bi-check-circle"></i> Mesmo motor de evolução</span></div></section>
-<footer>HG Grupo · Radar Industrial · Inteligência, estratégia e resultados.</footer></div><script src="{{ url_for('static', filename='pwa.js') }}?v=16.2-mobile-force"></script></body></html>
+<footer>HG Grupo · Radar Industrial · Inteligência, estratégia e resultados.</footer></div><script src="{{ url_for('static', filename='pwa.js') }}?v=20260824-v16.3"></script></body></html>
