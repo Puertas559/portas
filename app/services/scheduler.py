@@ -36,7 +36,9 @@ def _release_database_lease():
 
 def start_scheduler(app):
     global _scheduler_started
-    if os.getenv("COLLECTOR_ENABLED", "false").lower() not in {"1", "true", "yes", "on"}:
+    collector_enabled = os.getenv("COLLECTOR_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    hub_enabled = os.getenv("HUB_EVENTS_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    if not collector_enabled and not hub_enabled:
         return
     with _scheduler_lock:
         if _scheduler_started:
@@ -46,6 +48,8 @@ def start_scheduler(app):
     # Five-minute polling creates noise for industrial projects. Default is now 60 minutes;
     # a separate process/cron can call /api/collector/run or run_collector for production scheduling.
     interval = max(15, int(os.getenv("COLLECTOR_INTERVAL_MINUTES", "60")))
+    hub_interval_hours = max(1, int(os.getenv("HUB_EVENTS_INTERVAL_HOURS", "12")))
+    last_hub_scan = [None]
 
     def loop():
         time.sleep(20)
@@ -60,8 +64,14 @@ def start_scheduler(app):
                         running = CollectorRun.query.filter_by(status="RUNNING").filter(
                             CollectorRun.started_at > datetime.now(timezone.utc) - timedelta(minutes=max(interval, 30))
                         ).first()
-                        if due and not running:
+                        if collector_enabled and due and not running:
                             run_collector()
+                        if hub_enabled:
+                            hub_due = not last_hub_scan[0] or last_hub_scan[0] < datetime.now(timezone.utc) - timedelta(hours=hub_interval_hours)
+                            if hub_due:
+                                from .hub_events import run_hub_event_scan
+                                run_hub_event_scan()
+                                last_hub_scan[0] = datetime.now(timezone.utc)
             except Exception:
                 app.logger.exception("Error en el programador de captación automática")
             finally:

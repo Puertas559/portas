@@ -684,3 +684,133 @@ class WebsiteAnalysis(db.Model):
             "diagnostics": self.diagnostics or {},
             "enrichment": (self.diagnostics or {}).get("enrichment") or {},
         }
+
+
+class HubEventSource(db.Model):
+    __tablename__ = "hub_event_sources"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(220), nullable=False)
+    url = db.Column(db.String(1200), nullable=False)
+    country = db.Column(db.String(80))
+    source_type = db.Column(db.String(50), nullable=False, default="OFFICIAL")
+    priority = db.Column(db.String(10), nullable=False, default="B")
+    status = db.Column(db.String(30), nullable=False, default="ACTIVE", index=True)
+    last_checked_at = db.Column(db.DateTime(timezone=True))
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    __table_args__ = (db.UniqueConstraint("tenant_id", "url", name="uq_hub_source_url"),)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "url": self.url, "country": self.country,
+                "sourceType": self.source_type, "priority": self.priority, "status": self.status,
+                "lastCheckedAt": self.last_checked_at.isoformat() if self.last_checked_at else None,
+                "lastError": self.last_error}
+
+
+class HubEvent(db.Model):
+    __tablename__ = "hub_events"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = db.Column(db.Integer, db.ForeignKey("hub_event_sources.id", ondelete="SET NULL"), index=True)
+    name = db.Column(db.String(320), nullable=False, index=True)
+    normalized_key = db.Column(db.String(500), nullable=False, index=True)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    city = db.Column(db.String(160))
+    country = db.Column(db.String(80), nullable=False, default="Paraguay")
+    organizer = db.Column(db.String(260))
+    url = db.Column(db.String(1200))
+    event_type = db.Column(db.String(80))
+    sectors = db.Column(db.JSON, nullable=False, default=list)
+    description = db.Column(db.Text)
+    source_mode = db.Column(db.String(30), nullable=False, default="MANUAL", index=True)
+    status = db.Column(db.String(30), nullable=False, default="DETECTED", index=True)
+    confidence = db.Column(db.Integer, nullable=False, default=50)
+    commercial_score = db.Column(db.Integer, nullable=False, default=0)
+    economic_score = db.Column(db.Integer, nullable=False, default=0)
+    strategic_score = db.Column(db.Integer, nullable=False, default=0)
+    total_score = db.Column(db.Integer, nullable=False, default=0, index=True)
+    score_details = db.Column(db.JSON, nullable=False, default=dict)
+    cost_estimate = db.Column(db.Numeric(18,2), nullable=False, default=0)
+    currency = db.Column(db.String(3), nullable=False, default="USD")
+    participation_mode = db.Column(db.String(40))
+    projection = db.Column(db.JSON, nullable=False, default=dict)
+    actual_results = db.Column(db.JSON, nullable=False, default=dict)
+    notes = db.Column(db.Text)
+    approved_at = db.Column(db.DateTime(timezone=True))
+    closed_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    source = db.relationship("HubEventSource")
+    accounts = db.relationship("HubEventAccount", back_populates="event", cascade="all, delete-orphan")
+    actions = db.relationship("HubEventAction", back_populates="event", cascade="all, delete-orphan")
+    __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_key", name="uq_hub_event_key"),)
+
+    def to_dict(self, include_children=False):
+        data = {"id": self.id, "name": self.name, "startDate": self.start_date.isoformat() if self.start_date else None,
+                "endDate": self.end_date.isoformat() if self.end_date else None, "city": self.city, "country": self.country,
+                "organizer": self.organizer, "url": self.url, "eventType": self.event_type, "sectors": self.sectors or [],
+                "description": self.description, "sourceMode": self.source_mode, "status": self.status,
+                "confidence": self.confidence, "commercialScore": self.commercial_score, "economicScore": self.economic_score,
+                "strategicScore": self.strategic_score, "totalScore": self.total_score, "scoreDetails": self.score_details or {},
+                "costEstimate": float(self.cost_estimate or 0), "currency": self.currency,
+                "participationMode": self.participation_mode, "projection": self.projection or {},
+                "actualResults": self.actual_results or {}, "notes": self.notes,
+                "source": self.source.to_dict() if self.source else None}
+        if include_children:
+            data["accounts"] = [x.to_dict() for x in self.accounts]
+            data["actions"] = [x.to_dict() for x in sorted(self.actions, key=lambda a: (a.due_at or utcnow()))]
+        return data
+
+
+class HubEventAccount(db.Model):
+    __tablename__ = "hub_event_accounts"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("hub_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="SET NULL"), index=True)
+    company_name = db.Column(db.String(280), nullable=False, index=True)
+    website = db.Column(db.String(1200))
+    role = db.Column(db.String(80), nullable=False, default="PARTICIPANT")
+    tier = db.Column(db.String(10), nullable=False, default="C", index=True)
+    icp_score = db.Column(db.Integer, nullable=False, default=0)
+    contact_name = db.Column(db.String(220))
+    contact_role = db.Column(db.String(180))
+    email = db.Column(db.String(320))
+    whatsapp = db.Column(db.String(120))
+    hypothesis = db.Column(db.Text)
+    conversation_result = db.Column(db.String(80))
+    next_action = db.Column(db.String(400))
+    next_action_at = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(30), nullable=False, default="MAPPED", index=True)
+    sent_to_radar_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    event = db.relationship("HubEvent", back_populates="accounts")
+    company = db.relationship("Company")
+
+    def to_dict(self):
+        return {"id": self.id, "eventId": self.event_id, "companyId": self.company_id, "companyName": self.company_name,
+                "website": self.website, "role": self.role, "tier": self.tier, "icpScore": self.icp_score,
+                "contactName": self.contact_name, "contactRole": self.contact_role, "email": self.email, "whatsapp": self.whatsapp,
+                "hypothesis": self.hypothesis, "conversationResult": self.conversation_result,
+                "nextAction": self.next_action, "nextActionAt": self.next_action_at.isoformat() if self.next_action_at else None,
+                "status": self.status, "sentToRadarAt": self.sent_to_radar_at.isoformat() if self.sent_to_radar_at else None}
+
+
+class HubEventAction(db.Model):
+    __tablename__ = "hub_event_actions"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("hub_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    phase = db.Column(db.String(20), nullable=False, index=True)
+    title = db.Column(db.String(400), nullable=False)
+    due_at = db.Column(db.DateTime(timezone=True), index=True)
+    owner_name = db.Column(db.String(180), nullable=False, default="Equipe HUB")
+    status = db.Column(db.String(30), nullable=False, default="PENDING", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    event = db.relationship("HubEvent", back_populates="actions")
+
+    def to_dict(self):
+        return {"id": self.id, "phase": self.phase, "title": self.title,
+                "dueAt": self.due_at.isoformat() if self.due_at else None, "ownerName": self.owner_name, "status": self.status}

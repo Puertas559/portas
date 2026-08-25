@@ -63,9 +63,11 @@ def create_app(test_config=None):
     from .routes.api import api_bp
     from .routes.auth import auth_bp
     from .routes.web import web_bp
+    from .routes.hub import hub_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(hub_bp)
 
     @app.before_request
     def enforce_authentication():
@@ -98,6 +100,13 @@ def create_app(test_config=None):
         from .services.collector import run_collector
         run = run_collector()
         click.echo(f"Captación finalizada: {run.items_scanned} elementos, {run.signals_created} señales nuevas")
+
+    @app.cli.command("scan-hub-events")
+    def scan_hub_events_command():
+        """Busca eventos nas fontes HUB ativas e envia candidatos à triagem."""
+        from .services.hub_events import run_hub_event_scan
+        stats = run_hub_event_scan()
+        click.echo(f"HUB Eventos: {stats['sources']} fontes, {stats['found']} links, {stats['created']} novos candidatos")
 
     @app.cli.command("bootstrap-tenant")
     def bootstrap_tenant_command():

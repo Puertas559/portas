@@ -43,6 +43,7 @@
       <p>3 · INTELIGENCIA</p>
       <a href="#commandCenter" data-module-target="radar"><i class="bi bi-activity"></i><span>Radar</span></a>
       <a href="#captacion" data-module-target="captacion"><i class="bi bi-database-add"></i><span>Captación</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a>
+      {% if tenant.slug == "puertas-brasil-py" %}<a href="{{ url_for('hub.home') }}"><i class="bi bi-calendar2-event"></i><span>HUB Eventos</span></a>{% endif %}
       <a href="#prioridades" data-module-target="oportunidades"><i class="bi bi-bullseye"></i><span>Oportunidades</span></a>
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
