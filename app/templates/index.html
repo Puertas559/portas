@@ -5,15 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Radar Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=16.0">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=16.0">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260824-v16.3">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260824-v16.3">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Radar HG">
   <meta name="format-detection" content="telephone=no">
-  <link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=16.0">
-
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260824-v16.0">
   <link rel="stylesheet" href="{{ url_for('static', filename='capture.css') }}?v=20260824-v16.0">
@@ -21,6 +19,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260824-v16.0">
+<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260824-v16.3">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
@@ -43,7 +42,7 @@
       <p>3 · INTELIGENCIA</p>
       <a href="#commandCenter" data-module-target="radar"><i class="bi bi-activity"></i><span>Radar</span></a>
       <a href="#captacion" data-module-target="captacion"><i class="bi bi-database-add"></i><span>Captación</span>{% if prospect_total %}<b>{{ prospect_total }}</b>{% endif %}</a>
-      {% if tenant.slug == "puertas-brasil-py" %}<a href="{{ url_for('hub.home') }}"><i class="bi bi-calendar2-event"></i><span>HUB Eventos</span></a>{% endif %}
+      {% if tenant.slug == "puertas-brasil-py" %}<a class="hub-events-nav" href="{{ url_for('hub.home') }}"><i class="bi bi-calendar2-event"></i><span>HUB Eventos</span><b>NOVO</b></a>{% endif %}
       <a href="#prioridades" data-module-target="oportunidades"><i class="bi bi-bullseye"></i><span>Oportunidades</span></a>
       <a href="#smartlists" data-module-target="smartlists"><i class="bi bi-funnel"></i><span>Listas inteligentes</span></a>
       <a href="#metrics" data-module-target="metrics"><i class="bi bi-bar-chart-line"></i><span>Rendimiento</span></a>
@@ -57,7 +56,7 @@
 
     <header class="topbar workspace-topbar">
       <div><small>{{ brand.get("brand_name", tenant.name)|upper }} · {{ "CENTRO DE TRABALHO COMERCIAL" if brand.get("language") == "pt-BR" else "CENTRO DE TRABAJO COMERCIAL" }}</small><strong id="workspaceModuleTitle">{{ "Qualificar por site" if brand.get("language") == "pt-BR" else "Calificar por sitio" }}</strong></div>
-      <div class="workspace-top-actions"><div class="global-company-search"><i class="bi bi-search"></i><input id="globalCompanySearch" autocomplete="off" placeholder="Buscar empresa…" aria-label="Buscar empresa"><div id="globalCompanyResults" class="global-company-results" hidden></div></div><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px"><i class="bi bi-arrow-left"></i> HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
+      <div class="workspace-top-actions">{% if tenant.slug == "puertas-brasil-py" %}<a class="hub-events-top" href="{{ url_for('hub.home') }}"><i class="bi bi-calendar2-event"></i><span>HUB Eventos</span></a>{% endif %}<div class="global-company-search"><i class="bi bi-search"></i><input id="globalCompanySearch" autocomplete="off" placeholder="Buscar empresa…" aria-label="Buscar empresa"><div id="globalCompanyResults" class="global-company-results" hidden></div></div><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px"><i class="bi bi-arrow-left"></i> HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
     </header>
 
     <section class="today-hub app-module" data-module="hoy" id="hoy">
@@ -273,5 +272,5 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260824-v16.0"></script>
 {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260824-v16.0"></script>{% endif %}
 <script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260824-v16.0"></script>
-<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=16.0"></script></body>
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=20260824-v16.3"></script></body>
 </html>

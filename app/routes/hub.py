@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, session, url_for
 from ..extensions import db
-from ..models import HubEvent, HubEventAccount, HubEventAction, HubEventSource
+from ..models import HubEvent, HubEventAccount, HubEventAction, HubEventSource, Tenant
 from ..services.entity_resolution import normalize_domain, normalize_name, resolve_company
 from ..services.hub_events import build_playbook, create_detected_event, event_key, extract_page, scan_source
 from ..tenant import current_tenant, current_user, require_permission
@@ -16,6 +16,41 @@ def _allowed():
 
 def _event_or_404(event_id):
     tenant=current_tenant(); return HubEvent.query.filter_by(id=event_id, tenant_id=tenant.id).first_or_404()
+
+
+
+
+@hub_bp.get('/enter')
+def enter():
+    user = current_user()
+    if not user:
+        abort(403)
+    if user.role == 'GROUP_ADMIN':
+        tenant = Tenant.query.filter_by(slug='puertas-brasil-py', status='ACTIVE').first_or_404()
+        session['active_tenant_id'] = tenant.id
+        return redirect(url_for('hub.home'))
+    if user.tenant and user.tenant.slug == 'puertas-brasil-py':
+        return redirect(url_for('hub.home'))
+    abort(403)
+
+
+@hub_bp.get('/health')
+def health():
+    if not _allowed():
+        abort(404)
+    try:
+        tenant = current_tenant()
+        return jsonify(
+            ok=True,
+            module='hub-events',
+            tenant=tenant.slug,
+            events=HubEvent.query.filter_by(tenant_id=tenant.id).count(),
+            sources=HubEventSource.query.filter_by(tenant_id=tenant.id).count(),
+            message='HUB Eventos ativo e tabelas acessíveis',
+        )
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify(ok=False, module='hub-events', error=str(exc)), 500
 
 
 @hub_bp.get('/')
