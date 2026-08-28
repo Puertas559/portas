@@ -37,6 +37,31 @@ SECTOR_TERMS = {
     "Investimentos": ("inversion", "investimento", "investment", "maquila", "implant", "expansion", "expansão"),
 }
 
+
+NAVIGATION_REJECT = {
+    "ir al calendario", "ver calendario", "calendario", "agenda", "registrate a nuestros eventos",
+    "registre-se", "inscreva-se", "saiba mais", "leer mas", "ver mais", "mais informacoes",
+    "comision de damas", "comissão de damas", "inicio", "home", "noticias", "eventos"
+}
+SOCIAL_HOSTS = ("facebook.com", "instagram.com", "linkedin.com", "youtube.com", "x.com", "twitter.com", "wa.me", "whatsapp.com")
+
+def _plausible_company_name(value):
+    name = re.sub(r"\s+", " ", html.unescape(str(value or ""))).strip(" -|•\n\t")
+    folded = _fold(name)
+    if len(name) < 3 or len(name) > 120 or folded in NAVIGATION_REJECT:
+        return False
+    bad = ("clique", "click", "saiba mais", "leer mas", "ver mais", "inscrev", "registr", "download", "menu", "contato")
+    return not any(x in folded for x in bad)
+
+def _looks_like_event(info):
+    name = _fold(info.get("name"))
+    if not name or name in NAVIGATION_REJECT:
+        return False
+    structured = bool(info.get("structuredEvent"))
+    has_date = bool(info.get("startDate"))
+    title_event = any(_fold(k) in name for k in KEYWORDS)
+    return structured or has_date or title_event
+
 def _fold(value):
     value = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"\s+", " ", value).strip().casefold()
@@ -51,7 +76,7 @@ def fetch_html(url, timeout=15):
     with urlopen(req, timeout=timeout) as response:
         ctype = response.headers.get("Content-Type", "")
         if "html" not in ctype.lower() and "xml" not in ctype.lower():
-            raise ValueError("La fuente no devuelve HTML/XML")
+            raise ValueError("A fonte não devolveu HTML/XML")
         return response.read(2_000_000).decode(response.headers.get_content_charset() or "utf-8", errors="replace")
 
 
@@ -208,7 +233,7 @@ def extract_page(url):
     info = {"name": title, "url": url, "description": desc, "raw": raw, "text": text[:20000],
             "startDate": start, "endDate": end, "city": city, "country": country,
             "organizer": organizer, "eventType": event_type, "sectors": sectors,
-            "accounts": _extract_accounts(jsonlds, raw, url)}
+            "accounts": _extract_accounts(jsonlds, raw, url), "structuredEvent": bool(event_objs)}
     return info
 
 
@@ -356,17 +381,14 @@ def scan_source(source, limit=40):
             # A própria página pode ser um evento.
             info = extract_page(page_url)
             hay = _fold(f"{info['name']} {info['description']} {page_text}")
-            has_event_word = any(k in hay for k in KEYWORDS)
-            has_date = bool(info.get("startDate"))
-            if has_event_word and (has_date or len(info.get("sectors") or []) >= 1):
+            if _looks_like_event(info):
                 candidates.append((page_url, info))
             # E pode apontar para eventos.
             for url, label, link_hay in _candidate_links(raw, page_url):
                 if any(k in link_hay for k in KEYWORDS):
                     try:
                         child = extract_page(url)
-                        chay = _fold(f"{child['name']} {child['description']}")
-                        if any(k in chay for k in KEYWORDS) and (child.get("startDate") or len(child.get("sectors") or []) >= 1):
+                        if _looks_like_event(child):
                             candidates.append((url, child))
                     except Exception:
                         continue
@@ -385,6 +407,121 @@ def scan_source(source, limit=40):
     source.last_checked_at = datetime.now(timezone.utc); source.last_error = None if unique else "Nenhum candidato de evento encontrado nesta varredura."
     return unique[:limit], diagnostics
 
+
+
+def extract_company_candidates_from_url(url, limit=120):
+    """Extrai possíveis empresas de uma página de expositores/participantes sem criar CRM."""
+    raw = fetch_html(url, timeout=15)
+    base_host = urlparse(url).netloc.casefold()
+    found, seen = [], set()
+
+    def add(name, website=None, role="PARTICIPANT"):
+        if not _plausible_company_name(name):
+            return
+        name = re.sub(r"\s+", " ", html.unescape(str(name))).strip()
+        website = (website or "").strip() or None
+        key = (normalize_name(name), normalize_domain(website) if website else "")
+        if key in seen:
+            return
+        seen.add(key)
+        found.append({"companyName": name[:220], "website": website, "role": role})
+
+    for obj in _jsonld(raw):
+        if not isinstance(obj, dict):
+            continue
+        typ = str(obj.get("@type", "")).casefold()
+        if any(x in typ for x in ("organization", "corporation", "localbusiness")):
+            add(obj.get("name"), obj.get("url"), "PARTICIPANT")
+
+    for m in re.finditer(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', raw, re.I | re.S):
+        href, inner = m.group(1), m.group(2)
+        absolute = urljoin(url, href).split("#")[0]
+        parsed = urlparse(absolute)
+        if parsed.scheme not in {"http", "https"}:
+            continue
+        label = re.sub(r"<[^>]+>", " ", html.unescape(inner))
+        label = re.sub(r"\s+", " ", label).strip()
+        if not label:
+            alt = re.search(r'alt=["\']([^"\']+)["\']', inner, re.I)
+            title = re.search(r'title=["\']([^"\']+)["\']', inner, re.I)
+            label = (alt.group(1) if alt else (title.group(1) if title else "")).strip()
+        host = parsed.netloc.casefold()
+        if any(sh in host for sh in SOCIAL_HOSTS):
+            continue
+        hay = _fold(label + " " + absolute)
+        role = "EXHIBITOR" if any(x in hay for x in ("expositor", "exhibitor", "stand")) else ("SPONSOR" if any(x in hay for x in ("sponsor", "patrocin")) else "PARTICIPANT")
+        if host != base_host or any(x in hay for x in ("expositor", "exhibitor", "empresa", "participante", "sponsor", "patrocin")):
+            add(label, absolute, role)
+        if len(found) >= limit:
+            break
+    return found[:limit]
+
+def parse_company_text(text, limit=250):
+    """Aceita linhas Nome;Site, Nome<TAB>Site, Nome,Site ou somente Nome."""
+    rows, seen = [], set()
+    for raw_line in str(text or "").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in re.split(r"\t|;|,(?=\s*(?:https?://|www\.))", line, maxsplit=1)]
+        name = parts[0]
+        website = parts[1] if len(parts) > 1 else None
+        if not _plausible_company_name(name):
+            continue
+        key = (normalize_name(name), normalize_domain(website) if website else "")
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"companyName": name[:220], "website": website, "role": "PARTICIPANT"})
+        if len(rows) >= limit:
+            break
+    return rows
+
+def analyze_event_account(account, max_pages=3):
+    """Usa o analisador industrial existente do Radar, mantendo a conta dentro do HUB."""
+    if not account.website:
+        return {"ok": False, "reason": "Empresa sem site para análise automática."}
+    try:
+        from .site_analyzer import analyze_website
+        analysis = analyze_website(account.website, max_pages=max_pages, use_sitemap=False, request_timeout=7, status="HUB_QUICK")
+        score = int(analysis.potential_score or 0)
+        account.icp_score = score
+        account.tier = "A" if score >= 75 else ("B" if score >= 50 else "C")
+        account.status = "ANALYZED"
+        emails = analysis.emails or []
+        if emails and not account.email:
+            account.email = emails[0]
+        if analysis.whatsapp and not account.whatsapp:
+            account.whatsapp = str(analysis.whatsapp)[:120]
+        contacts = analysis.contacts or []
+        if contacts and not account.contact_name:
+            first = contacts[0]
+            if isinstance(first, dict):
+                account.contact_name = (first.get("name") or first.get("fullName") or "")[:220] or None
+                account.contact_role = (first.get("role") or first.get("title") or "")[:180] or None
+            elif isinstance(first, str):
+                account.contact_name = first[:220]
+        products = analysis.products or []
+        reasons = analysis.reasons or []
+        sector = analysis.sector or "Setor a validar"
+        pieces = [f"Setor: {sector}"]
+        if products:
+            pieces.append("Aplicações prováveis: " + ", ".join(products[:5]))
+        if reasons:
+            pieces.append("Evidências: " + " | ".join(reasons[:3]))
+        account.hypothesis = " · ".join(pieces)[:2000]
+        try:
+            from ..models import Company
+            domain = normalize_domain(account.website)
+            q = Company.query.filter_by(tenant_id=account.tenant_id, status="ACTIVE")
+            company = q.filter_by(domain=domain).first() if domain else q.filter_by(normalized_name=normalize_name(account.company_name)).first()
+            account.company_id = company.id if company else account.company_id
+        except Exception:
+            pass
+        return {"ok": True, "score": score, "tier": account.tier, "products": products[:5], "sector": sector}
+    except Exception as exc:
+        account.status = "ANALYSIS_ERROR"
+        return {"ok": False, "reason": str(exc)[:300]}
 
 def create_detected_event(tenant_id, name, url=None, source=None, source_mode="AUTOMATIC", **fields):
     key = event_key(name, fields.get("start_date"), fields.get("city"), fields.get("organizer"))
@@ -417,12 +554,15 @@ def build_playbook(event, owner_name="Equipe HUB"):
 def run_hub_event_scan(tenant_id=None):
     query = HubEventSource.query.filter_by(status="ACTIVE")
     if tenant_id: query = query.filter_by(tenant_id=tenant_id)
-    stats = {"sources":0,"found":0,"created":0,"updated":0,"errors":[],"diagnostics":[]}
+    stats = {"sources":0,"found":0,"created":0,"updated":0,"ignoredPast":0,"errors":[],"diagnostics":[]}
     for source in query.all():
         stats["sources"] += 1
         try:
             rows, diag = scan_source(source); stats["diagnostics"].append(diag); stats["found"] += len(rows)
             for url, info in rows:
+                if info.get("startDate") and info["startDate"] < date.today() - timedelta(days=1):
+                    stats["ignoredPast"] += 1
+                    continue
                 event, created = create_detected_event(source.tenant_id, info["name"], url=url, source=source, source_mode="AUTOMATIC",
                                                        start_date=info.get("startDate"), city=info.get("city"), organizer=info.get("organizer"),
                                                        country=info.get("country") or source.country, event_type=info.get("eventType"),
