@@ -690,6 +690,7 @@ class HubEventSource(db.Model):
     __tablename__ = "hub_event_sources"
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_code = db.Column(db.String(2), nullable=False, default="PY", index=True)
     name = db.Column(db.String(220), nullable=False)
     url = db.Column(db.String(1200), nullable=False)
     country = db.Column(db.String(80))
@@ -699,10 +700,10 @@ class HubEventSource(db.Model):
     last_checked_at = db.Column(db.DateTime(timezone=True))
     last_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
-    __table_args__ = (db.UniqueConstraint("tenant_id", "url", name="uq_hub_source_url"),)
+    __table_args__ = (db.UniqueConstraint("tenant_id", "market_code", "url", name="uq_hub_source_market_url"),)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "url": self.url, "country": self.country,
+        return {"id": self.id, "marketCode": self.market_code, "name": self.name, "url": self.url, "country": self.country,
                 "sourceType": self.source_type, "priority": self.priority, "status": self.status,
                 "lastCheckedAt": self.last_checked_at.isoformat() if self.last_checked_at else None,
                 "lastError": self.last_error}
@@ -712,6 +713,7 @@ class HubEvent(db.Model):
     __tablename__ = "hub_events"
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_code = db.Column(db.String(2), nullable=False, default="PY", index=True)
     source_id = db.Column(db.Integer, db.ForeignKey("hub_event_sources.id", ondelete="SET NULL"), index=True)
     name = db.Column(db.String(320), nullable=False, index=True)
     normalized_key = db.Column(db.String(500), nullable=False, index=True)
@@ -745,10 +747,10 @@ class HubEvent(db.Model):
     source = db.relationship("HubEventSource")
     accounts = db.relationship("HubEventAccount", back_populates="event", cascade="all, delete-orphan")
     actions = db.relationship("HubEventAction", back_populates="event", cascade="all, delete-orphan")
-    __table_args__ = (db.UniqueConstraint("tenant_id", "normalized_key", name="uq_hub_event_key"),)
+    __table_args__ = (db.UniqueConstraint("tenant_id", "market_code", "normalized_key", name="uq_hub_event_market_key"),)
 
     def to_dict(self, include_children=False):
-        data = {"id": self.id, "name": self.name, "startDate": self.start_date.isoformat() if self.start_date else None,
+        data = {"id": self.id, "marketCode": self.market_code, "name": self.name, "startDate": self.start_date.isoformat() if self.start_date else None,
                 "endDate": self.end_date.isoformat() if self.end_date else None, "city": self.city, "country": self.country,
                 "organizer": self.organizer, "url": self.url, "eventType": self.event_type, "sectors": self.sectors or [],
                 "description": self.description, "sourceMode": self.source_mode, "status": self.status,
@@ -768,6 +770,7 @@ class HubEventAccount(db.Model):
     __tablename__ = "hub_event_accounts"
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_code = db.Column(db.String(2), nullable=False, default="PY", index=True)
     event_id = db.Column(db.Integer, db.ForeignKey("hub_events.id", ondelete="CASCADE"), nullable=False, index=True)
     company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="SET NULL"), index=True)
     company_name = db.Column(db.String(280), nullable=False, index=True)
@@ -790,7 +793,7 @@ class HubEventAccount(db.Model):
     company = db.relationship("Company")
 
     def to_dict(self):
-        return {"id": self.id, "eventId": self.event_id, "companyId": self.company_id, "companyName": self.company_name,
+        return {"id": self.id, "marketCode": self.market_code, "eventId": self.event_id, "companyId": self.company_id, "companyName": self.company_name,
                 "website": self.website, "role": self.role, "tier": self.tier, "icpScore": self.icp_score,
                 "contactName": self.contact_name, "contactRole": self.contact_role, "email": self.email, "whatsapp": self.whatsapp,
                 "hypothesis": self.hypothesis, "conversationResult": self.conversation_result,
@@ -802,6 +805,7 @@ class HubEventAction(db.Model):
     __tablename__ = "hub_event_actions"
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_code = db.Column(db.String(2), nullable=False, default="PY", index=True)
     event_id = db.Column(db.Integer, db.ForeignKey("hub_events.id", ondelete="CASCADE"), nullable=False, index=True)
     phase = db.Column(db.String(20), nullable=False, index=True)
     title = db.Column(db.String(400), nullable=False)
@@ -812,5 +816,5 @@ class HubEventAction(db.Model):
     event = db.relationship("HubEvent", back_populates="actions")
 
     def to_dict(self):
-        return {"id": self.id, "phase": self.phase, "title": self.title,
+        return {"id": self.id, "marketCode": self.market_code, "phase": self.phase, "title": self.title,
                 "dueAt": self.due_at.isoformat() if self.due_at else None, "ownerName": self.owner_name, "status": self.status}

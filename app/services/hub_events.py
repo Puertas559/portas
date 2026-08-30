@@ -27,6 +27,8 @@ CITY_HINTS = [
     "Ciudad del Este", "Asunción", "Asuncion", "Hernandarias", "Presidente Franco", "Minga Guazú", "Minga Guazu",
     "Santa Rita", "Encarnación", "Encarnacion", "Caaguazú", "Caaguazu", "Luque", "San Lorenzo", "Limpio",
     "São Paulo", "Sao Paulo", "Foz do Iguaçu", "Foz do Iguacu", "Curitiba", "Cascavel", "Goiânia", "Goiania",
+    "Buenos Aires", "Córdoba", "Cordoba", "Rosario", "Mendoza", "Posadas", "Puerto Iguazú", "Puerto Iguazu",
+    "Santa Fe", "Resistencia", "Corrientes", "Mar del Plata", "Neuquén", "Neuquen", "Salta", "Tucumán", "Tucuman",
 ]
 SECTOR_TERMS = {
     "Indústria": ("industria", "industrial", "manufactura", "manufacturing"),
@@ -160,7 +162,7 @@ def _extract_location(obj, text):
             break
     if not country:
         ft = _fold(text)
-        country = "Paraguay" if "paraguay" in ft else ("Brasil" if "brasil" in ft or "brazil" in ft else None)
+        country = "Paraguay" if "paraguay" in ft else ("Argentina" if "argentina" in ft else ("Brasil" if "brasil" in ft or "brazil" in ft else None))
     return city, country
 
 
@@ -197,7 +199,7 @@ def _extract_accounts(jsonlds, raw, base_url):
     return found[:80]
 
 
-def extract_page(url):
+def extract_page(url, market_code=None):
     raw = fetch_html(url)
     text = _clean_text(raw)
     jsonlds = _jsonld(raw)
@@ -221,6 +223,8 @@ def extract_page(url):
         start, parsed_end = _parse_dates(combined)
         end = end or parsed_end
     city, country = _extract_location(obj, combined)
+    if market_code == "PY": country = "Paraguay"
+    elif market_code == "AR": country = "Argentina"
     organizer = _org_name(obj.get("organizer")) if isinstance(obj, dict) else None
     sectors = [name for name, terms in SECTOR_TERMS.items() if any(_fold(t) in _fold(combined) for t in terms)]
     event_type = "EVENT"
@@ -319,13 +323,15 @@ def apply_automatic_intelligence(event, info, create_accounts=True):
         for item in info.get("accounts") or []:
             name = (item.get("companyName") or "").strip()
             if not name: continue
-            existing = HubEventAccount.query.filter_by(tenant_id=event.tenant_id, event_id=event.id, company_name=name).first()
+            existing = HubEventAccount.query.filter_by(tenant_id=event.tenant_id, market_code=event.market_code, event_id=event.id, company_name=name).first()
             if existing: continue
             website = item.get("website")
-            acc = HubEventAccount(tenant_id=event.tenant_id, event_id=event.id, company_name=name, website=website,
+            acc = HubEventAccount(tenant_id=event.tenant_id, market_code=event.market_code, event_id=event.id, company_name=name, website=website,
                                   role=item.get("role") or "PARTICIPANT", tier="B" if values["icp"] >= 75 else "C",
                                   icp_score=values["icp"], hypothesis="Conta identificada automaticamente na página do evento; revisar antes de prospecção.")
             try:
+                if event.market_code != "PY":
+                    raise LookupError("CRM regional não ativado")
                 from ..models import Company
                 domain = normalize_domain(website)
                 q = Company.query.filter_by(tenant_id=event.tenant_id, status="ACTIVE")
@@ -379,7 +385,7 @@ def scan_source(source, limit=40):
             raw = fetch_html(page_url, timeout=10); diagnostics["pagesChecked"] += 1
             page_text = _clean_text(raw)[:25000]
             # A própria página pode ser um evento.
-            info = extract_page(page_url)
+            info = extract_page(page_url, market_code=source.market_code)
             hay = _fold(f"{info['name']} {info['description']} {page_text}")
             if _looks_like_event(info):
                 candidates.append((page_url, info))
@@ -387,7 +393,7 @@ def scan_source(source, limit=40):
             for url, label, link_hay in _candidate_links(raw, page_url):
                 if any(k in link_hay for k in KEYWORDS):
                     try:
-                        child = extract_page(url)
+                        child = extract_page(url, market_code=source.market_code)
                         if _looks_like_event(child):
                             candidates.append((url, child))
                     except Exception:
@@ -511,6 +517,8 @@ def analyze_event_account(account, max_pages=3):
             pieces.append("Evidências: " + " | ".join(reasons[:3]))
         account.hypothesis = " · ".join(pieces)[:2000]
         try:
+            if account.market_code != "PY":
+                raise LookupError("CRM regional não ativado")
             from ..models import Company
             domain = normalize_domain(account.website)
             q = Company.query.filter_by(tenant_id=account.tenant_id, status="ACTIVE")
@@ -523,18 +531,18 @@ def analyze_event_account(account, max_pages=3):
         account.status = "ANALYSIS_ERROR"
         return {"ok": False, "reason": str(exc)[:300]}
 
-def create_detected_event(tenant_id, name, url=None, source=None, source_mode="AUTOMATIC", **fields):
+def create_detected_event(tenant_id, market_code, name, url=None, source=None, source_mode="AUTOMATIC", **fields):
     key = event_key(name, fields.get("start_date"), fields.get("city"), fields.get("organizer"))
-    existing = HubEvent.query.filter_by(tenant_id=tenant_id, url=url).first() if url else None
-    existing = existing or HubEvent.query.filter_by(tenant_id=tenant_id, normalized_key=key).first()
+    existing = HubEvent.query.filter_by(tenant_id=tenant_id, market_code=market_code, url=url).first() if url else None
+    existing = existing or HubEvent.query.filter_by(tenant_id=tenant_id, market_code=market_code, normalized_key=key).first()
     if not existing:
         # Compatibilidade com eventos antigos criados antes do enriquecimento (sem data/cidade).
-        existing = HubEvent.query.filter_by(tenant_id=tenant_id).filter(db.func.lower(HubEvent.name) == str(name).lower()).first()
+        existing = HubEvent.query.filter_by(tenant_id=tenant_id, market_code=market_code).filter(db.func.lower(HubEvent.name) == str(name).lower()).first()
     if existing:
         if url and not existing.url: existing.url = url
         return existing, False
-    row = HubEvent(tenant_id=tenant_id, source_id=source.id if source else None, name=name[:320], normalized_key=key,
-                   url=url, source_mode=source_mode, status="DETECTED", country=fields.get("country") or (source.country if source else "Paraguay"),
+    row = HubEvent(tenant_id=tenant_id, market_code=market_code, source_id=source.id if source else None, name=name[:320], normalized_key=key,
+                   url=url, source_mode=source_mode, status="DETECTED", country=fields.get("country") or (source.country if source else ("Argentina" if market_code == "AR" else "Paraguay")),
                    city=fields.get("city"), organizer=fields.get("organizer"), event_type=fields.get("event_type"),
                    description=fields.get("description"), confidence=fields.get("confidence", 55))
     db.session.add(row); db.session.flush()
@@ -547,13 +555,14 @@ def build_playbook(event, owner_name="Equipe HUB"):
     plan = [(-30,"T-30","Mapear organizador, participantes, expositores e 20–50 contas potenciais"),(-21,"T-21","Classificar contas Tier A/B/C e iniciar contato com Tier A"),(-14,"T-14","Mapear decisores, hipóteses de necessidade e agendar reuniões"),(-7,"T-7","Preparar briefing por conta, materiais e confirmar agenda"),(-1,"T-1","Confirmar logística, reuniões, responsáveis e metas"),(0,"DIA D","Executar agenda e registrar resultado + próximo passo de cada conversa"),(1,"D+1","Fazer follow-up personalizado de contas Tier A/B"),(3,"D+3","Converter interesses em reuniões, visitas ou oportunidades"),(7,"D+7","Revisar pipeline originado/influenciado pelo evento"),(30,"D+30","Fechar ROI, aprendizados e decisão sobre próxima edição")]
     for offset, phase, title in plan:
         due_date = event.start_date + timedelta(days=offset)
-        db.session.add(HubEventAction(tenant_id=event.tenant_id,event_id=event.id,phase=phase,title=title,due_at=datetime.combine(due_date,time(9,0),tzinfo=timezone.utc),owner_name=owner_name))
+        db.session.add(HubEventAction(tenant_id=event.tenant_id,market_code=event.market_code,event_id=event.id,phase=phase,title=title,due_at=datetime.combine(due_date,time(9,0),tzinfo=timezone.utc),owner_name=owner_name))
     return len(plan)
 
 
-def run_hub_event_scan(tenant_id=None):
+def run_hub_event_scan(tenant_id=None, market_code=None):
     query = HubEventSource.query.filter_by(status="ACTIVE")
     if tenant_id: query = query.filter_by(tenant_id=tenant_id)
+    if market_code: query = query.filter_by(market_code=market_code)
     stats = {"sources":0,"found":0,"created":0,"updated":0,"ignoredPast":0,"errors":[],"diagnostics":[]}
     for source in query.all():
         stats["sources"] += 1
@@ -563,7 +572,7 @@ def run_hub_event_scan(tenant_id=None):
                 if info.get("startDate") and info["startDate"] < date.today() - timedelta(days=1):
                     stats["ignoredPast"] += 1
                     continue
-                event, created = create_detected_event(source.tenant_id, info["name"], url=url, source=source, source_mode="AUTOMATIC",
+                event, created = create_detected_event(source.tenant_id, source.market_code, info["name"], url=url, source=source, source_mode="AUTOMATIC",
                                                        start_date=info.get("startDate"), city=info.get("city"), organizer=info.get("organizer"),
                                                        country=info.get("country") or source.country, event_type=info.get("eventType"),
                                                        description=info.get("description"), confidence=70)
