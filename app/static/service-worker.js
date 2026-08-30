@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'hg-radar-industrial-v16-3';
+const CACHE_VERSION = 'hg-radar-industrial-v16-4-production';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const STATIC_ASSETS = [
   '/static/pwa.css',

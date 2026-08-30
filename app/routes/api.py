@@ -429,6 +429,7 @@ def company_search_add():
     data = request.get_json(silent=True) or {}
     if not data.get("company"):
         return jsonify(error="Falta el nombre de la empresa"), 400
+    tenant = current_tenant()
     payload = dict(data)
     payload.update({
         "project": data.get("project") or "Empresa identificada por búsqueda geográfica",
@@ -766,6 +767,7 @@ def signal_discard(signal_id):
 
 
 @api_bp.post("/website-analysis")
+@require_permission("WRITE_CRM")
 def website_analysis_create():
     data = request.get_json(silent=True) or {}
     if not data.get("url"):
@@ -807,6 +809,7 @@ def website_analysis_create():
 
 
 @api_bp.post("/website-analysis/<int:analysis_id>/deep")
+@require_permission("WRITE_CRM")
 def website_analysis_deep(analysis_id):
     tenant = current_tenant()
     analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
@@ -828,6 +831,7 @@ def website_analysis_deep(analysis_id):
 
 
 @api_bp.post("/website-analysis/alternatives")
+@require_permission("WRITE_CRM")
 def website_analysis_alternatives():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
@@ -839,6 +843,7 @@ def website_analysis_alternatives():
 
 
 @api_bp.post("/website-analysis/bulk")
+@require_permission("WRITE_CRM")
 def website_analysis_bulk():
     data = request.get_json(silent=True) or {}
     raw = data.get("urls") or []
@@ -968,6 +973,7 @@ def website_analysis_disqualify(analysis_id):
 
 
 @api_bp.post("/tasks/ensure")
+@require_permission("WRITE_CRM")
 def tasks_ensure():
     created = 0
     tenant = current_tenant()
@@ -1023,6 +1029,15 @@ def visit_create():
         extension = Path(secure_filename(uploaded.filename or "")).suffix.lower()
         if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
             continue
+        header = uploaded.stream.read(16)
+        uploaded.stream.seek(0)
+        valid_image = (
+            (extension in {".jpg", ".jpeg"} and header.startswith(b"\xff\xd8\xff"))
+            or (extension == ".png" and header.startswith(b"\x89PNG\r\n\x1a\n"))
+            or (extension == ".webp" and header.startswith(b"RIFF") and header[8:12] == b"WEBP")
+        )
+        if not valid_image:
+            continue
         filename = f"{uuid4().hex}{extension}"
         uploaded.save(upload_dir / filename)
         photos.append(filename)
@@ -1041,6 +1056,12 @@ def visit_create():
 
 @api_bp.get("/uploads/<path:filename>")
 def uploaded_file(filename):
+    tenant = current_tenant()
+    if secure_filename(filename) != filename:
+        return jsonify(error="Archivo no localizado"), 404
+    visits = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id).with_entities(VisitRecord.photos).all()
+    if not any(filename in (photos or []) for (photos,) in visits):
+        return jsonify(error="Archivo no localizado"), 404
     return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", filename)
 
 

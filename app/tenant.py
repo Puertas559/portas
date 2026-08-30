@@ -85,13 +85,14 @@ def bootstrap_tenant():
     # Si no existen usuarios todavía, el primer administrador puede crearse desde /setup.
     # Las variables ADMIN_* siguen siendo compatibles para un bootstrap automático.
     if email and password and not User.query.filter_by(tenant_id=tenant.id, normalized_email=email).first():
+        first_user = db.session.query(User.id).first() is None
         db.session.add(User(
             tenant_id=tenant.id,
             name=os.getenv("ADMIN_NAME", "Administrador"),
             email=email,
             normalized_email=email,
             password_hash=generate_password_hash(password),
-            role="ADMIN",
+            role="GROUP_ADMIN" if first_user else "ADMIN",
         ))
     db.session.commit()
     # Limpieza conservadora e idempotente: consolida solamente duplicados con
@@ -112,7 +113,12 @@ def current_user():
     if hasattr(g, "radar_user"):
         return g.radar_user
     user_id = session.get("user_id") if has_request_context() else None
-    g.radar_user = db.session.get(User, user_id) if user_id else None
+    user = db.session.get(User, user_id) if user_id else None
+    if user and (user.status != "ACTIVE" or not user.tenant or user.tenant.status != "ACTIVE"):
+        if has_request_context():
+            session.clear()
+        user = None
+    g.radar_user = user
     return g.radar_user
 
 

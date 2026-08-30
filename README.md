@@ -12,7 +12,7 @@ Esta es la primera implementación vertical de una plataforma genérica de Reven
 - Gunicorn en producción
 - `/data` para archivos persistentes
 - Captación automática mediante DNCP, MIC, agregadores y feeds configurables
-- Ejecución automática cada 5 minutos con filtro de necesidad concreta
+- Ejecución automática por operación cada 60 minutos con filtro de necesidad concreta
 - Calificación de sitios empresariales con contactos, dirección, responsables, tamaño y afinidad comercial
 - Docker y Railway
 
@@ -29,12 +29,23 @@ COLLECTOR_INTERVAL_MINUTES=60
 COLLECTOR_MIN_SCORE=60
 COLLECTOR_EXTRA_FEEDS=
 AUTH_REQUIRED=true
-ADMIN_EMAIL=
-ADMIN_PASSWORD=
-ADMIN_NAME=Administrador
+ADMIN_EMAIL=gerenciacomercial@puertasbrasil.com.py
+ADMIN_PASSWORD=defina-uma-senha-forte-com-12-ou-mais-caracteres
+ADMIN_NAME=David Granja
 DEFAULT_TENANT_NAME=Puertas Brasil PY
 DEFAULT_TENANT_SLUG=puertas-brasil-py
 SESSION_COOKIE_SECURE=true
+SESSION_LIFETIME_SECONDS=43200
+ALLOW_WEB_SETUP=false
+TRUST_PROXY=true
+HUB_EVENTS_ENABLED=true
+HUB_EVENTS_INTERVAL_HOURS=12
+BOOTSTRAP_ADMIN_COMPLETE=false
+LOGIN_RATE_LIMIT=10
+LOGIN_RATE_WINDOW_SECONDS=900
+GUNICORN_THREADS=4
+GUNICORN_TIMEOUT=120
+GUNICORN_MAX_REQUESTS=1000
 ```
 
 `COLLECTOR_EXTRA_FEEDS` acepta URLs RSS/Atom separadas por comas. Permite agregar cámaras de comercio, asociaciones, parques industriales, ferias y medios especializados sin modificar el código.
@@ -47,11 +58,23 @@ Conecte un volumen al servicio Flask en `/data`. PostgreSQL debe permanecer como
 
 1. Suba el contenido del paquete al repositorio.
 2. Haga commit y push en la rama conectada a Railway.
-3. Configure las variables indicadas.
-4. Confirme el volumen en `/data`.
-5. Use **Deploy Latest Commit**.
+3. Cree PostgreSQL y configure las variables de `.env.production.example` en Railway.
+4. Genere `SECRET_KEY` con `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
+5. Defina una contraseña inicial de al menos 12 caracteres en `ADMIN_PASSWORD`.
+6. Confirme el volumen persistente en `/data`.
+7. Use **Deploy Latest Commit** y espere que `/health` responda `status=ok`.
+8. Entre con `ADMIN_EMAIL`, confirme que el perfil es `GROUP_ADMIN`, cambie `BOOTSTRAP_ADMIN_COMPLETE=true` y elimine `ADMIN_PASSWORD` del ambiente.
 
-El contenedor ejecuta `flask db upgrade` y el bootstrap idempotente del tenant antes de iniciar Gunicorn.
+El contenedor valida el ambiente, ejecuta `flask db upgrade` y el bootstrap idempotente antes de iniciar Gunicorn. Una configuración insegura interrumpe el despliegue con un mensaje explícito, en vez de iniciar parcialmente.
+
+### Verificación antes de producción
+
+```bash
+python scripts/check_production_env.py
+python -m unittest -q
+```
+
+No publique `.env`, volcados del banco, archivos de sesión ni contraseñas. Mantenga `AUTH_REQUIRED=true`, `ALLOW_WEB_SETUP=false`, `SESSION_COOKIE_SECURE=true` y `TRUST_PROXY=true` en Railway.
 
 ## Rutas principales
 
@@ -90,7 +113,7 @@ Sin PostgreSQL local, la aplicación utiliza SQLite únicamente para desarrollo.
 
 ## Seguridad
 
-La plataforma usa autenticación por sesión, aislamiento por tenant y roles `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. `AUTH_REQUIRED=true` es el modo recomendado. Si no existe ningún usuario, el primer acceso redirige a `/setup` para crear el administrador general; después, nuevos usuarios se crean desde **Usuarios y accesos**. La aplicación genera y persiste una clave de sesión en `DATA_DIR` cuando `SECRET_KEY` no fue definida. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
+La plataforma usa autenticación por sesión, aislamiento por tenant y roles `GROUP_ADMIN`, `ADMIN`, `MANAGER`, `SALES` y `VIEWER`. En producción, el administrador inicial se crea mediante `ADMIN_*` y `/setup` permanece desactivado. El modo web de configuración queda disponible únicamente para desarrollo local mediante `ALLOW_WEB_SETUP=true`. La captación almacena evidencia empresarial pública y no realiza envíos comerciales automáticos.
 
 ## Sales Workspace V5
 

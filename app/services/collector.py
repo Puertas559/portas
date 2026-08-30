@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 from ..extensions import db
-from ..models import CollectorRun, ProspectSignal
+from ..models import CollectorRun, ProspectSignal, Tenant
 from ..tenant import current_tenant
 from .intelligence import estimate_deal_range, infer_buying_window, infer_lifecycle
 
@@ -279,8 +279,8 @@ def _is_older_than(value, cutoff):
     return value < cutoff
 
 
-def requalify_pending_signals():
-    tenant = current_tenant()
+def requalify_pending_signals(tenant=None):
+    tenant = tenant or current_tenant()
     cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_SIGNAL_AGE_DAYS)
     rows = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").all()
     for signal in rows:
@@ -301,12 +301,14 @@ def requalify_pending_signals():
         signal.why_now = result["why_now"]
 
 
-def run_collector():
-    tenant = current_tenant()
+def run_collector(tenant_id=None):
+    tenant = db.session.get(Tenant, tenant_id) if tenant_id is not None else current_tenant()
+    if not tenant or tenant.status != "ACTIVE":
+        raise ValueError("Operación inexistente o inactiva")
     run = CollectorRun(tenant_id=tenant.id)
     db.session.add(run)
     db.session.commit()
-    requalify_pending_signals()
+    requalify_pending_signals(tenant)
     errors, scanned, created, sources_scanned = [], 0, 0, 0
     batches = []
     for source in DEFAULT_FEEDS + _extra_feeds():

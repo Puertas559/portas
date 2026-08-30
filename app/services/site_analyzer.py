@@ -8,7 +8,7 @@ import ssl
 import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
 
 from ..extensions import db
@@ -268,10 +268,16 @@ def _normalize_url(value):
     if not value.startswith(("http://", "https://")):
         value = "https://" + value
     parsed = urlparse(value)
-    if not parsed.hostname or parsed.scheme not in {"http", "https"}:
+    if not parsed.hostname or parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
         raise SiteAnalysisError("INVALID_URL", "Dirección web no válida", "La dirección ingresada no tiene un dominio web válido.", "Corrija la dirección e intente nuevamente. Ejemplo: https://empresa.com.py", "INVALID_URL", {"requestedUrl": value, "stage": "validación de la dirección"}, status=400)
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or 443)}
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise SiteAnalysisError("INVALID_URL", "Dirección web no válida", "El puerto indicado no es válido.", "Utilice un sitio HTTP o HTTPS público.", status=400) from exc
+    if port not in {80, 443}:
+        raise SiteAnalysisError("PORT_NOT_ALLOWED", "Puerto no permitido", "El analizador solo puede acceder a sitios web públicos en los puertos 80 y 443.", "Utilice la dirección pública normal del sitio.", status=400)
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)}
     except socket.gaierror as exc:
         raise SiteAnalysisError("DNS_ERROR", "Dominio no localizado", "No fue posible localizar el dominio en Internet. Puede estar escrito incorrectamente, haber cambiado o estar fuera de servicio.", "Revise el dominio o utilice la búsqueda de sitios relacionados.", "DNS_ERROR", {"requestedUrl": value, "host": parsed.hostname, "stage": "resolución DNS"}, status=404) from exc
     for address in addresses:
@@ -281,17 +287,35 @@ def _normalize_url(value):
     return parsed._replace(fragment="").geturl()
 
 
+class _PublicRedirectHandler(HTTPRedirectHandler):
+    """Revalidate every redirect before urllib follows it."""
+
+    def __init__(self, max_redirects=5):
+        super().__init__()
+        self.redirects = 0
+        self.max_redirects = max_redirects
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.redirects += 1
+        if self.redirects > self.max_redirects:
+            raise SiteAnalysisError("TOO_MANY_REDIRECTS", "Demasiadas redirecciones", "El sitio superó el límite seguro de redirecciones.", "Utilice la dirección final del sitio.", status=422)
+        safe_url = _normalize_url(urljoin(req.full_url, newurl))
+        return super().redirect_request(req, fp, code, msg, headers, safe_url)
+
+
 def _fetch_resource(url, accepted=("html", "xml", "text"), timeout=20):
-    request = Request(url, headers={
+    safe_url = _normalize_url(url)
+    request = Request(safe_url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml,text/xml,text/plain;q=0.9,*/*;q=0.1",
     })
-    with urlopen(request, timeout=timeout) as response:
+    with build_opener(_PublicRedirectHandler()).open(request, timeout=timeout) as response:
+        final_url = _normalize_url(response.geturl())
         content_type = response.headers.get("Content-Type", "").lower()
         if accepted and not any(kind in content_type for kind in accepted):
             raise ValueError("El recurso no contiene contenido analizable")
         charset = response.headers.get_content_charset() or "utf-8"
-        return response.read(MAX_BYTES).decode(charset, errors="replace"), response.geturl(), content_type
+        return response.read(MAX_BYTES).decode(charset, errors="replace"), final_url, content_type
 
 
 def _fetch_page(url, timeout=20):

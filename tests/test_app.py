@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,12 +80,43 @@ class RadarTestCase(unittest.TestCase):
         self.assertEqual(timeline.status_code, 200)
         self.assertGreaterEqual(len(timeline.json), 2)
 
+    def test_visit_photo_is_limited_to_its_tenant(self):
+        opportunity = self.client.post("/api/opportunities", json={
+            "company": "Empresa Foto", "project": "Acceso industrial", "city": "Ciudad del Este",
+            "department": "Alto Paraná", "event": "NEW_PROJECT", "evidence": "Visita programada",
+        })
+        self.assertEqual(opportunity.status_code, 201)
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        visit = self.client.post("/api/visits", data={
+            "opportunityId": str(opportunity.json["id"]),
+            "photos": (io.BytesIO(png), "puerta.png"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(visit.status_code, 201)
+        self.assertEqual(len(visit.json["photos"]), 1)
+        photo_url = visit.json["photos"][0]
+        self.assertEqual(self.client.get(photo_url).status_code, 200)
+
+        with self.app.app_context():
+            other = Tenant(name="Tenant de fotos", slug="tenant-fotos", settings={})
+            db.session.add(other); db.session.flush()
+            db.session.add(User(
+                tenant_id=other.id, name="Usuario externo", email="foto@example.com",
+                normalized_email="foto@example.com", password_hash=generate_password_hash("safe-photo-password"),
+                role="ADMIN", status="ACTIVE",
+            ))
+            db.session.commit()
+        self.app.config["AUTH_REQUIRED"] = True
+        self.client.post("/api/auth/login", json={"email": "foto@example.com", "password": "safe-photo-password"})
+        self.assertEqual(self.client.get(photo_url).status_code, 404)
+
     def test_automatic_prospecting_scoring_and_approval(self):
-        score, level, event_type, products, reasons = analyze({
+        result = analyze({
             "company": "Industria Demo", "title": "Nueva fábrica y centro logístico en Alto Paraná",
             "summary": "Inversión industrial para ampliar la capacidad en Paraguay",
             "source": {"name": "Fuente oficial", "type": "OFFICIAL", "reliability": 95},
         })
+        score, level, event_type = result["score"], result["level"], result["event_type"]
+        products, reasons = result["products"], result["reasons"]
         self.assertGreaterEqual(score, 68)
         self.assertIn(level, {"HIGH", "HOT"})
         self.assertTrue(products)
@@ -112,7 +144,7 @@ class RadarTestCase(unittest.TestCase):
         <p>ventas@friodemo.com.py +595 981 123 456</p>
         <a href="https://wa.me/595981123456">WhatsApp</a>
         </body></html>"""
-        with patch("app.services.site_analyzer._normalize_url", return_value="https://friodemo.com.py"), patch("app.services.site_analyzer._fetch_page", return_value=(sample, "https://friodemo.com.py")):
+        with patch("app.services.site_analyzer._normalize_url", return_value="https://friodemo.com.py"), patch("app.services.site_analyzer._fetch_page", return_value=(sample, "https://friodemo.com.py", "text/html")):
             response = self.client.post("/api/website-analysis", json={"url": "friodemo.com.py"})
         self.assertEqual(response.status_code, 201)
         self.assertGreaterEqual(response.json["score"], 68)
@@ -270,6 +302,48 @@ class RadarTestCase(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(self.client.get("/api/opportunities").status_code, 200)
         self.assertEqual(self.client.post("/api/collector/run").status_code, 403)
+
+    def test_local_admin_is_not_promoted_to_group_admin(self):
+        with self.app.app_context():
+            db.session.add(User(
+                tenant_id=self.tenant_id, name="Administrador local", email="admin@example.com",
+                normalized_email="admin@example.com", password_hash=generate_password_hash("safe-admin-password"),
+                role="ADMIN", status="ACTIVE",
+            ))
+            db.session.commit()
+        self.app.config["AUTH_REQUIRED"] = True
+        login = self.client.post("/api/auth/login", json={"email": "admin@example.com", "password": "safe-admin-password"})
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json["role"], "ADMIN")
+        self.assertEqual(self.client.get("/group/operation/techdoors-br").status_code, 403)
+
+    def test_disabled_user_loses_existing_session(self):
+        with self.app.app_context():
+            user = User(
+                tenant_id=self.tenant_id, name="Usuario temporal", email="temp@example.com",
+                normalized_email="temp@example.com", password_hash=generate_password_hash("safe-temp-password"),
+                role="VIEWER", status="ACTIVE",
+            )
+            db.session.add(user); db.session.commit(); user_id = user.id
+        self.app.config["AUTH_REQUIRED"] = True
+        self.assertEqual(self.client.post("/api/auth/login", json={"email": "temp@example.com", "password": "safe-temp-password"}).status_code, 200)
+        with self.app.app_context():
+            db.session.get(User, user_id).status = "DISABLED"
+            db.session.commit()
+        self.assertEqual(self.client.get("/api/opportunities").status_code, 401)
+
+    def test_viewer_cannot_create_analysis_or_tasks(self):
+        with self.app.app_context():
+            db.session.add(User(
+                tenant_id=self.tenant_id, name="Consulta", email="viewer@example.com",
+                normalized_email="viewer@example.com", password_hash=generate_password_hash("safe-view-password"),
+                role="VIEWER", status="ACTIVE",
+            ))
+            db.session.commit()
+        self.app.config["AUTH_REQUIRED"] = True
+        self.client.post("/api/auth/login", json={"email": "viewer@example.com", "password": "safe-view-password"})
+        self.assertEqual(self.client.post("/api/website-analysis", json={"url": "example.com"}).status_code, 403)
+        self.assertEqual(self.client.post("/api/tasks/ensure").status_code, 403)
 
     def test_tenant_isolation(self):
         with self.app.app_context():
