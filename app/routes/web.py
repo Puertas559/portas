@@ -57,6 +57,18 @@ def switch_operation(slug):
     return redirect(url_for("web.index"))
 
 
+@web_bp.get("/academia-tecnica")
+def technical_sales():
+    tenant = current_tenant()
+    user = current_user()
+    return render_template(
+        "technical_sales.html",
+        tenant=tenant,
+        brand=tenant.settings or {},
+        user=user,
+    )
+
+
 @web_bp.get("/")
 def index():
     tenant = current_tenant()

@@ -1,8 +1,10 @@
-const CACHE_VERSION = 'hg-radar-industrial-v16-4-production';
+const CACHE_VERSION = 'hg-radar-industrial-v16-6-technical-sales-v2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const STATIC_ASSETS = [
   '/static/pwa.css',
   '/static/pwa.js',
+  '/static/technical-sales.css',
+  '/static/technical-sales.js',
   '/static/hg-group-logo.png',
   '/static/pwa-icon-192.png',
   '/static/pwa-icon-512.png',

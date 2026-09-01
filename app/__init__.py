@@ -67,10 +67,12 @@ def create_app(test_config=None):
     from .routes.auth import auth_bp
     from .routes.web import web_bp
     from .routes.hub import hub_bp
+    from .routes.technical_sales_api import technical_sales_api_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(hub_bp)
+    app.register_blueprint(technical_sales_api_bp)
 
     @app.before_request
     def enforce_authentication():

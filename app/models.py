@@ -564,6 +564,82 @@ class Proposal(db.Model):
     opportunity = db.relationship("Opportunity", back_populates="proposals")
 
 
+class TechnicalSurvey(db.Model):
+    __tablename__ = "technical_surveys"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id", ondelete="SET NULL"), index=True)
+    opportunity_id = db.Column(db.Integer, db.ForeignKey("opportunities.id", ondelete="SET NULL"), index=True)
+    reference = db.Column(db.String(80), nullable=False, index=True)
+    status = db.Column(db.String(40), nullable=False, default="DRAFT", index=True)
+    fields = db.Column(db.JSON, nullable=False, default=dict)
+    budget = db.Column(db.JSON, nullable=False, default=dict)
+    commercial = db.Column(db.JSON, nullable=False, default=dict)
+    budget_total = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    progress = db.Column(db.Integer, nullable=False, default=0)
+    validation_notes = db.Column(db.Text)
+    signature_name = db.Column(db.String(220))
+    signature_data = db.Column(db.Text)
+    signed_at = db.Column(db.DateTime(timezone=True))
+    submitted_at = db.Column(db.DateTime(timezone=True))
+    validated_at = db.Column(db.DateTime(timezone=True))
+    validated_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    approved_at = db.Column(db.DateTime(timezone=True))
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+    tenant = db.relationship("Tenant")
+    company = db.relationship("Company")
+    opportunity = db.relationship("Opportunity")
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_user_id])
+    validated_by = db.relationship("User", foreign_keys=[validated_by_user_id])
+    attachments = db.relationship("TechnicalSurveyAttachment", back_populates="survey", cascade="all, delete-orphan")
+    events = db.relationship("TechnicalSurveyEvent", back_populates="survey", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        db.UniqueConstraint("tenant_id", "reference", name="uq_technical_survey_reference"),
+        db.CheckConstraint("progress BETWEEN 0 AND 100", name="ck_technical_survey_progress"),
+    )
+
+
+class TechnicalSurveyAttachment(db.Model):
+    __tablename__ = "technical_survey_attachments"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    survey_id = db.Column(db.Integer, db.ForeignKey("technical_surveys.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_key = db.Column(db.String(80), nullable=False, index=True)
+    original_filename = db.Column(db.String(300), nullable=False)
+    stored_filename = db.Column(db.String(300), nullable=False)
+    mime_type = db.Column(db.String(120), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    relative_path = db.Column(db.String(700), nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    survey = db.relationship("TechnicalSurvey", back_populates="attachments")
+    created_by = db.relationship("User")
+
+
+class TechnicalSurveyEvent(db.Model):
+    __tablename__ = "technical_survey_events"
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    survey_id = db.Column(db.Integer, db.ForeignKey("technical_surveys.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    action = db.Column(db.String(60), nullable=False, index=True)
+    from_status = db.Column(db.String(40))
+    to_status = db.Column(db.String(40))
+    summary = db.Column(db.Text)
+    extra_data = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    survey = db.relationship("TechnicalSurvey", back_populates="events")
+    user = db.relationship("User")
+
+
 class ProspectSignal(db.Model):
     __tablename__ = "prospect_signals"
     id = db.Column(db.Integer, primary_key=True)
