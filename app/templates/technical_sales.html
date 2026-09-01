@@ -6,7 +6,7 @@
   <meta name="description" content="Academia, levantamento técnico-comercial e orçamento preliminar para portas seccionadas">
   <title>Academia & Levantamento · {{ brand.get('brand_name', tenant.name) }}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='technical-sales.css') }}?v=20260901-v2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='technical-sales.css') }}?v=20260901-v2-2-audit">
 </head>
 <body class="ts-body theme-{{ brand.get('theme','puertas') }}" data-brand="{{ brand.get('brand_name', tenant.name) }}">
   <aside class="ts-sidebar">
@@ -185,6 +185,6 @@
       language: {{ brand.get('language','pt-BR')|tojson }}
     };
   </script>
-  <script src="{{ url_for('static', filename='technical-sales.js') }}?v=20260901-v2"></script>
+  <script src="{{ url_for('static', filename='technical-sales.js') }}?v=20260901-v2-2-audit"></script>
 </body>
 </html>

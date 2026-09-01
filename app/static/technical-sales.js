@@ -1,7 +1,7 @@
 (() => {
   const cfg = window.TS_CONFIG || {};
   const $ = (s, root=document) => root.querySelector(s);
-  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+  const $$ = (s, root=document) => { const base = typeof root === 'string' ? document.querySelector(root) : root; return base ? [...base.querySelectorAll(s)] : []; };
   const currency = String(cfg.countryCode || 'BR').toUpperCase()==='PY' ? 'PYG' : 'BRL';
   const locale = currency==='PYG' ? 'es-PY' : 'pt-BR';
   const money = new Intl.NumberFormat(locale,{style:'currency',currency,maximumFractionDigits:currency==='PYG'?0:2});
@@ -188,7 +188,12 @@
 
   function payloadFromDraft(){
     const d=draft();
-    return {fields:d.fields||{},budget:d.budget||{},commercial:d.commercial||{},budgetTotal:Number(d.budgetTotal||0),companyId:d.companyId||null,validationNotes:d.validationNotes||''};
+    const payload={companyId:d.companyId||null,validationNotes:d.validationNotes||''};
+    if(['DRAFT','PENDING_VALIDATION'].includes(d.status)) payload.fields=d.fields||{};
+    if(['DRAFT','PENDING_VALIDATION','VALIDATED'].includes(d.status)){
+      payload.budget=d.budget||{}; payload.commercial=d.commercial||{}; payload.budgetTotal=Number(d.budgetTotal||0);
+    }
+    return payload;
   }
 
   function queueSave(delay=650){
@@ -338,8 +343,8 @@
     if(d.status==='QUOTE_GENERATED') actions.push(`<button class="ts-btn secondary" data-status="VALIDATED"><i class="bi bi-arrow-counterclockwise"></i> Voltar para validado</button>`,`<button class="ts-btn primary" data-open-view="budget"><i class="bi bi-pen"></i> Assinatura / aprovação</button>`);
     if(d.status==='APPROVED') actions.push(`<button class="ts-btn secondary" data-status="QUOTE_GENERATED"><i class="bi bi-arrow-counterclockwise"></i> Reabrir orçamento</button>`);
     $('#workflowActions').innerHTML=actions.join('');
-    $$('[data-status]','#workflowActions').forEach(b=>b.addEventListener('click',()=>changeStatus(b.dataset.status)));
-    $$('[data-open-view]','#workflowActions').forEach(b=>b.addEventListener('click',()=>openView(b.dataset.openView)));
+    $$('[data-status]',$('#workflowActions')).forEach(b=>b.addEventListener('click',()=>changeStatus(b.dataset.status)));
+    $$('[data-open-view]',$('#workflowActions')).forEach(b=>b.addEventListener('click',()=>openView(b.dataset.openView)));
     $('#validationNotes').value=d.validationNotes||'';
     $('#validationNotes').disabled=d.status==='APPROVED';
     applyLocks(); renderSignatureState(); updateBudgetActionState();
@@ -420,7 +425,7 @@
   }
   async function approveSurvey(){if(draft().status==='APPROVED')return;await changeStatus('APPROVED')}
 
-  function eventIcon(action){return ({CREATED:'bi-plus-circle',CRM_LINK_CHANGED:'bi-building-check',STATUS_CHANGED:'bi-arrow-left-right',SIGNED:'bi-pen',ATTACHMENT_ADDED:'bi-paperclip',ATTACHMENT_REMOVED:'bi-trash3',QUOTE_GENERATED:'bi-file-earmark-check'}[action]||'bi-clock-history')}
+  function eventIcon(action){return ({CREATED:'bi-plus-circle',CRM_LINK_CHANGED:'bi-building-check',STATUS_CHANGED:'bi-arrow-left-right',SIGNED:'bi-pen',SIGNATURE_INVALIDATED:'bi-pen-fill',ATTACHMENT_ADDED:'bi-paperclip',ATTACHMENT_REMOVED:'bi-trash3',QUOTE_GENERATED:'bi-file-earmark-check'}[action]||'bi-clock-history')}
   function renderHistory(){
     if(!activeSurvey)return; $('#historyReference').textContent=draft().reference||'—';
     const events=draft().events||[];

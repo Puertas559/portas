@@ -576,6 +576,8 @@ class TechnicalSurvey(db.Model):
     budget = db.Column(db.JSON, nullable=False, default=dict)
     commercial = db.Column(db.JSON, nullable=False, default=dict)
     budget_total = db.Column(db.Numeric(18, 2), nullable=False, default=0)
+    quote_version = db.Column(db.Integer, nullable=False, default=0)
+    quote_snapshot = db.Column(db.JSON, nullable=False, default=dict)
     progress = db.Column(db.Integer, nullable=False, default=0)
     validation_notes = db.Column(db.Text)
     signature_name = db.Column(db.String(220))

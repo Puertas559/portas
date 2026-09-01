@@ -57,6 +57,111 @@ ALLOWED_MIMES = {
 }
 MAX_ATTACHMENT_BYTES = 14 * 1024 * 1024
 
+FIELD_LABELS = {
+    'client_name': 'Nome do cliente',
+    'phone': 'Telefone / WhatsApp',
+    'email': 'E-mail',
+    'address': 'Endereço completo da instalação',
+    'city_country': 'Cidade / país',
+    'work_type': 'Tipo de obra',
+    'work_status': 'Situação da residência',
+    'desired_deadline': 'Prazo desejado para instalação',
+    'approval_person': 'Pessoa responsável pela aprovação do orçamento',
+    'survey_date': 'Data do levantamento',
+    'sales_responsible': 'Responsável técnico-comercial',
+    'width_top': 'Largura superior (mm)',
+    'width_middle': 'Largura central (mm)',
+    'width_bottom': 'Largura inferior (mm)',
+    'height_left': 'Altura esquerda (mm)',
+    'height_middle': 'Altura central (mm)',
+    'height_right': 'Altura direita (mm)',
+    'diagonal_1': 'Diagonal 1 (mm)',
+    'diagonal_2': 'Diagonal 2 (mm)',
+    'squared': 'Vão está no esquadro?',
+    'floor_level': 'Piso está nivelado?',
+    'finish_state': 'Medidas são de obra acabada?',
+    'level_notes': 'Desníveis / inclinações / observações',
+    'headroom': 'Verga / espaço superior livre (mm)',
+    'left_side': 'Ombreira esquerda (mm)',
+    'right_side': 'Ombreira direita (mm)',
+    'depth': 'Profundidade interna livre (mm)',
+    'upper_interferences': 'Interferências superiores',
+    'depth_interferences': 'Interferências na profundidade',
+    'structure_material': 'Material da estrutura',
+    'structure_condition': 'Condição aparente da estrutura',
+    'side_columns': 'Existem pilares laterais?',
+    'upper_beam': 'Existe viga superior?',
+    'metal_reinforcement': 'Necessidade de reforço metálico?',
+    'frame_required': 'Necessidade de requadro?',
+    'installation_position': 'Posição prevista de instalação',
+    'structure_notes': 'Observações sobre fixação',
+    'lift_type': 'Sistema de elevação previsto',
+    'ceiling_slope': 'Teto inclinado?',
+    'lift_notes': 'Observações sobre trilhos / elevação',
+    'panel_type': 'Tipo de painel',
+    'panel_thickness': 'Espessura do painel',
+    'panel_design': 'Modelo / desenho externo',
+    'color_finish': 'Cor / acabamento desejado',
+    'inside_finish': 'Acabamento interno',
+    'facade_match': 'Compatibilidade desejada com fachada / esquadrias',
+    'sealing_needs': 'Necessidades de vedação',
+    'operation_mode': 'Acionamento desejado',
+    'cycles_day': 'Quantidade aproximada de ciclos por dia',
+    'vehicles': 'Quantidade de veículos que utilizam a garagem',
+    'usage_context': 'Tipo de uso',
+    'usage_intensity': 'Intensidade estimada',
+    'voltage': 'Tensão disponível',
+    'outlet_location': 'Local da tomada / alimentação',
+    'outlet_distance': 'Distância tomada → motor (mm)',
+    'remote_qty': 'Quantidade de controles remotos',
+    'automation_options': 'Recursos desejados',
+    'automation_notes': 'Observações de automação',
+    'safety_items': 'Itens de segurança previstos / desejados',
+    'children_pets': 'Há crianças ou animais no ambiente?',
+    'other_access': 'Garagem possui outra entrada?',
+    'safety_notes': 'Observações de segurança',
+    'accessories': 'Acessórios desejados',
+    'windows_qty': 'Quantidade de janelas / visores',
+    'window_material': 'Tipo de vidro / acrílico',
+    'window_position': 'Posição dos visores',
+    'accessory_notes': 'Detalhes / observações',
+    'site_access': 'Condição de acesso ao imóvel',
+    'material_entry': 'Altura / largura disponível para entrada dos materiais',
+    'stairs_ramps': 'Escadas, rampas ou corredores estreitos?',
+    'parking': 'É possível estacionar o veículo da equipe?',
+    'lift_equipment': 'Necessidade de andaime ou plataforma?',
+    'working_height': 'Altura de trabalho',
+    'power_available': 'Há energia elétrica no local?',
+    'assembly_area': 'Área disponível para montagem',
+    'time_restrictions': 'Restrições de horário / condomínio',
+    'entry_authorization': 'Necessidade de autorização de entrada?',
+    'rain_risk': 'Risco de chuva afetar instalação?',
+    'existing_type': 'Tipo da porta atual',
+    'existing_dimensions': 'Dimensões da porta atual',
+    'existing_material': 'Material',
+    'existing_condition': 'Estado da estrutura',
+    'existing_fixing': 'Forma de fixação',
+    'dismantle': 'Necessita desmontagem?',
+    'disposal': 'Necessita retirada / descarte?',
+    'reuse_motor': 'Pretende reaproveitar motor?',
+    'reuse_components': 'Possibilidade de reaproveitar trilhos / componentes',
+    'included_services': 'Serviços / itens incluídos',
+    'service_notes': 'Observações de escopo',
+    'payment_terms': 'Forma de pagamento',
+    'entry_value': 'Valor da entrada',
+    'installments': 'Número de parcelas',
+    'manufacturing_deadline': 'Prazo de fabricação',
+    'installation_deadline': 'Prazo de instalação',
+    'proposal_validity': 'Validade da proposta',
+    'panel_warranty': 'Garantia dos painéis',
+    'motor_warranty': 'Garantia do motor',
+    'installation_warranty': 'Garantia da instalação',
+    'technical_assistance': 'Condições de assistência técnica',
+    'not_included': 'Itens não incluídos',
+    'measure_change_terms': 'Condições para alteração de medidas',
+    'final_notes': 'Observações finais',
+}
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -156,6 +261,7 @@ def _survey_dict(row, *, detail=False):
         "clientName": (row.fields or {}).get("client_name"),
         "cityCountry": (row.fields or {}).get("city_country"),
         "budgetTotal": float(row.budget_total or 0),
+        "quoteVersion": int(row.quote_version or 0),
         "progress": row.progress or 0,
         "createdAt": row.created_at.isoformat() if row.created_at else None,
         "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
@@ -175,6 +281,7 @@ def _survey_dict(row, *, detail=False):
             "commercial": row.commercial or {},
             "validationNotes": row.validation_notes or "",
             "signatureData": row.signature_data,
+            "quoteSnapshot": row.quote_snapshot or {},
             "missingRequired": _missing_required(row.fields or {}),
             "attachments": [_attachment_dict(x) for x in sorted(row.attachments, key=lambda a: a.created_at or _now())],
             "events": [_event_dict(x) for x in sorted(row.events, key=lambda e: e.created_at or _now(), reverse=True)],
@@ -207,6 +314,18 @@ def _safe_budget_total(value):
 
 def _status_message(status):
     return STATUS_LABELS.get(status, status)
+
+
+def _invalidate_signature(row, reason):
+    if not row.signature_data:
+        return False
+    prior = row.signature_name or "cliente/responsável"
+    row.signature_name = None
+    row.signature_data = None
+    row.signed_at = None
+    row.approved_at = None
+    _event(row, "SIGNATURE_INVALIDATED", f"Assinatura de {prior} invalidada: {reason}")
+    return True
 
 
 @technical_sales_api_bp.get("")
@@ -267,6 +386,8 @@ def update_survey(survey_id):
     data = request.get_json(silent=True) or {}
     technical_change = "fields" in data
     commercial_change = any(key in data for key in ("budget", "commercial", "budgetTotal"))
+    if commercial_change and row.signature_data:
+        _invalidate_signature(row, "a composição comercial foi alterada")
     if technical_change and row.status not in {"DRAFT", "PENDING_VALIDATION"}:
         return jsonify(error="As medidas e dados técnicos ficam bloqueados após a validação. Reabra a ficha para revisão técnica."), 409
     if commercial_change and row.status not in {"DRAFT", "PENDING_VALIDATION", "VALIDATED"}:
@@ -344,6 +465,8 @@ def change_status(survey_id):
         return jsonify(error="Registre a assinatura do cliente/responsável antes de marcar o orçamento como aprovado."), 422
 
     previous = row.status
+    if previous in {"APPROVED", "QUOTE_GENERATED"} and target in {"QUOTE_GENERATED", "VALIDATED", "PENDING_VALIDATION"}:
+        _invalidate_signature(row, "o orçamento foi reaberto para revisão")
     row.status = target
     user = current_user()
     row.updated_by_user_id = user.id if user else None
@@ -406,44 +529,32 @@ def upload_attachments(survey_id):
     if row.status not in {"DRAFT", "PENDING_VALIDATION"}:
         return jsonify(error="Os anexos ficam bloqueados após a validação técnica."), 409
     group = secure_filename(str(request.form.get("group") or "general"))[:80] or "general"
-    files = request.files.getlist("file") or request.files.getlist("files")
+    files = [f for f in (request.files.getlist("file") or request.files.getlist("files")) if f and f.filename]
     if not files:
         return jsonify(error="Nenhum arquivo recebido."), 400
-    root = _attachment_root(row)
-    user = current_user()
-    created = []
+    prepared = []
     for file in files:
-        if not file or not file.filename:
-            continue
         mime = (file.mimetype or "").lower()
         if mime not in ALLOWED_MIMES:
             return jsonify(error=f"Formato não permitido: {file.filename}"), 415
-        file.stream.seek(0, 2)
-        size = file.stream.tell()
-        file.stream.seek(0)
+        file.stream.seek(0, 2); size = file.stream.tell(); file.stream.seek(0)
         if size <= 0 or size > MAX_ATTACHMENT_BYTES:
             return jsonify(error=f"Arquivo excede o limite permitido: {file.filename}"), 413
-        original = secure_filename(file.filename) or f"anexo{ALLOWED_MIMES[mime]}"
-        stored = f"{uuid4().hex}{ALLOWED_MIMES[mime]}"
-        path = root / stored
-        file.save(path)
-        attachment = TechnicalSurveyAttachment(
-            tenant_id=row.tenant_id,
-            survey_id=row.id,
-            group_key=group,
-            original_filename=original[:300],
-            stored_filename=stored,
-            mime_type=mime,
-            size_bytes=size,
-            relative_path=str(path.relative_to(Path(current_app.config["DATA_DIR"]))),
-            created_by_user_id=user.id if user else None,
-        )
-        db.session.add(attachment)
-        db.session.flush()
-        created.append(attachment)
-    if created:
-        _event(row, "ATTACHMENT_ADDED", f"{len(created)} anexo(s) adicionado(s) em {group}.", extra={"group": group, "attachmentIds": [x.id for x in created]})
-    db.session.commit()
+        prepared.append((file, mime, size, secure_filename(file.filename) or f"anexo{ALLOWED_MIMES[mime]}"))
+    root = _attachment_root(row); user = current_user(); created=[]; written=[]
+    try:
+        for file, mime, size, original in prepared:
+            stored=f"{uuid4().hex}{ALLOWED_MIMES[mime]}"; path=root/stored; file.save(path); written.append(path)
+            attachment=TechnicalSurveyAttachment(tenant_id=row.tenant_id,survey_id=row.id,group_key=group,original_filename=original[:300],stored_filename=stored,mime_type=mime,size_bytes=size,relative_path=str(path.relative_to(Path(current_app.config["DATA_DIR"]))),created_by_user_id=user.id if user else None)
+            db.session.add(attachment); db.session.flush(); created.append(attachment)
+        _event(row,"ATTACHMENT_ADDED",f"{len(created)} anexo(s) adicionado(s) em {group}.",extra={"group":group,"attachmentIds":[x.id for x in created]})
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        for path in written:
+            try: path.unlink(missing_ok=True)
+            except OSError: pass
+        raise
     return jsonify(items=[_attachment_dict(x) for x in created]), 201
 
 
@@ -525,13 +636,14 @@ def _build_pdf(survey):
     header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("ALIGN", (1,0), (1,0), "RIGHT"), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
     story.extend([header, Spacer(1, 2*mm)])
 
-    status_line = f"Status: <b>{_pdf_text(STATUS_LABELS.get(survey.status, survey.status))}</b>"
+    status_line = f"Status: <b>{_pdf_text(STATUS_LABELS.get(survey.status, survey.status))}</b> | Orçamento: <b>V{int(survey.quote_version or 1)}</b>"
     if survey.company:
         status_line += f" | CRM: <b>{_pdf_text(survey.company.name)}</b>"
     story.append(Paragraph(status_line, body))
     story.append(Spacer(1, 3*mm))
 
-    fields = survey.fields or {}
+    snapshot = survey.quote_snapshot or {}
+    fields = snapshot.get("fields") or survey.fields or {}
     field_groups = [
         ("1. Cliente e obra", [("Cliente", "client_name"), ("Telefone / WhatsApp", "phone"), ("E-mail", "email"), ("Endereço", "address"), ("Cidade / país", "city_country"), ("Tipo de obra", "work_type"), ("Situação da residência", "work_status"), ("Responsável técnico-comercial", "sales_responsible")]),
         ("2. Medidas do vão", [("Largura superior", "width_top"), ("Largura central", "width_middle"), ("Largura inferior", "width_bottom"), ("Altura esquerda", "height_left"), ("Altura central", "height_middle"), ("Altura direita", "height_right"), ("Diagonal 1", "diagonal_1"), ("Diagonal 2", "diagonal_2"), ("Obra acabada", "finish_state")]),
@@ -564,13 +676,27 @@ def _build_pdf(survey):
             ]))
             story.append(table)
 
+    shown_keys = {key for _, items in field_groups for _, key in items}
+    complementary = []
+    for key, value in fields.items():
+        if key in shown_keys or value in (None, "", []):
+            continue
+        if isinstance(value, list):
+            value = ", ".join(map(str, value))
+        complementary.append([Paragraph(f"<b>{_pdf_text(FIELD_LABELS.get(key, key.replace('_', ' ').title()))}</b>", small), Paragraph(_pdf_text(value), body)])
+    if complementary:
+        story.append(Paragraph("Dados complementares do levantamento", h2))
+        table = Table(complementary, colWidths=[58*mm, 117*mm])
+        table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#f2f5f3")), ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#d7ded9")), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5), ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4)]))
+        story.append(table)
+
     widths = [float(fields.get(k) or 0) for k in ("width_top", "width_middle", "width_bottom") if str(fields.get(k) or "").strip()]
     heights = [float(fields.get(k) or 0) for k in ("height_left", "height_middle", "height_right") if str(fields.get(k) or "").strip()]
     if widths and heights:
         story.append(Paragraph("Referência automática", h2))
         story.append(Paragraph(f"Menor largura x menor altura: <b>{min(widths):.0f} x {min(heights):.0f} mm</b>. A medida do vão não é necessariamente a medida final de fabricação.", body))
 
-    budget = survey.budget or {}
+    budget = snapshot.get("budget") or survey.budget or {}
     budget_labels = {
         "door": "Porta / painéis", "automation": "Automação", "accessories": "Acessórios", "transport": "Transporte",
         "installation": "Instalação", "reinforcement": "Reforço estrutural", "electrical": "Elétrica / adicionais", "taxes": "Impostos / outros",
@@ -585,12 +711,12 @@ def _build_pdf(survey):
             budget_rows.append([Paragraph(_pdf_text(label), body), Paragraph(f"<b>{_pdf_text(_format_money(value, tenant))}</b>", body)])
     if budget_rows:
         story.append(Paragraph("7. Composição comercial preliminar", h2))
-        budget_rows.append([Paragraph("<b>Total preliminar</b>", body), Paragraph(f"<b>{_pdf_text(_format_money(survey.budget_total, tenant))}</b>", body)])
+        budget_rows.append([Paragraph("<b>Total preliminar</b>", body), Paragraph(f"<b>{_pdf_text(_format_money(snapshot.get("budgetTotal", survey.budget_total), tenant))}</b>", body)])
         table = Table(budget_rows, colWidths=[120*mm, 55*mm])
         table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#d7ded9")), ("ALIGN", (1,0), (1,-1), "RIGHT"), ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#edf6f1")), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
         story.append(table)
 
-    commercial = survey.commercial or {}
+    commercial = snapshot.get("commercial") or survey.commercial or {}
     if any(commercial.values()):
         story.append(Paragraph("8. Condições comerciais", h2))
         rows = []
@@ -670,7 +796,7 @@ def survey_pdf(survey_id):
     if row.status not in {"QUOTE_GENERATED", "APPROVED"}:
         return jsonify(error="Valide a ficha e gere o orçamento antes de emitir o PDF definitivo."), 409
     buffer = _build_pdf(row)
-    filename = f"{row.reference}-orcamento-preliminar.pdf"
+    filename = f"{row.reference}-orcamento-V{int(row.quote_version or 1)}.pdf"
     return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=filename)
 
 
@@ -682,8 +808,17 @@ def generate_quote(survey_id):
         return jsonify(error="A ficha precisa estar validada tecnicamente antes de gerar o orçamento."), 409
     if row.status == "VALIDATED":
         previous = row.status
+        row.quote_version = int(row.quote_version or 0) + 1
+        row.quote_snapshot = {
+            "version": row.quote_version,
+            "generatedAt": _now().isoformat(),
+            "fields": dict(row.fields or {}),
+            "budget": dict(row.budget or {}),
+            "commercial": dict(row.commercial or {}),
+            "budgetTotal": float(row.budget_total or 0),
+        }
         row.status = "QUOTE_GENERATED"
-        _event(row, "QUOTE_GENERATED", "Orçamento preliminar gerado a partir da ficha validada.", from_status=previous, to_status=row.status)
-        _company_activity(row, "Orçamento preliminar gerado", f"O orçamento da ficha {row.reference} foi gerado após validação técnica.")
+        _event(row, "QUOTE_GENERATED", f"Orçamento preliminar V{row.quote_version} gerado a partir da ficha validada.", from_status=previous, to_status=row.status, extra={"quoteVersion": row.quote_version})
+        _company_activity(row, "Orçamento preliminar gerado", f"O orçamento V{row.quote_version} da ficha {row.reference} foi gerado após validação técnica.")
         db.session.commit()
     return jsonify(ok=True, survey=_survey_dict(row, detail=True), pdfUrl=f"/api/technical-surveys/{row.id}/pdf")
