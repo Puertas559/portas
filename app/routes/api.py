@@ -429,7 +429,6 @@ def company_search_add():
     data = request.get_json(silent=True) or {}
     if not data.get("company"):
         return jsonify(error="Falta el nombre de la empresa"), 400
-    tenant = current_tenant()
     payload = dict(data)
     payload.update({
         "project": data.get("project") or "Empresa identificada por búsqueda geográfica",
@@ -809,7 +808,6 @@ def website_analysis_create():
 
 
 @api_bp.post("/website-analysis/<int:analysis_id>/deep")
-@require_permission("WRITE_CRM")
 def website_analysis_deep(analysis_id):
     tenant = current_tenant()
     analysis = WebsiteAnalysis.query.filter_by(id=analysis_id, tenant_id=tenant.id).first_or_404()
@@ -831,7 +829,6 @@ def website_analysis_deep(analysis_id):
 
 
 @api_bp.post("/website-analysis/alternatives")
-@require_permission("WRITE_CRM")
 def website_analysis_alternatives():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
@@ -843,7 +840,6 @@ def website_analysis_alternatives():
 
 
 @api_bp.post("/website-analysis/bulk")
-@require_permission("WRITE_CRM")
 def website_analysis_bulk():
     data = request.get_json(silent=True) or {}
     raw = data.get("urls") or []
@@ -1016,6 +1012,19 @@ def task_update(task_id):
     return jsonify(task.to_dict())
 
 
+def _valid_image_upload(upload, extension):
+    head = upload.stream.read(16)
+    upload.stream.seek(0)
+    signatures = {
+        ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
+        ".png": (b"\x89PNG\r\n\x1a\n",),
+        ".webp": (b"RIFF",),
+    }
+    if extension == ".webp":
+        return head.startswith(b"RIFF") and head[8:12] == b"WEBP"
+    return any(head.startswith(sig) for sig in signatures.get(extension, ()))
+
+
 @api_bp.post("/visits")
 @require_permission("WRITE_CRM")
 def visit_create():
@@ -1027,16 +1036,7 @@ def visit_create():
     upload_dir.mkdir(parents=True, exist_ok=True)
     for uploaded in request.files.getlist("photos"):
         extension = Path(secure_filename(uploaded.filename or "")).suffix.lower()
-        if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
-            continue
-        header = uploaded.stream.read(16)
-        uploaded.stream.seek(0)
-        valid_image = (
-            (extension in {".jpg", ".jpeg"} and header.startswith(b"\xff\xd8\xff"))
-            or (extension == ".png" and header.startswith(b"\x89PNG\r\n\x1a\n"))
-            or (extension == ".webp" and header.startswith(b"RIFF") and header[8:12] == b"WEBP")
-        )
-        if not valid_image:
+        if extension not in {".jpg", ".jpeg", ".png", ".webp"} or not _valid_image_upload(uploaded, extension):
             continue
         filename = f"{uuid4().hex}{extension}"
         uploaded.save(upload_dir / filename)
@@ -1057,12 +1057,13 @@ def visit_create():
 @api_bp.get("/uploads/<path:filename>")
 def uploaded_file(filename):
     tenant = current_tenant()
-    if secure_filename(filename) != filename:
-        return jsonify(error="Archivo no localizado"), 404
-    visits = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id).with_entities(VisitRecord.photos).all()
-    if not any(filename in (photos or []) for (photos,) in visits):
-        return jsonify(error="Archivo no localizado"), 404
-    return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", filename)
+    safe_name = secure_filename(filename)
+    if safe_name != filename or not safe_name:
+        return jsonify(error="Archivo inválido"), 404
+    visits = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id).all()
+    if not any(safe_name in (visit.photos or []) for visit in visits):
+        return jsonify(error="Archivo no encontrado"), 404
+    return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", safe_name)
 
 
 @api_bp.post("/proposals/<int:opportunity_id>")
@@ -1853,6 +1854,8 @@ def import_history_preview():
     upload = request.files.get("file")
     if not upload or not upload.filename:
         return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    if Path(secure_filename(upload.filename)).suffix.lower() not in {".xlsx", ".csv"}:
+        return jsonify(error="Formato de archivo no permitido"), 400
     try:
         from ..services.import_history import preview
         return jsonify(preview(upload))
@@ -1869,6 +1872,8 @@ def import_history_execute():
     upload = request.files.get("file")
     if not upload or not upload.filename:
         return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    if Path(secure_filename(upload.filename)).suffix.lower() not in {".xlsx", ".csv"}:
+        return jsonify(error="Formato de archivo no permitido"), 400
     try:
         import json
         from ..services.import_history import import_rows

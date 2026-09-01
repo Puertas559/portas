@@ -1,6 +1,8 @@
 import json
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from .safe_http import safe_urlopen
 
 USER_AGENT = "PuertasBrasilPY-CompanyFinder/1.0 (+https://puertasbrasil.com.py)"
 SEARCH_URL = "https://nominatim.openstreetmap.org/search"
@@ -33,7 +35,7 @@ def _request_json(url, params=None, data=None):
     target = f"{url}?{urlencode(params)}" if params else url
     encoded = urlencode(data).encode("utf-8") if data else None
     request = Request(target, data=encoded, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urlopen(request, timeout=24) as response:
+    with safe_urlopen(request, timeout=24) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

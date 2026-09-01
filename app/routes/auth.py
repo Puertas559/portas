@@ -1,7 +1,4 @@
-from datetime import datetime, timezone
-import os
-import threading
-import time
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -12,38 +9,21 @@ from ..tenant import current_tenant, current_user, normalize_email, require_perm
 
 
 auth_bp = Blueprint("auth", __name__)
-_login_attempts = {}
-_login_attempts_lock = threading.Lock()
-_login_window = max(60, int(os.getenv("LOGIN_RATE_WINDOW_SECONDS", "900")))
-_login_limit = max(3, int(os.getenv("LOGIN_RATE_LIMIT", "10")))
 
 
-def _login_keys(email):
-    return (f"ip:{request.remote_addr or 'unknown'}", f"email:{email}")
+def _client_ip():
+    if current_app.config.get("TRUST_PROXY"):
+        forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded[:64]
+    return (request.remote_addr or "unknown")[:64]
 
 
-def _login_is_blocked(keys):
-    cutoff = time.monotonic() - _login_window
-    with _login_attempts_lock:
-        for key in list(_login_attempts):
-            recent = [stamp for stamp in _login_attempts[key] if stamp >= cutoff]
-            if recent:
-                _login_attempts[key] = recent
-            else:
-                _login_attempts.pop(key, None)
-        return any(len(_login_attempts.get(key, ())) >= _login_limit for key in keys)
-
-
-def _record_login_failure(keys):
-    now = time.monotonic()
-    with _login_attempts_lock:
-        for key in keys:
-            _login_attempts.setdefault(key, []).append(now)
-
-
-def _clear_login_identity(email):
-    with _login_attempts_lock:
-        _login_attempts.pop(f"email:{email}", None)
+def _failed_login_count(email):
+    since = datetime.now(timezone.utc) - timedelta(minutes=10)
+    ip = _client_ip()
+    rows = AuditLog.query.filter(AuditLog.action == "LOGIN_FAILED", AuditLog.created_at >= since).order_by(AuditLog.created_at.desc()).limit(100).all()
+    return sum(1 for row in rows if (row.details or {}).get("ip") == ip and (row.details or {}).get("email") == email)
 
 
 def _has_any_user():
@@ -52,19 +32,21 @@ def _has_any_user():
 
 @auth_bp.get("/setup")
 def setup_page():
+    import os
+    if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production") and os.getenv("ALLOW_INITIAL_SETUP", "false").lower() not in {"1","true","yes"}:
+        return redirect(url_for("auth.login_page"))
     if _has_any_user():
         return redirect(url_for("auth.login_page"))
-    if not current_app.config["ALLOW_WEB_SETUP"]:
-        return render_template("login.html", setup_mode=False, error="La configuración web inicial está desactivada. Configure el administrador mediante las variables ADMIN_*.", default_workspace=current_app.config["DEFAULT_TENANT_SLUG"]), 503
     return render_template("login.html", setup_mode=True, default_workspace=current_app.config["DEFAULT_TENANT_SLUG"])
 
 
 @auth_bp.post("/setup")
 def setup_submit():
+    import os
+    if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production") and os.getenv("ALLOW_INITIAL_SETUP", "false").lower() not in {"1","true","yes"}:
+        return redirect(url_for("auth.login_page"))
     if _has_any_user():
         return redirect(url_for("auth.login_page"))
-    if not current_app.config["ALLOW_WEB_SETUP"]:
-        return jsonify(error="Configuración web inicial desactivada"), 403
     data = request.form
     name = (data.get("name") or "").strip()
     email = normalize_email(data.get("email"))
@@ -83,7 +65,7 @@ def setup_submit():
     db.session.flush()
     db.session.add(AuditLog(tenant_id=tenant.id, user_id=user.id, action="INITIAL_ADMIN_CREATED", entity_type="USER", entity_id=str(user.id)))
     db.session.commit()
-    session.clear(); session.permanent = True; session["user_id"] = user.id
+    session.clear(); session["user_id"] = user.id
     return redirect(url_for("web.group_home"))
 
 
@@ -100,22 +82,23 @@ def _login():
     data = request.get_json(silent=True) if request.is_json else request.form
     email = normalize_email((data or {}).get("email"))
     password = (data or {}).get("password", "")
-    rate_keys = _login_keys(email)
-    if _login_is_blocked(rate_keys):
+    if _failed_login_count(email) >= 5:
         return None
     candidates = User.query.join(Tenant).filter(
         User.normalized_email == email, User.status == "ACTIVE", Tenant.status == "ACTIVE",
     ).all()
     user = next((u for u in candidates if check_password_hash(u.password_hash, password)), None)
     if not user:
-        _record_login_failure(rate_keys)
+        tenant = Tenant.query.filter_by(status="ACTIVE").order_by(Tenant.id.asc()).first()
+        if tenant:
+            db.session.add(AuditLog(tenant_id=tenant.id, user_id=None, action="LOGIN_FAILED", entity_type="AUTH", entity_id=None, details={"email": email, "ip": _client_ip()}))
+            db.session.commit()
         return None
-    _clear_login_identity(email)
-    session.clear(); session.permanent = True; session["user_id"] = user.id
+    session.clear(); session["user_id"] = user.id; session.permanent = True
     if user.role == "GROUP_ADMIN":
         session["active_tenant_id"] = user.tenant_id
     user.last_login_at = datetime.now(timezone.utc)
-    db.session.add(AuditLog(tenant_id=user.tenant_id, user_id=user.id, action="LOGIN", entity_type="USER", entity_id=str(user.id)))
+    db.session.add(AuditLog(tenant_id=user.tenant_id, user_id=user.id, action="LOGIN", entity_type="USER", entity_id=str(user.id), details={"ip": _client_ip()}))
     db.session.commit()
     return user
 
@@ -206,7 +189,7 @@ def admin_users_update(user_id):
         if row.id == actor.id and status != "ACTIVE": return jsonify(error="No puede desactivar su propio usuario"), 400
         row.status = status
     if data.get("password"):
-        if len(str(data["password"])) < 12: return jsonify(error="La contraseña debe tener al menos 12 caracteres"), 400
+        if len(str(data["password"])) < 10: return jsonify(error="La contraseña debe tener al menos 12 caracteres"), 400
         row.password_hash = generate_password_hash(str(data["password"]))
     db.session.add(AuditLog(tenant_id=tenant.id, user_id=actor.id if actor else None, action="USER_UPDATED", entity_type="USER", entity_id=str(row.id), details={"role": row.role, "status": row.status}))
     db.session.commit()

@@ -4,7 +4,9 @@ import re
 import unicodedata
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from .safe_http import safe_urlopen
 
 from ..extensions import db
 from ..models import HubEvent, HubEventAccount, HubEventAction, HubEventSource
@@ -75,7 +77,7 @@ def event_key(name, start_date=None, city=None, organizer=None):
 
 def fetch_html(url, timeout=15):
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; HG-Radar-HUB/2.0; +event-intelligence)"})
-    with urlopen(req, timeout=timeout) as response:
+    with safe_urlopen(req, timeout=timeout) as response:
         ctype = response.headers.get("Content-Type", "")
         if "html" not in ctype.lower() and "xml" not in ctype.lower():
             raise ValueError("A fonte não devolveu HTML/XML")

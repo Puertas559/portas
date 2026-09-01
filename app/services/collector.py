@@ -6,11 +6,13 @@ import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from .safe_http import safe_urlopen
 from xml.etree import ElementTree
 
 from ..extensions import db
-from ..models import CollectorRun, ProspectSignal, Tenant
+from ..models import CollectorRun, ProspectSignal
 from ..tenant import current_tenant
 from .intelligence import estimate_deal_range, infer_buying_window, infer_lifecycle
 
@@ -91,7 +93,7 @@ PRIORITY_LOCATIONS = {
 
 def _fetch(url):
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5"})
-    with urlopen(request, timeout=20) as response:
+    with safe_urlopen(request, timeout=20) as response:
         return response.read()
 
 
@@ -279,8 +281,8 @@ def _is_older_than(value, cutoff):
     return value < cutoff
 
 
-def requalify_pending_signals(tenant=None):
-    tenant = tenant or current_tenant()
+def requalify_pending_signals():
+    tenant = current_tenant()
     cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_SIGNAL_AGE_DAYS)
     rows = ProspectSignal.query.filter_by(tenant_id=tenant.id, status="PENDING_VALIDATION").all()
     for signal in rows:
@@ -301,14 +303,12 @@ def requalify_pending_signals(tenant=None):
         signal.why_now = result["why_now"]
 
 
-def run_collector(tenant_id=None):
-    tenant = db.session.get(Tenant, tenant_id) if tenant_id is not None else current_tenant()
-    if not tenant or tenant.status != "ACTIVE":
-        raise ValueError("Operación inexistente o inactiva")
+def run_collector():
+    tenant = current_tenant()
     run = CollectorRun(tenant_id=tenant.id)
     db.session.add(run)
     db.session.commit()
-    requalify_pending_signals(tenant)
+    requalify_pending_signals()
     errors, scanned, created, sources_scanned = [], 0, 0, 0
     batches = []
     for source in DEFAULT_FEEDS + _extra_feeds():
