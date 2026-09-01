@@ -1,16 +1,29 @@
 (() => {
   const cfg = window.TS_CONFIG || {};
-  const $ = (s, root=document) => root.querySelector(s);
-  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
-  const money = new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'});
-  const STORE='hgTechnicalSalesDraftsV1';
+  const resolveRoot = (root=document) => {
+    if (!root) return document;
+    if (typeof root === 'string') return document.querySelector(root) || document;
+    return root;
+  };
+  const $ = (s, root=document) => resolveRoot(root).querySelector(s);
+  const $$ = (s, root=document) => [...resolveRoot(root).querySelectorAll(s)];
+  const currency = String(cfg.countryCode || 'BR').toUpperCase()==='PY' ? 'PYG' : 'BRL';
+  const locale = currency==='PYG' ? 'es-PY' : 'pt-BR';
+  const money = new Intl.NumberFormat(locale,{style:'currency',currency,maximumFractionDigits:currency==='PYG'?0:2});
   const COURSE_STORE='hgTechnicalCourseProgressV1';
+  const ACTIVE_STORE='hgTechnicalSalesActiveServerV2';
   let currentSection=0;
   let activeLesson=0;
-  let drafts=loadJson(STORE,{}) || {};
-  let activeDraftId=localStorage.getItem('hgTechnicalSalesActiveDraft') || '';
+  let surveys=[];
+  let activeSurvey=null;
+  let activeDraftId=localStorage.getItem(ACTIVE_STORE) || '';
   let courseProgress=new Set(loadJson(COURSE_STORE,[]) || []);
-  let photoUrls=[];
+  let saveTimer=null;
+  let saveInFlight=null;
+  let companyTimer=null;
+  let companyOptions=new Map();
+  let signatureDrawing=false;
+  let signatureDirty=false;
 
   const lessons = [
     {title:'Começando do zero',icon:'bi-door-open',summary:'O que é uma porta seccionada, como funciona e quais são os componentes básicos.',why:'Antes de medir ou vender, você precisa visualizar o conjunto: painéis articulados, trilhos, ferragens, molas, cabos, vedações e automação.',learn:['O que diferencia uma porta seccionada de outros tipos de fechamento.','Vocabulário básico usado no levantamento e no orçamento.','Como a porta se desloca e por que precisa de espaço ao redor do vão.'],practice:'Ao chegar à obra, identifique o vão, teto, laterais e trajeto provável da porta antes de retirar a trena.',alert:'Nunca prometa uma configuração antes de verificar espaço superior, laterais, profundidade e estrutura.'},
@@ -100,96 +113,357 @@
     ]}
   ];
 
+
   function f(id,label,type='text',required=false,options=null,helper='',learn=''){return {id,label,type,required,options,helper,learn};}
   function loadJson(key,fallback){try{return JSON.parse(localStorage.getItem(key)) ?? fallback}catch{return fallback}}
   function saveJson(key,value){localStorage.setItem(key,JSON.stringify(value))}
-  function newDraftData(){return {id:crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),fields:{sales_responsible:cfg.userName||''},budget:{},commercial:{}}}
-  function ensureDraft(){if(!activeDraftId || !drafts[activeDraftId]){const d=newDraftData();drafts[d.id]=d;activeDraftId=d.id;saveDrafts()}return drafts[activeDraftId]}
-  function saveDrafts(){saveJson(STORE,drafts);localStorage.setItem('hgTechnicalSalesActiveDraft',activeDraftId)}
-  function draft(){return ensureDraft()}
-  function draftLabel(d){const n=d.fields?.client_name?.trim();const c=d.fields?.city_country?.trim();return n ? `${n}${c?' · '+c:''}` : `Novo levantamento · ${new Date(d.createdAt).toLocaleDateString('pt-BR')}`}
+  function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+  function escapeAttr(v){return escapeHtml(v)}
+  function formatDate(v){if(!v)return '—';try{return new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v))}catch{return String(v)}}
+  function draft(){return activeSurvey || {fields:{},budget:{},commercial:{},attachments:[],events:[],permissions:{}}}
+  function draftLabel(d){const n=d.clientName || d.fields?.client_name?.trim();const c=d.cityCountry || d.fields?.city_country?.trim();return n ? `${n}${c?' · '+c:''}` : `${d.reference || 'Nova ficha'} · ${formatDate(d.createdAt).split(' ')[0]}`}
 
-  function renderDraftSelect(){ensureDraft();const sel=$('#draftSelect');sel.innerHTML=Object.values(drafts).sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).map(d=>`<option value="${d.id}" ${d.id===activeDraftId?'selected':''}>${escapeHtml(draftLabel(d))}</option>`).join('')}
+  async function api(url, options={}){
+    const opts={credentials:'same-origin',...options};
+    opts.headers={...(options.headers||{})};
+    if(options.body && !(options.body instanceof FormData) && typeof options.body!=='string'){
+      opts.headers['Content-Type']='application/json';
+      opts.body=JSON.stringify(options.body);
+    }
+    const response=await fetch(url,opts);
+    let data=null;
+    const type=response.headers.get('content-type')||'';
+    if(type.includes('application/json')) data=await response.json();
+    else data=await response.text();
+    if(!response.ok){const err=new Error(data?.error || `Erro ${response.status}`);err.status=response.status;err.data=data;throw err}
+    return data;
+  }
+
+  function setServerState(state,text){
+    const el=$('#serverState'); if(!el)return;
+    const icons={saved:'bi-cloud-check',saving:'bi-cloud-arrow-up',error:'bi-cloud-slash',loading:'bi-arrow-repeat'};
+    el.className=`ts-server-state ${state}`;
+    el.innerHTML=`<i class="bi ${icons[state]||icons.saved}"></i><span>${escapeHtml(text||'Servidor')}</span>`;
+  }
+
+  function mergeSurveySummary(detail){
+    const idx=surveys.findIndex(x=>String(x.id)===String(detail.id));
+    const summary={...detail};
+    delete summary.attachments; delete summary.events; delete summary.signatureData; delete summary.fields; delete summary.budget; delete summary.commercial;
+    if(idx>=0) surveys[idx]={...surveys[idx],...summary}; else surveys.unshift(summary);
+    surveys.sort((a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0));
+  }
+
+  async function loadSurveys(){
+    setServerState('loading','Carregando');
+    const data=await api('/api/technical-surveys');
+    surveys=data.items||[];
+    if(!surveys.length){
+      const created=await api('/api/technical-surveys',{method:'POST',body:{fields:{sales_responsible:cfg.userName||''}}});
+      surveys=[created];
+      activeDraftId=String(created.id);
+    } else if(!activeDraftId || !surveys.some(x=>String(x.id)===String(activeDraftId))){
+      activeDraftId=String(surveys[0].id);
+    }
+    localStorage.setItem(ACTIVE_STORE,activeDraftId);
+    renderDraftSelect();
+    await selectSurvey(activeDraftId,false);
+    setServerState('saved','Sincronizado');
+  }
+
+  async function createSurvey(){
+    await flushSave();
+    setServerState('saving','Criando');
+    const created=await api('/api/technical-surveys',{method:'POST',body:{fields:{sales_responsible:cfg.userName||''}}});
+    surveys.unshift(created); activeDraftId=String(created.id); activeSurvey=created;
+    localStorage.setItem(ACTIVE_STORE,activeDraftId);
+    currentSection=0; renderDraftSelect(); renderAllActive(); openView('survey');
+    setServerState('saved','Sincronizado');
+  }
+
+  async function selectSurvey(id, flush=true){
+    if(flush) await flushSave();
+    setServerState('loading','Carregando');
+    const detail=await api(`/api/technical-surveys/${id}`);
+    activeDraftId=String(detail.id); activeSurvey=detail;
+    localStorage.setItem(ACTIVE_STORE,activeDraftId);
+    mergeSurveySummary(detail); renderDraftSelect(); renderAllActive();
+    setServerState('saved','Sincronizado');
+  }
+
+  function payloadFromDraft(){
+    const d=draft();
+    return {fields:d.fields||{},budget:d.budget||{},commercial:d.commercial||{},budgetTotal:Number(d.budgetTotal||0),companyId:d.companyId||null,validationNotes:d.validationNotes||''};
+  }
+
+  function queueSave(delay=650){
+    if(!activeSurvey)return;
+    activeSurvey.updatedAt=new Date().toISOString();
+    mergeSurveySummary(activeSurvey); renderDraftSelect();
+    setServerState('saving','Salvando');
+    $('#autosaveStatus').innerHTML='<i class="bi bi-cloud-arrow-up"></i> Salvando no servidor…';
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>{saveTimer=null;saveNow().catch(showError)},delay);
+  }
+
+  async function saveNow(){
+    if(!activeSurvey)return;
+    const id=activeSurvey.id;
+    const work=api(`/api/technical-surveys/${id}`,{method:'PATCH',body:payloadFromDraft()});
+    saveInFlight=work;
+    try{
+      const saved=await work;
+      if(String(activeDraftId)===String(id)) activeSurvey={...activeSurvey,...saved};
+      mergeSurveySummary(saved); renderDraftSelect(); renderWorkflow(); renderHistory();
+      setServerState('saved','Sincronizado');
+      $('#autosaveStatus').innerHTML='<i class="bi bi-cloud-check"></i> Salvo no servidor';
+      return saved;
+    } finally { if(saveInFlight===work) saveInFlight=null; }
+  }
+
+  async function flushSave(){
+    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;await saveNow();}
+    else if(saveInFlight){await saveInFlight;}
+  }
+
+  function showError(err){
+    console.error(err); setServerState('error','Erro ao salvar');
+    const msg=err?.message || 'Não foi possível concluir a operação.';
+    alert(msg);
+  }
+
+  function renderDraftSelect(){
+    const sel=$('#draftSelect'); if(!sel)return;
+    sel.innerHTML=surveys.map(d=>`<option value="${d.id}" ${String(d.id)===String(activeDraftId)?'selected':''}>${escapeHtml(draftLabel(d))} · ${escapeHtml(d.statusLabel||'')}</option>`).join('');
+  }
 
   function renderCourse(filter=''){
     const q=filter.trim().toLowerCase();
     $('#courseModules').innerHTML=lessons.map((l,i)=>({l,i})).filter(({l})=>!q || `${l.title} ${l.summary} ${l.learn.join(' ')}`.toLowerCase().includes(q)).map(({l,i})=>`<button class="ts-module-card ${i===activeLesson?'active':''}" data-lesson="${i}"><span class="ts-module-number">${i}</span><span><b>${escapeHtml(l.title)}</b><small>${escapeHtml(l.summary)}</small></span>${courseProgress.has(i)?'<i class="bi bi-check-circle-fill"></i>':'<i class="bi bi-chevron-right"></i>'}</button>`).join('');
-    $$('.ts-module-card').forEach(b=>b.addEventListener('click',()=>openLesson(Number(b.dataset.lesson))));
-    updateCourseProgress();
+    $$('.ts-module-card').forEach(b=>b.addEventListener('click',()=>openLesson(Number(b.dataset.lesson)))); updateCourseProgress();
   }
   function openLesson(i){activeLesson=i;const l=lessons[i];$('#lessonPanel').innerHTML=`<div class="ts-lesson-head"><span><i class="bi ${l.icon}"></i></span><div><p class="ts-eyebrow">MÓDULO ${i}</p><h2>${escapeHtml(l.title)}</h2><p>${escapeHtml(l.summary)}</p></div></div><div class="ts-lesson-block"><h3>Por que você precisa saber isso?</h3><p>${escapeHtml(l.why)}</p></div><div class="ts-lesson-block"><h3>O que você vai dominar</h3><ul>${l.learn.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><div class="ts-lesson-block"><h3>Aplicação prática</h3><p>${escapeHtml(l.practice)}</p></div>${l.alert?`<div class="ts-warning"><i class="bi bi-exclamation-triangle"></i><p><b>Alerta técnico</b><span>${escapeHtml(l.alert)}</span></p></div>`:''}<div class="ts-lesson-actions"><button class="ts-btn secondary" data-lesson-survey><i class="bi bi-rulers"></i> Aplicar no levantamento</button><button class="ts-btn primary" data-complete-lesson><i class="bi bi-check2-circle"></i> ${courseProgress.has(i)?'Concluído':'Marcar como concluído'}</button></div>`;
     $('[data-complete-lesson]').addEventListener('click',()=>{courseProgress.add(i);saveJson(COURSE_STORE,[...courseProgress]);renderCourse($('#courseSearch').value);openLesson(i)});
-    $('[data-lesson-survey]').addEventListener('click',()=>openView('survey'));
-    renderCourse($('#courseSearch').value);
+    $('[data-lesson-survey]').addEventListener('click',()=>openView('survey')); renderCourse($('#courseSearch').value);
   }
   function updateCourseProgress(){const pct=Math.round((courseProgress.size/lessons.length)*100);$('#coursePct').textContent=`${pct}%`;$('#courseRing').style.setProperty('--pct',`${pct}%`);$('#courseCompleted').textContent=`${courseProgress.size} de ${lessons.length} módulos concluídos`}
 
+  function technicalEditable(){return ['DRAFT','PENDING_VALIDATION'].includes(draft().status)}
+  function commercialEditable(){return ['DRAFT','PENDING_VALIDATION','VALIDATED'].includes(draft().status)}
+
   function renderSurvey(){
+    if(!activeSurvey)return;
     $('#surveyStepper').innerHTML=sections.map((s,i)=>`<button type="button" class="ts-step-btn ${i===currentSection?'active':''}" data-step="${i}" title="${escapeHtml(s.title)}">${i+1}</button>`).join('');
     $('#surveySections').innerHTML=sections.map((s,i)=>`<section class="ts-form-section ${i===currentSection?'active':''}" data-section="${i}"><div class="ts-form-section-head"><div><p class="ts-eyebrow">ETAPA ${i+1} DE ${sections.length}</p><h2>${escapeHtml(s.title)}</h2><p>${escapeHtml(s.desc)}</p>${s.learn?`<button type="button" class="ts-learn-btn" data-learn="${s.learn}"><i class="bi bi-mortarboard"></i> Aprender este conceito</button>`:''}</div><span class="ts-section-icon"><i class="bi ${s.icon}"></i></span></div><div class="ts-form-grid">${s.fields.map(renderField).join('')}${i===1?'<div class="ts-measure-result wide" id="measureReference"></div>':''}${s.photos?renderPhotoZone(s.photos):''}</div></section>`).join('');
-    hydrateForm(); bindForm(); bindLearn(); bindPhotoInputs(); updateSurveyProgress();
+    bindForm(); bindLearn(); bindPhotoInputs(); updateSurveyProgress(); applyLocks(); renderWorkflow(); hydrateCrm();
   }
+
   function renderField(x){
-    const req=x.required?'<em class="ts-required">*</em>':'';
-    let control=''; const value=draft().fields[x.id] ?? '';
+    const req=x.required?'<em class="ts-required">*</em>':''; let control=''; const value=draft().fields?.[x.id] ?? '';
     if(x.type==='select') control=`<select data-field="${x.id}" ${x.required?'data-required="1"':''}><option value="">Selecione…</option>${x.options.map(o=>`<option ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>`;
     else if(x.type==='textarea') control=`<textarea rows="3" data-field="${x.id}" ${x.required?'data-required="1"':''}>${escapeHtml(value)}</textarea>`;
     else if(x.type==='checks'){const current=Array.isArray(value)?value:[];control=`<div class="ts-option-grid">${x.options.map(o=>`<label class="ts-option"><input type="checkbox" data-field-check="${x.id}" value="${escapeAttr(o)}" ${current.includes(o)?'checked':''}> ${escapeHtml(o)}</label>`).join('')}</div>`;}
     else control=`<input type="${x.type}" data-field="${x.id}" ${x.required?'data-required="1"':''} value="${escapeAttr(value)}" ${x.type==='number'?'min="0" step="1" inputmode="numeric"':''}>`;
     return `<div class="ts-field ${x.type==='textarea'||x.type==='checks'?'wide':''}"><span>${escapeHtml(x.label)} ${req}</span>${control}${x.helper?`<small class="ts-helper"><i class="bi bi-info-circle"></i>${escapeHtml(x.helper)}</small>`:''}${x.learn?`<button type="button" class="ts-learn-btn" data-learn="${x.learn}"><i class="bi bi-question-circle"></i> O que é isso?</button>`:''}</div>`;
   }
-  function renderPhotoZone(p){return `<div class="ts-photo-zone"><div class="ts-photo-zone-head"><div><h4><i class="bi bi-camera"></i> ${escapeHtml(p.title)}</h4><p>${escapeHtml(p.desc)}</p></div><label class="ts-btn secondary ts-camera-btn"><i class="bi bi-camera-fill"></i> Abrir câmera<input type="file" accept="image/*" capture="environment" multiple data-photo-input="${p.id}"></label></div><div class="ts-photo-previews" data-photo-list="${p.id}"></div></div>`}
-  function hydrateForm(){ $$('[data-field]').forEach(el=>{const v=draft().fields[el.dataset.field];if(v!==undefined && el.value!==String(v))el.value=v}); }
+
+  function renderPhotoZone(p){return `<div class="ts-photo-zone"><div class="ts-photo-zone-head"><div><h4><i class="bi bi-camera"></i> ${escapeHtml(p.title)}</h4><p>${escapeHtml(p.desc)} Fotos e vídeos ficam salvos no servidor.</p></div><label class="ts-btn secondary ts-camera-btn"><i class="bi bi-camera-fill"></i> Câmera / arquivo<input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" capture="environment" multiple data-photo-input="${p.id}"></label></div><div class="ts-photo-previews" data-photo-list="${p.id}"></div></div>`}
+
   function bindForm(){
-    $$('[data-field]').forEach(el=>el.addEventListener('input',()=>{draft().fields[el.dataset.field]=el.value;touchDraft();if(['width_top','width_middle','width_bottom','height_left','height_middle','height_right'].includes(el.dataset.field))updateBudgetSummary();updateSurveyProgress()}));
+    $$('[data-field]').forEach(el=>el.addEventListener('input',()=>{draft().fields[el.dataset.field]=el.value;touchDraft();updateSurveyProgress()}));
     $$('[data-field-check]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.fieldCheck;draft().fields[id]=$$(`[data-field-check="${id}"]:checked`).map(c=>c.value);touchDraft();updateSurveyProgress()}));
   }
-  function touchDraft(){draft().updatedAt=new Date().toISOString();saveDrafts();renderDraftSelect();$('#autosaveStatus').innerHTML='<i class="bi bi-cloud-check"></i> Rascunho salvo automaticamente';}
-  function updateSurveyProgress(){const required=$$('[data-required="1"]');const done=required.filter(x=>String(x.value||'').trim()).length;const pct=required.length?Math.round(done/required.length*100):0;$('#surveyPct').textContent=`${pct}%`;$('#surveyProgress').style.width=`${pct}%`;$('#surveyMissing').textContent=pct===100?'Campos essenciais preenchidos. Faça a revisão técnica.':`${required.length-done} campo(s) essencial(is) ainda não preenchido(s).`;$('#surveyStepper').querySelectorAll('button').forEach((b,i)=>{const sec=$(`[data-section="${i}"]`);const req=$$('[data-required="1"]',sec);if(req.length && req.every(x=>String(x.value||'').trim()))b.classList.add('done');else b.classList.remove('done')});const mr=$('#measureReference');if(mr){const r=refs();const d=draft().fields;const diag=(Number(d.diagonal_1)&&Number(d.diagonal_2))?Math.abs(Number(d.diagonal_1)-Number(d.diagonal_2)):null;mr.innerHTML=`<i class="bi bi-bounding-box"></i><div><small>REFERÊNCIA AUTOMÁTICA DO LEVANTAMENTO</small><b>${r.w&&r.h?`${r.w} × ${r.h} mm`:'Preencha as 3 larguras e 3 alturas'}</b>${diag!==null?`<span>Diferença registrada entre diagonais: ${diag} mm · validar condição do esquadro.</span>`:''}</div>`;}updateBudgetSummary()}
-  function goSection(i){currentSection=Math.max(0,Math.min(sections.length-1,i));$$('.ts-form-section').forEach((s,n)=>s.classList.toggle('active',n===currentSection));$$('.ts-step-btn').forEach((b,n)=>b.classList.toggle('active',n===currentSection));$('#prevSection').disabled=currentSection===0;$('#nextSection').innerHTML=currentSection===sections.length-1?'Ir para orçamento <i class="bi bi-arrow-right"></i>':'Próxima etapa <i class="bi bi-arrow-right"></i>';window.scrollTo({top:0,behavior:'smooth'});loadSectionPhotos()}
+  function touchDraft(){queueSave();updateBudgetSummary();}
 
-  function bindLearn(){ $$('[data-learn]').forEach(b=>b.addEventListener('click',()=>showMicro(b.dataset.learn))); }
-  function showMicro(key){const m=micro[key];if(!m)return;$('#learnDialogContent').innerHTML=`<div class="ts-dialog-content"><i class="bi ${m.icon}"></i><h2>${escapeHtml(m.title)}</h2><p class="lead">${escapeHtml(m.lead)}</p><div class="ts-learn-grid"><article><h3>O que observar</h3><p>${escapeHtml(m.what)}</p></article><article><h3>Como fazer</h3><p>${escapeHtml(m.how)}</p></article><article><h3>Impacto técnico/comercial</h3><p>${escapeHtml(m.impact)}</p></article><article><h3>Regra do sistema</h3><p>Se houver dúvida, registre a condição real, fotografe e marque para validação técnica. Não presuma.</p></article></div></div>`;$('#learnDialog').showModal()}
-
-  function openView(view){$$('.ts-view').forEach(v=>v.classList.toggle('active',v.dataset.viewPanel===view));$$('.ts-nav').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#viewTitle').textContent=view==='academy'?'Academia técnica':view==='survey'?'Levantamento técnico-comercial':'Orçamento preliminar';if(view==='survey'){renderSurvey();goSection(currentSection)}if(view==='budget'){hydrateBudget();updateBudgetSummary()}window.scrollTo({top:0,behavior:'smooth'})}
-
-  async function dbOpen(){return new Promise((resolve,reject)=>{const req=indexedDB.open('hgTechnicalSalesAssets',1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('photos'))db.createObjectStore('photos',{keyPath:'key'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-  async function savePhoto(group,file){const db=await dbOpen();const key=`${activeDraftId}:${group}:${Date.now()}:${Math.random()}`;await new Promise((res,rej)=>{const tx=db.transaction('photos','readwrite');tx.objectStore('photos').put({key,draftId:activeDraftId,group,name:file.name,type:file.type,blob:file});tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}
-  async function getPhotos(group=null){const db=await dbOpen();const rows=await new Promise((res,rej)=>{const tx=db.transaction('photos','readonly');const req=tx.objectStore('photos').getAll();req.onsuccess=()=>res(req.result.filter(x=>x.draftId===activeDraftId && (!group||x.group===group)));req.onerror=()=>rej(req.error)});db.close();return rows}
-  async function deletePhoto(key){const db=await dbOpen();await new Promise((res,rej)=>{const tx=db.transaction('photos','readwrite');tx.objectStore('photos').delete(key);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}
-  function clearPhotoUrls(){photoUrls.forEach(URL.revokeObjectURL);photoUrls=[]}
-  async function renderPhotoGroup(group){const list=$(`[data-photo-list="${group}"]`);if(!list)return;const rows=await getPhotos(group);list.innerHTML=rows.map(x=>{const url=URL.createObjectURL(x.blob);photoUrls.push(url);return `<div class="ts-photo-item"><img src="${url}" alt="${escapeAttr(x.name)}"><small>${escapeHtml(x.name)}</small><button type="button" data-delete-photo="${escapeAttr(x.key)}"><i class="bi bi-x-lg"></i></button></div>`}).join('');$$('[data-delete-photo]',list).forEach(b=>b.addEventListener('click',async()=>{await deletePhoto(b.dataset.deletePhoto);renderPhotoGroup(group)}))}
-  function bindPhotoInputs(){ $$('[data-photo-input]').forEach(inp=>inp.addEventListener('change',async()=>{for(const file of inp.files){if(file.type.startsWith('image/'))await savePhoto(inp.dataset.photoInput,file)}inp.value='';await renderPhotoGroup(inp.dataset.photoInput)}));loadSectionPhotos()}
-  function loadSectionPhotos(){clearPhotoUrls();const s=sections[currentSection];if(s?.photos)renderPhotoGroup(s.photos.id)}
-
-  function parseMoney(v){const s=String(v||'').trim().replace(/\./g,'').replace(',','.').replace(/[^0-9.-]/g,'');return Number(s)||0}
-  function hydrateBudget(){ $$('[data-budget]').forEach(i=>i.value=draft().budget[i.dataset.budget]??'');$$('[data-commercial]').forEach(i=>i.value=draft().commercial[i.dataset.commercial]??'');calcBudget(); }
-  function calcBudget(){let total=0;$$('[data-budget]').forEach(i=>total+=parseMoney(i.value));$('#budgetTotal').textContent=money.format(total);draft().budgetTotal=total;saveDrafts();updateBudgetSummary()}
-  function refs(){const d=draft().fields;const widths=['width_top','width_middle','width_bottom'].map(k=>Number(d[k])).filter(Boolean);const heights=['height_left','height_middle','height_right'].map(k=>Number(d[k])).filter(Boolean);return {w:widths.length?Math.min(...widths):null,h:heights.length?Math.min(...heights):null}}
-  function updateBudgetSummary(){const d=draft().fields,r=refs();const rows=[['Cliente',d.client_name||'—'],['Local',d.city_country||'—'],['Vão de referência',r.w&&r.h?`${r.w} × ${r.h} mm`:'—'],['Verga',d.headroom?`${d.headroom} mm`:'—'],['Laterais',d.left_side&&d.right_side?`${d.left_side} / ${d.right_side} mm`:'—'],['Painel',d.panel_type||'—'],['Acionamento',d.operation_mode||'—'],['Uso',d.usage_intensity||'—'],['Tensão',d.voltage||'—'],['Estrutura',d.structure_material||'—'],['Total preliminar',money.format(draft().budgetTotal||0)]];$('#budgetSummary').innerHTML=rows.map(x=>`<div class="ts-summary-row"><span>${escapeHtml(x[0])}</span><b>${escapeHtml(String(x[1]))}</b></div>`).join('')}
-
-  async function buildPrintSheet(){const d=draft(),r=refs();const photos=await getPhotos();const grouped={};photos.forEach(p=>(grouped[p.group]??=[]).push(p));let html=`<div class="print-header"><div><h1>Levantamento técnico-comercial · Porta Seccionada Residencial</h1><p>${escapeHtml(cfg.brandName||'')} · Orçamento preliminar sujeito a validação técnica</p></div><img src="${escapeAttr(cfg.logoUrl||'')}" alt="logo"></div>`;
-    sections.forEach((s,idx)=>{const fields=s.fields.map(x=>{let v=d.fields[x.id];if(Array.isArray(v))v=v.join(', ');return v?`<div class="print-field"><b>${escapeHtml(x.label)}</b>${escapeHtml(String(v))}</div>`:''}).join('');const photosFor=s.photos?(grouped[s.photos.id]||[]):[];html+=`<div class="print-section"><h2>${idx+1}. ${escapeHtml(s.title)}</h2><div class="print-grid">${fields||'<div class="print-field">Sem informações registradas.</div>'}</div>${photosFor.length?`<div class="print-photos">${photosFor.map(p=>{const url=URL.createObjectURL(p.blob);photoUrls.push(url);return `<img src="${url}" alt="${escapeAttr(p.name)}">`}).join('')}</div>`:''}</div>`});
-    const budgetLabels={door:'Porta / painéis',automation:'Automação',accessories:'Acessórios',transport:'Transporte',installation:'Instalação',reinforcement:'Reforço estrutural',electrical:'Elétrica / adicionais',taxes:'Impostos / outros'};const budgetRows=$$('[data-budget]').map(i=>[budgetLabels[i.dataset.budget]||i.dataset.budget,parseMoney(i.value)]).filter(x=>x[1]);html+=`<div class="print-section"><h2>Composição comercial preliminar</h2><div class="print-grid">${budgetRows.map(([k,v])=>`<div class="print-field"><b>${escapeHtml(String(k).trim())}</b>${money.format(v)}</div>`).join('')}</div><div class="print-total">Total preliminar: ${money.format(d.budgetTotal||0)}</div></div>`;
-    html+=`<div class="print-section"><h2>Resumo técnico</h2><div class="print-grid"><div class="print-field"><b>Medida de referência do vão</b>${r.w&&r.h?`${r.w} × ${r.h} mm`:'Não concluída'}</div><div class="print-field"><b>Responsável técnico-comercial</b>${escapeHtml(d.fields.sales_responsible||cfg.userName||'')}</div></div></div><div class="print-note"><b>VALIDAÇÃO:</b> Este documento permite elaborar uma estimativa/orçamento preliminar. A medida do vão não é necessariamente a medida final de fabricação. O orçamento definitivo e a liberação para fabricação dependem de validação técnica das medidas, estrutura, interferências, componentes e condições do local.</div>`;
-    $('#printSheet').innerHTML=html;$('#printSheet').setAttribute('aria-hidden','false')
+  function updateSurveyProgress(){
+    const required=$$('[data-required="1"]'); const done=required.filter(x=>String(x.value||'').trim()).length; const pct=required.length?Math.round(done/required.length*100):0;
+    draft().progress=pct; $('#surveyPct').textContent=`${pct}%`; $('#surveyProgress').style.width=`${pct}%`; $('#surveyMissing').textContent=pct===100?'Campos essenciais preenchidos. Envie para validação técnica.':`${required.length-done} campo(s) essencial(is) ainda não preenchido(s).`;
+    $('#surveyStepper').querySelectorAll('button').forEach((b,i)=>{const sec=$(`[data-section="${i}"]`);const req=$$('[data-required="1"]',sec);b.classList.toggle('done',req.length>0 && req.every(x=>String(x.value||'').trim()))});
+    const mr=$('#measureReference'); if(mr){const r=refs();const d=draft().fields;const diag=(Number(d.diagonal_1)&&Number(d.diagonal_2))?Math.abs(Number(d.diagonal_1)-Number(d.diagonal_2)):null;mr.innerHTML=`<i class="bi bi-bounding-box"></i><div><small>REFERÊNCIA AUTOMÁTICA DO LEVANTAMENTO</small><b>${r.w&&r.h?`${r.w} × ${r.h} mm`:'Preencha as 3 larguras e 3 alturas'}</b>${diag!==null?`<span>Diferença registrada entre diagonais: ${diag} mm · validar condição do esquadro.</span>`:''}</div>`;}
+    renderWorkflow(); updateBudgetSummary();
   }
 
-  function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
-  function escapeAttr(v){return escapeHtml(v)}
+  function goSection(i){currentSection=Math.max(0,Math.min(sections.length-1,i));$$('.ts-form-section').forEach((s,n)=>s.classList.toggle('active',n===currentSection));$$('.ts-step-btn').forEach((b,n)=>b.classList.toggle('active',n===currentSection));$('#prevSection').disabled=currentSection===0;$('#nextSection').innerHTML=currentSection===sections.length-1?'Ir para orçamento <i class="bi bi-arrow-right"></i>':'Próxima etapa <i class="bi bi-arrow-right"></i>';window.scrollTo({top:0,behavior:'smooth'});loadSectionAttachments()}
+  function bindLearn(){$$('[data-learn]').forEach(b=>b.addEventListener('click',()=>showMicro(b.dataset.learn)))}
+  function showMicro(key){const m=micro[key];if(!m)return;$('#learnDialogContent').innerHTML=`<div class="ts-dialog-content"><i class="bi ${m.icon}"></i><h2>${escapeHtml(m.title)}</h2><p class="lead">${escapeHtml(m.lead)}</p><div class="ts-learn-grid"><article><h3>O que observar</h3><p>${escapeHtml(m.what)}</p></article><article><h3>Como fazer</h3><p>${escapeHtml(m.how)}</p></article><article><h3>Impacto técnico/comercial</h3><p>${escapeHtml(m.impact)}</p></article><article><h3>Regra do sistema</h3><p>Se houver dúvida, registre a condição real, fotografe e marque para validação técnica. Não presuma.</p></article></div></div>`;$('#learnDialog').showModal()}
+
+  async function uploadAttachments(group, files){
+    if(!files.length)return;
+    setServerState('saving','Enviando anexos');
+    const form=new FormData(); form.append('group',group); [...files].forEach(file=>form.append('file',file));
+    const data=await api(`/api/technical-surveys/${draft().id}/attachments`,{method:'POST',body:form});
+    draft().attachments=[...(draft().attachments||[]),...(data.items||[])];
+    await refreshDetail(false); renderPhotoGroup(group); renderHistory(); setServerState('saved','Sincronizado');
+  }
+  function bindPhotoInputs(){$$('[data-photo-input]').forEach(inp=>inp.addEventListener('change',async()=>{try{await uploadAttachments(inp.dataset.photoInput,inp.files)}catch(e){showError(e)}finally{inp.value=''}}));loadSectionAttachments()}
+  function loadSectionAttachments(){const s=sections[currentSection];if(s?.photos)renderPhotoGroup(s.photos.id)}
+  function renderPhotoGroup(group){
+    const list=$(`[data-photo-list="${group}"]`); if(!list)return;
+    const rows=(draft().attachments||[]).filter(x=>x.group===group);
+    list.innerHTML=rows.map(x=>`<div class="ts-photo-item">${x.mimeType?.startsWith('video/')?`<video src="${escapeAttr(x.url)}" controls preload="metadata"></video>`:`<img src="${escapeAttr(x.url)}" alt="${escapeAttr(x.name)}">`}<small>${escapeHtml(x.name)}</small>${technicalEditable()?`<button type="button" data-delete-attachment="${x.id}" title="Excluir"><i class="bi bi-x-lg"></i></button>`:''}</div>`).join('') || '<div class="ts-photo-empty"><i class="bi bi-cloud"></i><span>Nenhum anexo nesta etapa.</span></div>';
+    $$('[data-delete-attachment]',list).forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Excluir este anexo do servidor?'))return;try{await api(`/api/technical-surveys/attachments/${b.dataset.deleteAttachment}`,{method:'DELETE'});draft().attachments=draft().attachments.filter(x=>String(x.id)!==String(b.dataset.deleteAttachment));renderPhotoGroup(group);await refreshDetail(false);renderHistory()}catch(e){showError(e)}}));
+  }
+
+  async function loadCompanies(q=''){
+    try{
+      const data=await api(`/api/companies?perPage=100${q?`&q=${encodeURIComponent(q)}`:''}`);
+      companyOptions=new Map((data.items||[]).map(x=>[`${x.name}${x.city?` · ${x.city}`:''}`,x]));
+      $('#companyOptions').innerHTML=[...companyOptions].map(([label,x])=>`<option value="${escapeAttr(label)}" data-id="${x.id}"></option>`).join('');
+    }catch(e){console.warn('CRM search',e)}
+  }
+  function hydrateCrm(){
+    const input=$('#companySearch'); if(!input||!activeSurvey)return;
+    if(activeSurvey.company){input.value=`${activeSurvey.company.name}${activeSurvey.company.city?` · ${activeSurvey.company.city}`:''}`;$('#companyLinkHelp').textContent=`Vinculado ao CRM · ID ${activeSurvey.company.id}`;}
+    else {input.value='';$('#companyLinkHelp').textContent='A ficha pode existir sem vínculo e ser vinculada depois.';}
+  }
+  async function linkCompanyByLabel(label){
+    const hit=companyOptions.get(label); if(!hit)return;
+    try{await flushSave();const saved=await api(`/api/technical-surveys/${draft().id}`,{method:'PATCH',body:{companyId:hit.id}});activeSurvey=saved;mergeSurveySummary(saved);hydrateCrm();renderWorkflow();renderHistory();renderDraftSelect()}catch(e){showError(e)}
+  }
+  async function unlinkCompany(){
+    if(!draft().companyId)return;
+    try{await flushSave();const saved=await api(`/api/technical-surveys/${draft().id}`,{method:'PATCH',body:{companyId:null}});activeSurvey=saved;mergeSurveySummary(saved);hydrateCrm();renderHistory();renderDraftSelect()}catch(e){showError(e)}
+  }
+
+  const STATUS_FLOW=[
+    ['DRAFT','Rascunho','bi-pencil-square'],['PENDING_VALIDATION','Validação técnica','bi-clipboard2-pulse'],['VALIDATED','Validado','bi-patch-check'],['QUOTE_GENERATED','Orçamento gerado','bi-file-earmark-check'],['APPROVED','Aprovado','bi-check2-circle']
+  ];
+  function renderWorkflow(){
+    if(!activeSurvey)return; const d=draft();
+    const badge=$('#statusBadge'); badge.textContent=d.statusLabel||STATUS_FLOW.find(x=>x[0]===d.status)?.[1]||d.status; badge.className=`ts-status-badge status-${d.status}`;
+    const current=STATUS_FLOW.findIndex(x=>x[0]===d.status);
+    $('#statusTrack').innerHTML=STATUS_FLOW.map((x,i)=>`<div class="ts-status-node ${i<current?'done':i===current?'active':''}"><i class="bi ${x[2]}"></i><span>${escapeHtml(x[1])}</span></div>`).join('');
+    const actions=[];
+    if(d.status==='DRAFT') actions.push(`<button class="ts-btn primary" data-status="PENDING_VALIDATION"><i class="bi bi-send-check"></i> Enviar para validação</button>`);
+    if(d.status==='PENDING_VALIDATION'){
+      if(d.permissions?.canValidate) actions.push(`<button class="ts-btn primary" data-status="VALIDATED"><i class="bi bi-patch-check"></i> Validar tecnicamente</button>`);
+      actions.push(`<button class="ts-btn secondary" data-status="DRAFT"><i class="bi bi-arrow-counterclockwise"></i> Voltar a rascunho</button>`);
+    }
+    if(d.status==='VALIDATED') actions.push(`<button class="ts-btn secondary" data-status="PENDING_VALIDATION"><i class="bi bi-pencil-square"></i> Reabrir para revisão</button>`,`<button class="ts-btn primary" data-open-view="budget"><i class="bi bi-receipt"></i> Compor orçamento</button>`);
+    if(d.status==='QUOTE_GENERATED') actions.push(`<button class="ts-btn secondary" data-status="VALIDATED"><i class="bi bi-arrow-counterclockwise"></i> Voltar para validado</button>`,`<button class="ts-btn primary" data-open-view="budget"><i class="bi bi-pen"></i> Assinatura / aprovação</button>`);
+    if(d.status==='APPROVED') actions.push(`<button class="ts-btn secondary" data-status="QUOTE_GENERATED"><i class="bi bi-arrow-counterclockwise"></i> Reabrir orçamento</button>`);
+    $('#workflowActions').innerHTML=actions.join('');
+    $$('[data-status]', $('#workflowActions')).forEach(b=>b.addEventListener('click',()=>changeStatus(b.dataset.status)));
+    $$('[data-open-view]', $('#workflowActions')).forEach(b=>b.addEventListener('click',()=>openView(b.dataset.openView)));
+    $('#validationNotes').value=d.validationNotes||'';
+    $('#validationNotes').disabled=d.status==='APPROVED';
+    applyLocks(); renderSignatureState(); updateBudgetActionState();
+  }
+
+  async function changeStatus(target){
+    try{
+      await flushSave();
+      const body={status:target,notes:$('#validationNotes')?.value||''};
+      setServerState('saving','Atualizando status');
+      const saved=await api(`/api/technical-surveys/${draft().id}/status`,{method:'POST',body});
+      activeSurvey=saved;mergeSurveySummary(saved);renderAllActive();setServerState('saved','Sincronizado');
+      if(target==='VALIDATED') openView('budget');
+    }catch(e){if(e.data?.missingRequired){openView('survey');alert(`${e.message}\n\nFaltam ${e.data.missingRequired.length} campos essenciais.`)}else showError(e)}
+  }
+
+  function applyLocks(){
+    const tech=technicalEditable(); const commercial=commercialEditable();
+    $$('[data-field], [data-field-check], [data-photo-input]').forEach(el=>el.disabled=!tech);
+    $$('.ts-camera-btn').forEach(el=>el.classList.toggle('disabled',!tech));
+    $$('[data-budget], [data-commercial]').forEach(el=>el.disabled=!commercial);
+    $('#deleteDraft').disabled=!(draft().permissions?.canDelete ?? draft().status==='DRAFT');
+  }
+
+  function parseMoney(v){
+    const raw=String(v||'').trim(); if(!raw)return 0;
+    if(currency==='PYG') return Number(raw.replace(/[^0-9-]/g,''))||0;
+    const s=raw.replace(/\./g,'').replace(',','.').replace(/[^0-9.-]/g,''); return Number(s)||0;
+  }
+  function hydrateBudget(){$$('[data-budget]').forEach(i=>i.value=draft().budget?.[i.dataset.budget]??'');$$('[data-commercial]').forEach(i=>i.value=draft().commercial?.[i.dataset.commercial]??'');calcBudget(false);renderSignatureState();applyLocks();}
+  function calcBudget(save=true){let total=0;$$('[data-budget]').forEach(i=>total+=parseMoney(i.value));$('#budgetTotal').textContent=money.format(total);draft().budgetTotal=total;if(save)queueSave();updateBudgetSummary()}
+  function refs(){const d=draft().fields||{};const widths=['width_top','width_middle','width_bottom'].map(k=>Number(d[k])).filter(Boolean);const heights=['height_left','height_middle','height_right'].map(k=>Number(d[k])).filter(Boolean);return {w:widths.length?Math.min(...widths):null,h:heights.length?Math.min(...heights):null}}
+  function updateBudgetSummary(){const d=draft().fields||{},r=refs();const rows=[['Ficha',draft().reference||'—'],['Status',draft().statusLabel||'—'],['Cliente',d.client_name||'—'],['CRM',draft().company?.name||'Sem vínculo'],['Local',d.city_country||'—'],['Vão de referência',r.w&&r.h?`${r.w} × ${r.h} mm`:'—'],['Verga',d.headroom?`${d.headroom} mm`:'—'],['Laterais',d.left_side&&d.right_side?`${d.left_side} / ${d.right_side} mm`:'—'],['Painel',d.panel_type||'—'],['Acionamento',d.operation_mode||'—'],['Tensão',d.voltage||'—'],['Total preliminar',money.format(draft().budgetTotal||0)]];$('#budgetSummary').innerHTML=rows.map(x=>`<div class="ts-summary-row"><span>${escapeHtml(x[0])}</span><b>${escapeHtml(String(x[1]))}</b></div>`).join('')}
+
+  async function generatePdf(){
+    try{
+      await flushSave(); setServerState('saving','Gerando orçamento');
+      const data=await api(`/api/technical-surveys/${draft().id}/generate-quote`,{method:'POST'});
+      activeSurvey=data.survey;mergeSurveySummary(activeSurvey);renderAllActive();setServerState('saved','Sincronizado');
+      window.open(data.pdfUrl,'_blank','noopener');
+    }catch(e){showError(e)}
+  }
+  function updateBudgetActionState(){
+    const canPdf=['VALIDATED','QUOTE_GENERATED','APPROVED'].includes(draft().status);
+    $('#generatePdf').disabled=!canPdf;
+    $('#generatePdf').title=canPdf?'Gerar PDF definitivo do orçamento':'A ficha precisa ser validada tecnicamente antes do PDF.';
+    $('#approveSurvey').style.display=['QUOTE_GENERATED','APPROVED'].includes(draft().status)?'inline-flex':'none';
+    $('#approveSurvey').disabled=draft().status==='APPROVED';
+  }
+
+  function setupSignaturePad(){
+    const canvas=$('#signaturePad'); if(!canvas)return; const ctx=canvas.getContext('2d'); ctx.lineWidth=4;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#17231f';
+    const point=e=>{const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)*(canvas.width/r.width),y:(e.clientY-r.top)*(canvas.height/r.height)}};
+    canvas.addEventListener('pointerdown',e=>{if(!signatureEnabled())return;signatureDrawing=true;signatureDirty=true;canvas.setPointerCapture(e.pointerId);const p=point(e);ctx.beginPath();ctx.moveTo(p.x,p.y)});
+    canvas.addEventListener('pointermove',e=>{if(!signatureDrawing)return;const p=point(e);ctx.lineTo(p.x,p.y);ctx.stroke()});
+    const stop=()=>{signatureDrawing=false}; canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('pointerleave',stop);
+  }
+  function signatureEnabled(){return ['QUOTE_GENERATED','APPROVED'].includes(draft().status)}
+  function clearSignatureCanvas(){const canvas=$('#signaturePad');if(!canvas)return;canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);signatureDirty=true;}
+  function drawStoredSignature(){
+    const canvas=$('#signaturePad');if(!canvas)return;const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);signatureDirty=false;
+    if(!draft().signatureData)return;const img=new Image();img.onload=()=>{ctx.drawImage(img,0,0,canvas.width,canvas.height)};img.src=draft().signatureData;
+  }
+  function renderSignatureState(){
+    const enabled=signatureEnabled(); const canvas=$('#signaturePad'); if(!canvas)return;
+    canvas.classList.toggle('disabled',!enabled); $('#signatureName').disabled=!enabled;$('#clearSignature').disabled=!enabled;$('#saveSignature').disabled=!enabled;
+    $('#signatureName').value=draft().signatureName||'';
+    $('#signatureHelp').textContent=enabled?'Assine no quadro e registre. A assinatura ficará vinculada à ficha no servidor.':'A assinatura é habilitada depois que a ficha for validada e o orçamento gerado.';
+    $('#signedState').innerHTML=draft().hasSignature?`<i class="bi bi-patch-check-fill"></i><div><b>Assinatura registrada</b><span>${escapeHtml(draft().signatureName||'')} · ${formatDate(draft().signedAt)}</span></div>`:'';
+    drawStoredSignature();
+  }
+  async function saveSignature(){
+    if(!signatureEnabled())return; const name=$('#signatureName').value.trim(); const canvas=$('#signaturePad');
+    if(!name){alert('Informe o nome completo do assinante.');return}
+    if(!signatureDirty && !draft().signatureData){alert('Registre a assinatura no quadro.');return}
+    const signatureData=signatureDirty?canvas.toDataURL('image/png'):draft().signatureData;
+    try{const saved=await api(`/api/technical-surveys/${draft().id}/signature`,{method:'POST',body:{name,signatureData}});activeSurvey=saved;mergeSurveySummary(saved);renderSignatureState();renderHistory();renderWorkflow()}catch(e){showError(e)}
+  }
+  async function approveSurvey(){if(draft().status==='APPROVED')return;await changeStatus('APPROVED')}
+
+  function eventIcon(action){return ({CREATED:'bi-plus-circle',CRM_LINK_CHANGED:'bi-building-check',STATUS_CHANGED:'bi-arrow-left-right',SIGNED:'bi-pen',ATTACHMENT_ADDED:'bi-paperclip',ATTACHMENT_REMOVED:'bi-trash3',QUOTE_GENERATED:'bi-file-earmark-check'}[action]||'bi-clock-history')}
+  function renderHistory(){
+    if(!activeSurvey)return; $('#historyReference').textContent=draft().reference||'—';
+    const events=draft().events||[];
+    $('#historyTimeline').innerHTML=events.length?events.map(e=>`<article class="ts-history-event"><span><i class="bi ${eventIcon(e.action)}"></i></span><div><div><b>${escapeHtml(e.summary||e.action)}</b><time>${formatDate(e.createdAt)}</time></div><p>${escapeHtml(e.user||'Sistema')}${e.fromStatus||e.toStatus?` · ${escapeHtml(e.fromStatus||'')} ${e.toStatus?'→ '+escapeHtml(e.toStatus):''}`:''}</p></div></article>`).join(''):'<div class="ts-history-empty"><i class="bi bi-clock-history"></i><p>Nenhum evento registrado ainda.</p></div>';
+    const d=draft();$('#historySummary').innerHTML=`<div class="ts-card-title"><span><i class="bi bi-card-checklist"></i></span><div><p class="ts-eyebrow">FICHA 360</p><h2>${escapeHtml(d.reference||'')}</h2></div></div><div class="ts-history-facts"><div><span>Status</span><b>${escapeHtml(d.statusLabel||'—')}</b></div><div><span>Cliente</span><b>${escapeHtml(d.fields?.client_name||'—')}</b></div><div><span>CRM</span><b>${escapeHtml(d.company?.name||'Sem vínculo')}</b></div><div><span>Criada por</span><b>${escapeHtml(d.createdBy||'—')}</b></div><div><span>Validação</span><b>${d.validatedAt?`${escapeHtml(d.validatedBy||'')} · ${formatDate(d.validatedAt)}`:'—'}</b></div><div><span>Assinatura</span><b>${d.signedAt?`${escapeHtml(d.signatureName||'')} · ${formatDate(d.signedAt)}`:'—'}</b></div><div><span>Aprovação</span><b>${formatDate(d.approvedAt)}</b></div><div><span>Anexos</span><b>${(d.attachments||[]).length}</b></div></div>`;
+  }
+
+  function openView(view){
+    $$('.ts-view').forEach(v=>v.classList.toggle('active',v.dataset.viewPanel===view));$$('.ts-nav').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+    const titles={academy:'Academia técnica',survey:'Levantamento técnico-comercial',budget:'Orçamento preliminar',history:'Histórico da ficha'};$('#viewTitle').textContent=titles[view]||'Academia técnica';
+    if(view==='survey'){renderSurvey();goSection(currentSection)} if(view==='budget'){hydrateBudget();updateBudgetSummary();renderWorkflow()} if(view==='history')renderHistory();window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  async function refreshDetail(render=true){
+    if(!activeSurvey)return; const detail=await api(`/api/technical-surveys/${draft().id}`);activeSurvey=detail;mergeSurveySummary(detail);if(render)renderAllActive();return detail;
+  }
+  function renderAllActive(){renderDraftSelect();renderSurvey();hydrateBudget();hydrateCrm();renderWorkflow();renderHistory();updateBudgetSummary();}
 
   function bindGlobal(){
     $$('.ts-nav').forEach(b=>b.addEventListener('click',()=>openView(b.dataset.view)));$$('[data-open-view]').forEach(b=>b.addEventListener('click',()=>openView(b.dataset.openView)));
     $('#courseSearch').addEventListener('input',e=>renderCourse(e.target.value));$('[data-start-course]').addEventListener('click',()=>openLesson(0));
-    $('#draftSelect').addEventListener('change',e=>{activeDraftId=e.target.value;localStorage.setItem('hgTechnicalSalesActiveDraft',activeDraftId);renderSurvey();hydrateBudget();updateBudgetSummary()});
-    $('#newDraft').addEventListener('click',()=>{const d=newDraftData();drafts[d.id]=d;activeDraftId=d.id;saveDrafts();renderDraftSelect();currentSection=0;renderSurvey();hydrateBudget();openView('survey')});
-    $('#deleteDraft').addEventListener('click',()=>{if(Object.keys(drafts).length<=1){alert('Mantenha pelo menos um levantamento ativo.');return}if(!confirm('Excluir este levantamento? Os dados serão removidos deste navegador.'))return;delete drafts[activeDraftId];activeDraftId=Object.keys(drafts)[0];saveDrafts();renderDraftSelect();renderSurvey();hydrateBudget()});
+    $('#draftSelect').addEventListener('change',e=>selectSurvey(e.target.value).catch(showError));
+    $('#newDraft').addEventListener('click',()=>createSurvey().catch(showError));
+    $('#deleteDraft').addEventListener('click',async()=>{if(!draft().permissions?.canDelete){alert('Somente fichas em rascunho podem ser excluídas.');return}if(!confirm('Excluir definitivamente esta ficha em rascunho?'))return;try{await api(`/api/technical-surveys/${draft().id}`,{method:'DELETE'});surveys=surveys.filter(x=>String(x.id)!==String(draft().id));activeSurvey=null;if(!surveys.length){await createSurvey()}else{await selectSurvey(surveys[0].id,false)}}catch(e){showError(e)}});
     $('#prevSection').addEventListener('click',e=>{e.preventDefault();goSection(currentSection-1)});$('#nextSection').addEventListener('click',e=>{e.preventDefault();if(currentSection===sections.length-1)openView('budget');else goSection(currentSection+1)});
-    $('#surveyStepper').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(b)goSection(Number(b.dataset.step))});
-    $('[data-close-dialog]').addEventListener('click',()=>$('#learnDialog').close());
-    $$('[data-budget]').forEach(i=>i.addEventListener('input',()=>{draft().budget[i.dataset.budget]=i.value;touchDraft();calcBudget()}));$$('[data-commercial]').forEach(i=>i.addEventListener('input',()=>{draft().commercial[i.dataset.commercial]=i.value;touchDraft()}));
-    $('#generatePdf').addEventListener('click',async()=>{await buildPrintSheet();setTimeout(()=>window.print(),80)});
+    $('#surveyStepper').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(b)goSection(Number(b.dataset.step))});$('[data-close-dialog]').addEventListener('click',()=>$('#learnDialog').close());
+    $$('[data-budget]').forEach(i=>i.addEventListener('input',()=>{draft().budget[i.dataset.budget]=i.value;calcBudget(true)}));$$('[data-commercial]').forEach(i=>i.addEventListener('input',()=>{draft().commercial[i.dataset.commercial]=i.value;queueSave()}));
+    $('#generatePdf').addEventListener('click',generatePdf);$('#approveSurvey').addEventListener('click',approveSurvey);
+    $('#validationNotes').addEventListener('input',()=>{draft().validationNotes=$('#validationNotes').value;queueSave(900)});
+    $('#companySearch').addEventListener('input',e=>{clearTimeout(companyTimer);companyTimer=setTimeout(()=>loadCompanies(e.target.value.trim()),250)});$('#companySearch').addEventListener('change',e=>linkCompanyByLabel(e.target.value));$('#unlinkCompany').addEventListener('click',unlinkCompany);
+    $('#clearSignature').addEventListener('click',clearSignatureCanvas);$('#saveSignature').addEventListener('click',saveSignature);
+    window.addEventListener('beforeunload',()=>{if(saveTimer&&draft().id){clearTimeout(saveTimer);saveTimer=null;try{fetch(`/api/technical-surveys/${draft().id}`,{method:'PATCH',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payloadFromDraft()),keepalive:true})}catch(_){}}});
   }
 
-  ensureDraft();renderDraftSelect();renderCourse();openLesson(0);renderSurvey();hydrateBudget();bindGlobal();goSection(0);
+  async function init(){
+    try{
+      renderCourse();openLesson(0);bindGlobal();setupSignaturePad();await loadCompanies();await loadSurveys();openView('academy');
+    }catch(e){showError(e)}
+  }
+  init();
 })();
