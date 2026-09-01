@@ -4,7 +4,7 @@
   const moduleTitles = {
     triage:"Calificar por sitio", research:"Cola de investigación", salesready:"Listo para ventas", hoy:"Mi día",
     crm:"CRM", pipeline:"Embudo comercial", visitas:"Visitas", radar:"Radar comercial", captacion:"Captación automática",
-    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", reportes:"Reportes comerciales", metrics:"Rendimiento"
+    oportunidades:"Oportunidades", smartlists:"Listas inteligentes", reportes:"Reportes comerciales", metrics:"Rendimiento", dataquality:"Calidad de datos", auditlog:"Auditoría"
   };
   let workspaceData = null;
   const bulkSelection = new Set();
@@ -22,6 +22,8 @@
     if (name === "reportes") loadReports();
     if (name === "hoy" && typeof loadToday === "function") loadToday();
     if (name === "radar" && typeof loadCommandCenter === "function") loadCommandCenter();
+    if (name === "dataquality") loadDataQuality();
+    if (name === "auditlog") loadAuditLog();
   }
 
   document.querySelectorAll("[data-module-target]").forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); openModule(link.dataset.moduleTarget); }));
@@ -58,7 +60,7 @@
     const blockers = (lead.blockers || []).slice(0,4);
     return `<article class="readiness-card ${bulkSelection.has(String(lead.id)) ? "selected-card" : ""}" data-ready-id="${esc(lead.id)}">
       <label><input type="checkbox" class="bulk-ready-check" data-id="${esc(lead.id)}" ${bulkSelection.has(String(lead.id))?"checked":""}></label>
-      <div><span class="${ready?"ready-flag":"blocked-flag"}">${ready?"● LISTO PARA VENTAS":"○ AÚN NO PREPARADO"}</span><h3>${esc(lead.company)}</h3><p>${esc(lead.project || "Proyecto por validar")}</p>
+      <div><span class="${ready?"ready-flag":"blocked-flag"}">${ready?'<i class="bi bi-check-circle-fill"></i> LISTO PARA VENTAS':'<i class="bi bi-circle"></i> AÚN NO PREPARADO'}</span><h3>${esc(lead.company)}</h3><p>${esc(lead.project || "Proyecto por validar")}</p>
       <div class="readiness-meta"><span>Preparación ${Number(lead.leadReadiness)||0}</span><span>Puntuación ${Number(lead.score)||0}</span><span>Confianza ${Number(lead.confidenceScore)||0}</span><span>Datos ${Number(lead.dataCompleteness)||0}%</span></div>
       ${blockers.length?`<p style="margin-top:9px">Falta: ${esc(blockers.join(", "))}</p>`:""}</div>
       <button class="open-ready" data-open-opportunity="${esc(lead.id)}"><i class="bi bi-arrow-right"></i></button>
@@ -178,23 +180,137 @@
     if(period==="custom"){if($("reportStart")?.value)p.set("start",$("reportStart").value);if($("reportEnd")?.value)p.set("end",$("reportEnd").value);}
     if($("reportUser")?.value)p.set("user",$("reportUser").value); return p;
   }
-  const reportTypeLabel=(v)=>({EMAIL_SENT:"Correo enviado",WHATSAPP_SENT:"WhatsApp",CALL:"Llamada",MEETING:"Reunión",VISIT_SCHEDULED:"Visita marcada",VISIT:"Visita realizada",PROPOSAL_SENT:"Propuesta",REPLY:"Respuesta recibida",FOLLOW_UP:"Seguimiento",NOTE:"Nota",DATA_UPDATE:"Actualización"}[v]||v||"Actividad");
+  const reportTypeLabel=(v)=>({EMAIL_SENT:"Correo enviado",WHATSAPP_SENT:"WhatsApp",CALL:"Llamada",MEETING:"Reunión",VISIT_SCHEDULED:"Visita marcada",VISIT:"Visita realizada",PROPOSAL_SENT:"Propuesta",REPLY:"Respuesta recibida"}[v]||v||"Actividad");
+  const yesNo=(v)=>v?'<span class="report-yes"><i class="bi bi-check-circle-fill"></i> Sí</span>':'<span class="report-no">—</span>';
   async function loadReports(){
-    const box=$("reportActivity"), kpis=$("reportKpis"), summary=$("reportSummary"); if(box)box.innerHTML='<p>Cargando registros...</p>';
+    const box=$("reportActivity"), kpis=$("reportKpis"), summary=$("reportSummary"); if(box)box.innerHTML='<p>Cargando empresas...</p>';
     try{const r=await fetch(`/api/reports/activity?${reportParams()}`);const d=await r.json();if(!r.ok)throw new Error(d.error||"No se pudo cargar el reporte");
       if($("reportUser") && $("reportUser").options.length<=1){(d.users||[]).forEach(u=>$("reportUser").insertAdjacentHTML("beforeend",`<option value="${esc(u)}">${esc(u)}</option>`));}
-      const m=d.metrics||{}; if(kpis)kpis.innerHTML=[["Empresas analizadas",m.analysed],["Clasificadas",m.classified],["Correos",m.emails],["WhatsApps",m.whatsapps],["Empresas que respondieron",m.replies],["Visitas marcadas",m.visitsScheduled ?? m.visits],["Propuestas",m.proposals],["Seguimientos pendientes",m.pendingFollowups]].map(([l,v])=>`<article><small>${esc(l.toUpperCase())}</small><strong>${Number(v)||0}</strong></article>`).join("");
+      const m=d.metrics||{};
+      if(kpis)kpis.innerHTML=[
+        ["Empresas únicas analizadas",m.analysed],["Clasificadas",m.classified],["Empresas contactadas",m.contactedCompanies],["Empresas que respondieron",m.replies],
+        ["Visitas marcadas",m.visitsScheduled ?? m.visits],["Visitas realizadas",m.visitsCompleted],["Empresas con propuesta",m.proposals],["Ganadas",m.wins]
+      ].map(([l,v])=>`<article><small>${esc(l.toUpperCase())}</small><strong>${Number(v)||0}</strong></article>`).join("");
+      if($("reportTaskStats"))$("reportTaskStats").innerHTML=`<article><i class="bi bi-envelope-check"></i><span><small>CORREOS</small><b>${Number(m.emails)||0}</b></span></article><article><i class="bi bi-whatsapp"></i><span><small>WHATSAPPS</small><b>${Number(m.whatsapps)||0}</b></span></article><article><i class="bi bi-telephone"></i><span><small>LLAMADAS</small><b>${Number(m.calls)||0}</b></span></article><article><i class="bi bi-list-check"></i><span><small>TAREAS PENDIENTES</small><b>${Number(m.pendingFollowups)||0}</b></span></article><article class="${Number(m.overdueFollowups)>0?'overdue':''}"><i class="bi bi-exclamation-triangle"></i><span><small>TAREAS VENCIDAS</small><b>${Number(m.overdueFollowups)||0}</b></span></article>`;
       if(summary)summary.textContent=d.summary||"Sin actividad registrada en el período.";
-      if($("reportFunnel"))$("reportFunnel").innerHTML=`<div><b>${Number(m.analysed)||0}</b><span>Analizadas</span></div><i>→</i><div><b>${Number(m.classified)||0}</b><span>Clasificadas</span></div><i>→</i><div><b>${(Number(m.emails)||0)+(Number(m.whatsapps)||0)+(Number(m.calls)||0)}</b><span>Contactos</span></div><i>→</i><div><b>${Number(m.replies)||0}</b><span>Respondieron</span></div><i>→</i><div><b>${Number(m.visitsScheduled ?? m.visits)||0}</b><span>Visitas</span></div><i>→</i><div><b>${Number(m.proposals)||0}</b><span>Propuestas</span></div>`;
-      const rows=d.activities||[]; if($("reportCount"))$("reportCount").textContent=`${rows.length} registros`;
-      if(box)box.innerHTML=rows.length?`<div class="report-row report-row-header"><span>Fecha</span><span>Empresa</span><span>Actividad</span><span>Canal</span><span>Responsable</span></div>${rows.map(row=>`<div class="report-row"><span>${esc((row.date||"").slice(0,10))}</span><strong>${esc(row.company)}</strong><span>${esc(reportTypeLabel(row.type))}</span><span>${esc(row.channel||"—")}</span><span>${esc(row.createdBy||"Equipo comercial")}</span></div>`).join("")}`:'<p class="report-empty">No hay actividades registradas en este período.</p>';
+      if($("reportFunnel"))$("reportFunnel").innerHTML=`<div><b>${Number(m.analysed)||0}</b><span>Empresas únicas</span></div><i>→</i><div><b>${Number(m.classified)||0}</b><span>Clasificadas</span></div><i>→</i><div><b>${Number(m.contactedCompanies)||0}</b><span>Contactadas</span></div><i>→</i><div><b>${Number(m.replies)||0}</b><span>Respondieron</span></div><i>→</i><div><b>${Number(m.visitsScheduled ?? m.visits)||0}</b><span>Visitas</span></div><i>→</i><div><b>${Number(m.proposals)||0}</b><span>Propuestas</span></div>`;
+      const rows=d.companies||[]; if($("reportCount"))$("reportCount").textContent=`${rows.length} empresas`;
+      if(box)box.innerHTML=rows.length?`<div class="report-company-row report-company-header"><span>Empresa</span><span>Estado</span><span>Último contacto</span><span>Respondió</span><span>Visita</span><span>Propuesta</span><span>Próxima acción</span></div>${rows.map(row=>`<div class="report-company-row"><strong>${esc(row.company)}</strong><span>${esc(row.status||"CRM")}</span><span>${esc((row.lastContactAt||"").slice(0,10)||"—")}</span><span>${yesNo(row.replied)}</span><span>${row.visitCompleted?'<span class="report-yes">Realizada</span>':row.visitScheduled?'<span class="report-yes">Marcada</span>':'—'}</span><span>${yesNo(row.proposal)}</span><span>${esc(row.nextAction||"—")}</span></div>`).join("")}`:'<p class="report-empty">No hay empresas con actividad comercial relevante en este período.</p>';
     }catch(e){if(box)box.innerHTML=`<p class="report-empty">${esc(e.message)}</p>`;}
   }
+
   $("reportPeriod")?.addEventListener("change",()=>{document.querySelectorAll(".report-custom").forEach(el=>el.hidden=$("reportPeriod").value!=="custom");loadReports();});
   $("reportUser")?.addEventListener("change",loadReports); $("reportRefresh")?.addEventListener("click",loadReports);
   $("reportCopy")?.addEventListener("click",async()=>{await navigator.clipboard.writeText($("reportSummary")?.textContent||"");toastLocal("Resumen copiado");});
   $("reportCsv")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.csv?${reportParams()}`;});
   $("reportPdf")?.addEventListener("click",()=>{window.location.href=`/api/reports/activity.pdf?${reportParams()}`;});
+
+
+
+  // V15.6 · Importación de histórico comercial
+  const importFieldLabels = {
+    company:"Empresa*", legal_name:"Razón social", ruc:"RUC / CNPJ", website:"Sitio", sector:"Sector",
+    city:"Ciudad", department:"Departamento / Estado", country:"País", company_email:"Correo general empresa",
+    company_phone:"Teléfono empresa", company_whatsapp:"WhatsApp empresa", contact_name:"Nombre del contacto",
+    contact_role:"Cargo / área", contact_email:"Correo del contacto", contact_phone:"Teléfono del contacto",
+    contact_whatsapp:"WhatsApp del contacto", date:"Fecha de interacción", channel:"Canal", status:"Estado CRM",
+    observation:"Observación / histórico", next_action:"Próxima acción", next_action_at:"Fecha próxima acción", owner:"Responsable comercial"
+  };
+  let importPreviewData = null;
+
+  function closeImportHistory(){ $("importHistoryDialog")?.close(); }
+
+  let companySearchTimer=null;
+  function companyResultHtml(row){
+    const meta=[row.legalName&&row.legalName!==row.name?row.legalName:null,row.ruc?`RUC/CNPJ ${row.ruc}`:null,row.city,row.sector].filter(Boolean).join(" · ");
+    return `<button type="button" class="global-company-result" data-company-id="${esc(row.id)}" data-company-name="${esc(row.name)}"><span><strong>${esc(row.name)}</strong><small>${esc(meta||row.domain||'Ficha empresarial')}</small></span><em>${esc(row.status||'CRM')}</em></button>`;
+  }
+  async function searchCompaniesGlobal(){
+    const input=$("globalCompanySearch"),box=$("globalCompanyResults"); if(!input||!box)return;
+    const q=input.value.trim(); if(q.length<2){box.hidden=true;box.innerHTML='';return;}
+    try{const r=await fetch(`/api/companies/global-search?q=${encodeURIComponent(q)}`);const d=await r.json();if(!r.ok)throw new Error();const rows=d.items||[];box.innerHTML=rows.map(companyResultHtml).join('')||'<div class="global-company-empty">No se encontró ninguna empresa en esta operación.</div>';box.hidden=false;}
+    catch(_){box.innerHTML='<div class="global-company-empty">No se pudo buscar ahora.</div>';box.hidden=false;}
+  }
+  $("globalCompanySearch")?.addEventListener("input",()=>{clearTimeout(companySearchTimer);companySearchTimer=setTimeout(searchCompaniesGlobal,180);});
+  $("globalCompanySearch")?.addEventListener("keydown",e=>{if(e.key==='Escape'){e.currentTarget.value='';$("globalCompanyResults").hidden=true;}});
+  $("globalCompanyResults")?.addEventListener("click",e=>{const b=e.target.closest('[data-company-id]');if(!b)return;$("globalCompanyResults").hidden=true;if(typeof window.openCompanyDossier==='function')window.openCompanyDossier({companyId:Number(b.dataset.companyId),company:b.dataset.companyName},'summary');});
+  document.addEventListener('click',e=>{if(!e.target.closest('.global-company-search')&&$("globalCompanyResults"))$("globalCompanyResults").hidden=true;});
+
+  async function loadDataQuality(){
+    const metrics=$("qualityMetrics"),issues=$("qualityIssues"),dups=$("qualityDuplicates"); if(!metrics)return;
+    try{const r=await fetch('/api/data-quality');const d=await r.json();if(!r.ok)throw new Error();const x=d.summary||{};const vals=[x.companies||0,x.incomplete||0,x.withoutContact||0,x.withoutNextAction||0,x.duplicateCandidates||0];metrics.querySelectorAll('article b').forEach((el,i)=>el.textContent=vals[i]);
+      const priority=[...(d.withoutNextAction||[]).map(x=>({...x,kind:'Sin próxima acción'})),...(d.withoutContact||[]).map(x=>({...x,kind:'Sin contacto'})),...(d.incomplete||[]).map(x=>({...x,kind:`Datos ${x.completeness}%`}))].slice(0,40);
+      issues.innerHTML=priority.map(x=>`<button class="quality-row" data-quality-company="${x.id}" data-name="${esc(x.name)}"><span><strong>${esc(x.name)}</strong><small>${esc(x.kind)}</small></span><i class="bi bi-arrow-right"></i></button>`).join('')||'<p class="quality-ok"><i class="bi bi-check-circle"></i> Sin alertas prioritarias.</p>';
+      dups.innerHTML=(d.duplicates||[]).map(x=>`<div class="duplicate-row"><strong>${esc(x.keyType)} · ${esc(x.key)}</strong><span>${x.companies.map(c=>esc(c.name)).join(' ↔ ')}</span><small>Revisión manual recomendada antes de consolidar.</small></div>`).join('')||'<p class="quality-ok"><i class="bi bi-check-circle"></i> Sin duplicados fuertes detectados.</p>';
+    }catch(_){issues.innerHTML='No se pudo analizar la base.';dups.innerHTML='—';}
+  }
+  $("refreshDataQuality")?.addEventListener('click',loadDataQuality);
+  $("qualityIssues")?.addEventListener('click',e=>{const b=e.target.closest('[data-quality-company]');if(b&&typeof window.openCompanyDossier==='function')window.openCompanyDossier({companyId:Number(b.dataset.qualityCompany),company:b.dataset.name},'summary');});
+
+  async function loadAuditLog(){
+    const box=$("auditLogList"); if(!box)return;
+    try{const r=await fetch('/api/audit-log?limit=150');const d=await r.json();if(!r.ok)throw new Error();box.innerHTML=(d.items||[]).map(x=>`<article class="audit-row"><time>${x.createdAt?new Date(x.createdAt).toLocaleString('es-PY'):'—'}</time><div><strong>${esc(x.user)} · ${esc(x.action)}</strong><span>${esc(x.entityType)} #${esc(x.entityId||'—')}</span></div><small>${esc(Object.keys(x.details||{}).slice(0,4).join(', ')||'Cambio registrado')}</small></article>`).join('')||'<p>No hay cambios registrados.</p>';}
+    catch(_){box.innerHTML='<p>No se pudo cargar la auditoría.</p>';}
+  }
+  $("refreshAuditLog")?.addEventListener('click',loadAuditLog);
+
+  $("importCommercialHistory")?.addEventListener("click",()=>{
+    importPreviewData=null;
+    if($("importHistoryMapping")) $("importHistoryMapping").hidden=true;
+    if($("importHistoryResult")) $("importHistoryResult").hidden=true;
+    if($("importHistoryStatus")) $("importHistoryStatus").textContent="";
+    $("importHistoryDialog")?.showModal();
+  });
+  $("closeImportHistory")?.addEventListener("click",closeImportHistory);
+
+  function buildImportMapping(data){
+    importPreviewData=data;
+    const columns=data.columns||[];
+    const detected=data.detectedMapping||{};
+    $("importHistoryRows").textContent=`${Number(data.rowCount)||0} filas detectadas`;
+    const options=(selected)=>`<option value="">No importar</option>${columns.map(c=>`<option value="${esc(c)}" ${selected===c?"selected":""}>${esc(c)}</option>`).join("")}`;
+    $("importHistoryFields").innerHTML=Object.entries(importFieldLabels).map(([field,label])=>`<label>${esc(label)}<select data-import-field="${field}">${options(detected[field]||"")}</select></label>`).join("");
+    const sample=data.sample||[];
+    if(sample.length){
+      const visible=columns.slice(0,10);
+      $("importHistoryPreview").innerHTML=`<div class="import-preview-table"><table><thead><tr>${visible.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${sample.map(row=>`<tr>${visible.map(c=>`<td title="${esc(row[c]||"")}">${esc(row[c]||"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }else $("importHistoryPreview").innerHTML="<p>La planilla no contiene filas de datos.</p>";
+    $("importHistoryMapping").hidden=false;
+  }
+
+  $("previewImportHistory")?.addEventListener("click",async()=>{
+    const file=$("importHistoryFile")?.files?.[0];
+    if(!file) return toastLocal("Seleccione una planilla .xlsx o .csv");
+    const status=$("importHistoryStatus"); status.textContent="Analizando columnas y coincidencias…";
+    const fd=new FormData(); fd.append("file",file);
+    try{
+      const r=await fetch("/api/imports/history/preview",{method:"POST",body:fd}); const d=await r.json();
+      if(!r.ok) throw new Error(d.error||"No se pudo leer la planilla");
+      buildImportMapping(d); status.textContent="Planilla lista para revisión";
+    }catch(e){status.textContent=e.message; toastLocal(e.message);}
+  });
+
+  $("executeImportHistory")?.addEventListener("click",async()=>{
+    const file=$("importHistoryFile")?.files?.[0]; if(!file)return toastLocal("Seleccione una planilla");
+    const mapping={}; document.querySelectorAll("[data-import-field]").forEach(sel=>{if(sel.value)mapping[sel.dataset.importField]=sel.value;});
+    if(!mapping.company)return toastLocal("Seleccione la columna Empresa");
+    const button=$("executeImportHistory"); button.disabled=true; button.innerHTML='<span class="spinner-border spinner-border-sm"></span> Consolidando…';
+    const fd=new FormData(); fd.append("file",file); fd.append("mapping",JSON.stringify(mapping));
+    try{
+      const r=await fetch("/api/imports/history",{method:"POST",body:fd}); const d=await r.json();
+      if(!r.ok) throw new Error(d.error||"No se pudo importar");
+      const result=$("importHistoryResult"); result.hidden=false;
+      result.innerHTML=`<strong><i class="bi bi-check2-circle"></i> Importación consolidada</strong><p>El Radar comparó cada fila con las empresas y contactos ya existentes antes de crear nuevos registros.</p><div class="import-result-grid">
+        <article><strong>${Number(d.companiesCreated)||0}</strong><span>empresas nuevas</span></article><article><strong>${Number(d.companiesUpdated)||0}</strong><span>empresas existentes encontradas</span></article>
+        <article><strong>${Number(d.contactsCreated)||0}</strong><span>contactos nuevos</span></article><article><strong>${Number(d.contactsUpdated)||0}</strong><span>contactos completados</span></article>
+        <article><strong>${Number(d.activitiesCreated)||0}</strong><span>interacciones incorporadas</span></article><article><strong>${Number(d.opportunitiesCreated)||0}</strong><span>entradas nuevas en CRM</span></article>
+        <article><strong>${Number(d.duplicatesSkipped)||0}</strong><span>duplicados omitidos</span></article><article><strong>${(d.errors||[]).length}</strong><span>filas con revisión</span></article></div>${(d.errors||[]).length?`<div class="import-result-errors">${d.errors.slice(0,8).map(x=>`Fila ${x.row}: ${esc(x.error)}`).join("<br>")}</div>`:""}`;
+      toastLocal("Histórico importado y consolidado");
+      setTimeout(()=>location.reload(),1200);
+    }catch(e){toastLocal(e.message); if($("importHistoryStatus"))$("importHistoryStatus").textContent=e.message;}
+    finally{button.disabled=false;button.innerHTML='<i class="bi bi-database-check"></i> Importar y consolidar';}
+  });
+
 
   openModule("triage");
 })();
