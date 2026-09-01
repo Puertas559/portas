@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="Academia, levantamento técnico-comercial e orçamento preliminar para portas seccionadas">
+  <title>Academia & Levantamento · {{ brand.get('brand_name', tenant.name) }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='technical-sales.css') }}?v=20260901-v1">
+</head>
+<body class="ts-body theme-{{ brand.get('theme','puertas') }}" data-brand="{{ brand.get('brand_name', tenant.name) }}">
+  <aside class="ts-sidebar">
+    <a class="ts-brand" href="{{ url_for('web.index') }}">
+      <img src="{{ url_for('static', filename=('techdoors-logo-display.png' if brand.get('theme') == 'techdoors' else 'puertas-brasil-logo-display.png')) }}" alt="{{ brand.get('brand_name', tenant.name) }}">
+      <span><b>Academia Técnica</b><small>Porta seccionada residencial</small></span>
+    </a>
+    <nav>
+      <button class="ts-nav active" data-view="academy"><i class="bi bi-mortarboard"></i><span>Academia</span></button>
+      <button class="ts-nav" data-view="survey"><i class="bi bi-rulers"></i><span>Levantamento</span></button>
+      <button class="ts-nav" data-view="budget"><i class="bi bi-receipt"></i><span>Orçamento preliminar</span></button>
+    </nav>
+    <div class="ts-sidebar-help">
+      <i class="bi bi-lightbulb"></i>
+      <p><b>Aprender fazendo</b><span>Abra as microaulas durante o levantamento sempre que tiver dúvida.</span></p>
+    </div>
+    <a class="ts-back" href="{{ url_for('web.index') }}"><i class="bi bi-arrow-left"></i> Voltar ao Radar</a>
+  </aside>
+
+  <main class="ts-main">
+    <header class="ts-topbar">
+      <div>
+        <p class="ts-eyebrow">FORMAÇÃO + CAMPO + ORÇAMENTO</p>
+        <h1 id="viewTitle">Academia técnica</h1>
+      </div>
+      <div class="ts-draft-actions">
+        <label class="ts-draft-select"><span>Levantamento ativo</span><select id="draftSelect"></select></label>
+        <button class="ts-btn secondary" id="newDraft"><i class="bi bi-plus-lg"></i><span>Novo</span></button>
+        <button class="ts-btn icon danger-soft" id="deleteDraft" title="Excluir levantamento"><i class="bi bi-trash3"></i></button>
+      </div>
+    </header>
+
+    <section class="ts-view active" id="academyView" data-view-panel="academy">
+      <div class="ts-hero">
+        <div>
+          <span class="ts-pill"><i class="bi bi-shield-check"></i> Método guiado para iniciantes</span>
+          <h2>Entenda antes de medir.</h2>
+          <p>O conteúdo ensina o conceito, mostra por que ele importa na venda e leva o vendedor diretamente à aplicação prática no levantamento.</p>
+          <div class="ts-hero-actions">
+            <button class="ts-btn primary" data-open-view="academy" data-start-course><i class="bi bi-play-fill"></i> Começar curso</button>
+            <button class="ts-btn secondary" data-open-view="survey"><i class="bi bi-rulers"></i> Ir para levantamento</button>
+          </div>
+        </div>
+        <div class="ts-course-progress-card">
+          <div class="ts-ring" id="courseRing"><span id="coursePct">0%</span></div>
+          <div><b>Seu progresso</b><span id="courseCompleted">0 de 23 módulos concluídos</span></div>
+        </div>
+      </div>
+
+      <div class="ts-section-heading">
+        <div><p class="ts-eyebrow">TRILHA COMPLETA</p><h2>Do zero ao orçamento preliminar</h2></div>
+        <label class="ts-search"><i class="bi bi-search"></i><input id="courseSearch" placeholder="Buscar aula ou conceito"></label>
+      </div>
+      <div class="ts-course-layout">
+        <div class="ts-module-list" id="courseModules"></div>
+        <article class="ts-lesson" id="lessonPanel">
+          <div class="ts-empty-lesson"><i class="bi bi-book"></i><h3>Selecione um módulo</h3><p>Escolha uma aula à esquerda para estudar o conteúdo.</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="ts-view" id="surveyView" data-view-panel="survey">
+      <div class="ts-survey-head">
+        <div>
+          <p class="ts-eyebrow">LEVANTAMENTO GUIADO EM CAMPO</p>
+          <h2>Ficha técnica-comercial</h2>
+          <p>Preencha somente após confirmar as condições do local. A estimativa deverá ser validada por medição técnica antes da fabricação.</p>
+        </div>
+        <div class="ts-progress-box">
+          <div><span>Progresso do levantamento</span><b id="surveyPct">0%</b></div>
+          <div class="ts-progress"><i id="surveyProgress"></i></div>
+          <small id="surveyMissing">Campos essenciais ainda não preenchidos.</small>
+        </div>
+      </div>
+
+      <div class="ts-stepper" id="surveyStepper"></div>
+      <form id="surveyForm" autocomplete="off">
+        <div id="surveySections"></div>
+      </form>
+      <div class="ts-survey-footer">
+        <button class="ts-btn secondary" id="prevSection"><i class="bi bi-arrow-left"></i> Etapa anterior</button>
+        <span id="autosaveStatus"><i class="bi bi-cloud-check"></i> Rascunho salvo automaticamente</span>
+        <button class="ts-btn primary" id="nextSection">Próxima etapa <i class="bi bi-arrow-right"></i></button>
+      </div>
+    </section>
+
+    <section class="ts-view" id="budgetView" data-view-panel="budget">
+      <div class="ts-budget-grid">
+        <section class="ts-card">
+          <div class="ts-card-title"><span><i class="bi bi-calculator"></i></span><div><p class="ts-eyebrow">COMPOSIÇÃO COMERCIAL</p><h2>Valores do orçamento preliminar</h2></div></div>
+          <div class="ts-money-grid">
+            <label>Porta / painéis <span>R$</span><input inputmode="decimal" data-budget="door" placeholder="0,00"></label>
+            <label>Automação <span>R$</span><input inputmode="decimal" data-budget="automation" placeholder="0,00"></label>
+            <label>Acessórios <span>R$</span><input inputmode="decimal" data-budget="accessories" placeholder="0,00"></label>
+            <label>Transporte <span>R$</span><input inputmode="decimal" data-budget="transport" placeholder="0,00"></label>
+            <label>Instalação <span>R$</span><input inputmode="decimal" data-budget="installation" placeholder="0,00"></label>
+            <label>Reforço estrutural <span>R$</span><input inputmode="decimal" data-budget="reinforcement" placeholder="0,00"></label>
+            <label>Elétrica / adicionais <span>R$</span><input inputmode="decimal" data-budget="electrical" placeholder="0,00"></label>
+            <label>Impostos / outros <span>R$</span><input inputmode="decimal" data-budget="taxes" placeholder="0,00"></label>
+          </div>
+          <div class="ts-total"><span>Total preliminar</span><b id="budgetTotal">R$ 0,00</b></div>
+          <div class="ts-form-grid commercial-grid">
+            <label>Forma de pagamento<input data-commercial="payment" placeholder="Ex.: 50% entrada + saldo"></label>
+            <label>Prazo de fabricação<input data-commercial="manufacture" placeholder="Ex.: 20 dias úteis"></label>
+            <label>Prazo de instalação<input data-commercial="installation_deadline" placeholder="Ex.: 1 dia após entrega"></label>
+            <label>Validade da proposta<input data-commercial="validity" placeholder="Ex.: 7 dias"></label>
+            <label>Garantia<input data-commercial="warranty" placeholder="Conforme política comercial"></label>
+            <label>Responsável pela aprovação<input data-commercial="approver" placeholder="Nome do decisor"></label>
+            <label class="wide">Itens não incluídos<textarea data-commercial="excluded" rows="3" placeholder="Obras civis, elétrica, reforços não previstos..."></textarea></label>
+          </div>
+        </section>
+
+        <aside class="ts-card ts-summary-card">
+          <div class="ts-card-title"><span><i class="bi bi-file-earmark-pdf"></i></span><div><p class="ts-eyebrow">SAÍDA DO LEVANTAMENTO</p><h2>Resumo para proposta</h2></div></div>
+          <div id="budgetSummary" class="ts-budget-summary"></div>
+          <div class="ts-warning"><i class="bi bi-exclamation-triangle"></i><p><b>Orçamento preliminar</b><span>A medida do vão não é necessariamente a medida final de fabricação. Validar tecnicamente antes de liberar produção.</span></p></div>
+          <button class="ts-btn primary full" id="generatePdf"><i class="bi bi-file-earmark-pdf"></i> Gerar ficha / PDF</button>
+          <button class="ts-btn secondary full" data-open-view="survey"><i class="bi bi-pencil-square"></i> Revisar levantamento</button>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="learnDialog" class="ts-dialog">
+    <button class="ts-dialog-close" data-close-dialog aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+    <div id="learnDialogContent"></div>
+  </dialog>
+
+  <section id="printSheet" class="ts-print-sheet" aria-hidden="true"></section>
+
+  <script>
+    window.TS_CONFIG = {
+      brandName: {{ brand.get('brand_name', tenant.name)|tojson }},
+      theme: {{ brand.get('theme','puertas')|tojson }},
+      logoUrl: {{ url_for('static', filename=('techdoors-logo-display.png' if brand.get('theme') == 'techdoors' else 'puertas-brasil-logo-display.png'))|tojson }},
+      userName: {{ (user.name if user else '')|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='technical-sales.js') }}?v=20260901-v1"></script>
+</body>
+</html>
