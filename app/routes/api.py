@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import csv
 import io
+import re
 from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlparse
@@ -984,10 +985,17 @@ def _smart_domain(value):
 def _smart_capture_kind(query):
     raw = (query or "").strip()
     digits = _smart_digits(raw)
+    lower = raw.lower()
+    if raw.startswith("@") and " " not in raw and "." not in raw:
+        return "SOCIAL"
+    if any(host in lower for host in ("instagram.com/", "facebook.com/", "linkedin.com/", "tiktok.com/", "x.com/")):
+        return "SOCIAL"
     if "@" in raw and "." in raw.rsplit("@", 1)[-1]:
         return "EMAIL"
     if len(digits) == 14:
         return "CNPJ"
+    if ("ruc" in lower and 5 <= len(digits) <= 12) or (re.fullmatch(r"\d{5,10}-\d", raw) and len(digits) <= 11):
+        return "RUC"
     if (raw.startswith("http://") or raw.startswith("https://") or ("." in raw and " " not in raw and not raw.startswith("+"))):
         return "WEBSITE"
     if len(digits) >= 8 and sum(ch.isalpha() for ch in raw) == 0:
@@ -1072,43 +1080,381 @@ def _smart_lookup_cnpj(cnpj):
         return None
 
 
+_SMART_PUBLIC_EMAILS = {"gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "icloud.com", "proton.me", "protonmail.com", "uol.com.br", "bol.com.br"}
+_SMART_SKIP_HOSTS = {
+    "duckduckgo.com", "google.com", "bing.com", "yahoo.com", "youtube.com", "wikipedia.org",
+    "instagram.com", "facebook.com", "linkedin.com", "tiktok.com", "x.com", "twitter.com",
+    "wa.me", "whatsapp.com", "cnpj.biz", "econodata.com.br", "empresascnpj.com", "consultacnpj.com",
+}
+
+
+def _smart_clean_url(value):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("//"):
+        raw = "https:" + raw
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
+    try:
+        parsed = urlparse(raw)
+        if not parsed.netloc:
+            return None
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path or ''}".rstrip("/")
+    except Exception:
+        return None
+
+
+def _smart_host(value):
+    try:
+        return (urlparse(_smart_clean_url(value) or "").hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def _smart_is_skipped_host(host):
+    host = (host or "").lower().removeprefix("www.")
+    return any(host == item or host.endswith("." + item) for item in _SMART_SKIP_HOSTS)
+
+
+def _smart_strip_html(value):
+    import html as _html
+    text_value = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", _html.unescape(text_value)).strip()
+
+
+def _smart_decode_search_url(href):
+    import html as _html
+    from urllib.parse import parse_qs, unquote, urlparse as _urlparse
+    href = _html.unescape(href or "")
+    if href.startswith("//"):
+        href = "https:" + href
+    try:
+        parsed = _urlparse(href)
+        if "duckduckgo.com" in (parsed.hostname or ""):
+            target = parse_qs(parsed.query).get("uddg", [None])[0]
+            if target:
+                return unquote(target)
+    except Exception:
+        pass
+    return href if href.startswith(("http://", "https://")) else None
+
+
+def _smart_web_search(query, limit=6):
+    """Best-effort public web discovery. It never reads the Radar CRM."""
+    import json as _json
+    from urllib.parse import urlencode
+    from urllib.request import Request as _UrlRequest, urlopen
+    results = []
+    try:
+        url = "https://html.duckduckgo.com/html/?" + urlencode({"q": query})
+        req = _UrlRequest(url, headers={
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,es;q=0.8,en;q=0.7",
+        })
+        with urlopen(req, timeout=6) as response:
+            html_text = response.read(700000).decode("utf-8", "ignore")
+        for match in re.finditer(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', html_text, re.I | re.S):
+            href = _smart_decode_search_url(match.group(1))
+            title = _smart_strip_html(match.group(2))
+            if not href:
+                continue
+            host = _smart_host(href)
+            if not host or host == "duckduckgo.com":
+                continue
+            item = {"url": href, "title": title, "host": host, "source": "Pesquisa web"}
+            if not any(row["url"] == href for row in results):
+                results.append(item)
+            if len(results) >= limit:
+                break
+    except Exception:
+        pass
+    if results:
+        return results
+    # Instant Answer is not a full search engine, but provides a useful fallback for known organizations.
+    try:
+        url = "https://api.duckduckgo.com/?" + urlencode({"q": query, "format": "json", "no_html": 1, "no_redirect": 1, "skip_disambig": 1})
+        req = _UrlRequest(url, headers={"User-Agent": "RadarIndustrial/1.0", "Accept": "application/json"})
+        with urlopen(req, timeout=5) as response:
+            data = _json.loads(response.read().decode("utf-8", "ignore"))
+        if data.get("AbstractURL"):
+            href = data["AbstractURL"]
+            results.append({"url": href, "title": data.get("Heading") or query, "host": _smart_host(href), "source": "Pesquisa web"})
+    except Exception:
+        pass
+    return results[:limit]
+
+
+def _smart_analysis_payload(analysis, *, fallback_email=None, fallback_phone=None, source="Site público"):
+    return {
+        "company": analysis.company_name, "website": analysis.url, "sector": analysis.sector,
+        "email": analysis.emails[0] if analysis.emails else fallback_email,
+        "phone": analysis.phones[0] if analysis.phones else fallback_phone,
+        "whatsapp": analysis.whatsapp or fallback_phone,
+        "address": analysis.address, "products": analysis.products or [], "analysisId": analysis.id,
+        "potentialScore": analysis.potential_score, "socialLinks": analysis.social_links or {},
+        "source": source,
+    }
+
+
+def _smart_analyze_external_site(value, *, fallback_email=None, fallback_phone=None):
+    if not value:
+        return None
+    try:
+        from ..services.site_analyzer import analyze_website, normalize_website_url
+        normalized = normalize_website_url(value)
+        analysis = analyze_website(normalized, max_pages=2, use_sitemap=False, request_timeout=6, status="QUICK")
+        return _smart_analysis_payload(analysis, fallback_email=fallback_email, fallback_phone=fallback_phone)
+    except Exception:
+        return None
+
+
+def _smart_guess_company_from_title(title, host=None):
+    value = re.split(r"\s+[|–—-]\s+", (title or "").strip())[0].strip()
+    if value and 2 <= len(value) <= 100:
+        return value
+    if host:
+        root = host.split(".")[0].replace("-", " ").replace("_", " ")
+        return root.title()
+    return None
+
+
+def _smart_external_discover(query, kind, fields=None):
+    """Resolve a NEW external lead first; CRM deduplication is intentionally performed later."""
+    fields = fields or {}
+    raw = (query or "").strip()
+    email = (fields.get("email") or (raw if kind == "EMAIL" else "") or "").strip()
+    phone = (fields.get("whatsapp") or fields.get("phone") or (raw if kind == "PHONE" else "") or "").strip()
+    registration_id = (fields.get("registrationId") or (raw if kind in {"CNPJ", "RUC"} else "") or "").strip()
+    website = (fields.get("website") or (raw if kind == "WEBSITE" else "") or "").strip()
+    company_name = (fields.get("company") or (raw if kind == "NAME" else "") or "").strip()
+    social = (fields.get("social") or (raw if kind == "SOCIAL" else "") or "").strip()
+
+    # 1) Direct identifiers with authoritative/public sources.
+    if kind == "CNPJ" or (registration_id and len(_smart_digits(registration_id)) == 14):
+        result = _smart_lookup_cnpj(registration_id)
+        if result:
+            result["externalFound"] = True
+            return result, []
+    if website:
+        result = _smart_analyze_external_site(website, fallback_email=email or None, fallback_phone=phone or None)
+        if result:
+            result["externalFound"] = True
+            return result, []
+    if email and "@" in email:
+        domain = _smart_domain(email)
+        if domain and domain not in _SMART_PUBLIC_EMAILS:
+            result = _smart_analyze_external_site(domain, fallback_email=email, fallback_phone=phone or None)
+            if result:
+                result["email"] = result.get("email") or email
+                result["externalFound"] = True
+                return result, []
+
+    # 2) Public web discovery for phone/WhatsApp, RUC, company name, public e-mail and @social.
+    if kind == "PHONE" or phone:
+        search_query = f'"{phone or raw}" empresa contato whatsapp'
+    elif kind == "RUC":
+        search_query = f'"{registration_id or raw}" RUC empresa Paraguay'
+    elif kind == "SOCIAL" or social:
+        token = social or raw
+        search_query = f'"{token}" empresa site oficial'
+    elif kind == "EMAIL":
+        search_query = f'"{email or raw}" empresa'
+    else:
+        search_query = f'"{company_name or raw}" empresa site oficial'
+    candidates = _smart_web_search(search_query, limit=7)
+    if not candidates:
+        return {"externalFound": False, "source": "Pesquisa externa", "query": raw}, []
+
+    # Prefer a probable official website. Social/directory results remain visible as evidence/candidates.
+    ordered = sorted(candidates, key=lambda row: (1 if _smart_is_skipped_host(row.get("host")) else 0, len(row.get("url") or "")))
+    for candidate in ordered:
+        if _smart_is_skipped_host(candidate.get("host")):
+            continue
+        result = _smart_analyze_external_site(candidate["url"], fallback_email=email or None, fallback_phone=phone or None)
+        if result:
+            result.update({
+                "externalFound": True, "source": "Pesquisa externa + site público",
+                "discoveredFrom": raw, "searchResultTitle": candidate.get("title"),
+            })
+            if registration_id:
+                result["registrationId"] = registration_id
+            if social:
+                result["social"] = social
+            return result, ordered[:5]
+
+    # If no site could be crawled, still return the best public result rather than falling back to the CRM.
+    best = ordered[0]
+    fallback = {
+        "externalFound": True, "company": _smart_guess_company_from_title(best.get("title"), best.get("host")),
+        "website": None if _smart_is_skipped_host(best.get("host")) else best.get("url"),
+        "email": email or None, "phone": phone or None, "whatsapp": phone or None,
+        "registrationId": registration_id or None, "social": social or (best.get("url") if kind == "SOCIAL" else None),
+        "source": "Pesquisa externa", "sourceUrl": best.get("url"), "searchResultTitle": best.get("title"),
+    }
+    return fallback, ordered[:5]
+
+
 @api_bp.post("/smart-capture/lookup")
 def smart_capture_lookup():
     data = request.get_json(silent=True) or {}
     query = (data.get("query") or "").strip()
     fields = data.get("fields") or {}
     if not query and not any(fields.values()):
-        return jsonify(error="Ingrese un dato, capture una tarjeta o informe un contacto"), 400
+        return jsonify(error="Informe um site, cartão, CNPJ/RUC, e-mail, WhatsApp, nome da empresa ou @rede social"), 400
     tenant = current_tenant()
     kind = _smart_capture_kind(query) if query else "CARD"
-    email = fields.get("email") or (query if kind == "EMAIL" else None)
-    phone = fields.get("whatsapp") or fields.get("phone") or (query if kind == "PHONE" else None)
-    registration_id = fields.get("registrationId") or (query if kind == "CNPJ" else None)
-    domain = fields.get("website") or (query if kind == "WEBSITE" else None) or (email.rsplit("@", 1)[-1] if email and "@" in email else None)
-    name = fields.get("company") or fields.get("name") or (query if kind == "NAME" else None)
+
+    # EXTERNAL-FIRST: discover/enrich the company on public sources BEFORE consulting CRM.
+    enrichment, external_candidates = _smart_external_discover(query, kind, fields)
+    enrichment = enrichment or {}
+
+    # Only after external discovery do we check the CRM to prevent a duplicate at save time.
+    email = enrichment.get("email") or fields.get("email") or (query if kind == "EMAIL" else None)
+    phone = enrichment.get("whatsapp") or enrichment.get("phone") or fields.get("whatsapp") or fields.get("phone") or (query if kind == "PHONE" else None)
+    registration_id = enrichment.get("registrationId") or fields.get("registrationId") or (query if kind in {"CNPJ", "RUC"} else None)
+    domain = enrichment.get("website") or fields.get("website") or (query if kind == "WEBSITE" else None) or (email.rsplit("@", 1)[-1] if email and "@" in email else None)
+    name = enrichment.get("company") or fields.get("company") or fields.get("name") or (query if kind == "NAME" else None)
     companies, contacts = _smart_find_matches(tenant.id, email=email, phone=phone, registration_id=registration_id, domain=domain, name=name)
-    enrichment = _smart_lookup_cnpj(registration_id) if registration_id and not companies else None
-    if not enrichment and domain and not companies:
-        try:
-            from ..services.site_analyzer import analyze_website, normalize_website_url
-            normalized = normalize_website_url(domain)
-            analysis = analyze_website(normalized, max_pages=2, use_sitemap=False, request_timeout=6, status="QUICK")
-            enrichment = {
-                "company": analysis.company_name, "website": analysis.url, "sector": analysis.sector,
-                "email": analysis.emails[0] if analysis.emails else email,
-                "phone": analysis.phones[0] if analysis.phones else phone, "whatsapp": analysis.whatsapp,
-                "address": analysis.address, "products": analysis.products or [], "analysisId": analysis.id,
-                "potentialScore": analysis.potential_score,
-            }
-        except Exception:
-            enrichment = {"website": f"https://{_smart_domain(domain)}" if _smart_domain(domain) else None}
+
     return jsonify(
         kind=kind,
+        searchMode="EXTERNAL_FIRST",
+        externalFound=bool(enrichment.get("externalFound")),
+        externalCandidates=external_candidates,
         duplicate=bool(companies or contacts),
+        duplicateCheckedAfterExternal=True,
         companies=[_smart_company_payload(row) for row in companies],
         contacts=[_smart_contact_payload(row) for row in contacts],
-        enrichment=enrichment or {},
+        enrichment=enrichment,
     )
+
+
+
+def _smart_parse_business_card_text(text_value):
+    """Extract common business-card fields from OCR text without trusting layout alone."""
+    text_value = (text_value or "").replace("\r", "\n")
+    lines = [re.sub(r"\s+", " ", line).strip(" |•·") for line in text_value.split("\n")]
+    lines = [line for line in lines if line]
+
+    email_match = re.search(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", text_value, re.I)
+    email = email_match.group(0).strip(".,;:") if email_match else None
+
+    url_matches = re.findall(r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.\-]+\.[a-z]{2,}(?:/[^\s]*)?", text_value, re.I)
+    urls = []
+    for raw in url_matches:
+        value = raw.strip(".,;:()[]{}<>")
+        if "@" not in value and value.lower() != (email or "").lower() and value not in urls:
+            urls.append(value)
+    website = urls[0] if urls else None
+
+    phone_candidates = re.findall(r"(?:\+?\d[\d\s().\-]{6,}\d)", text_value)
+    phones = []
+    for raw in phone_candidates:
+        digits = _smart_digits(raw)
+        if 8 <= len(digits) <= 15 and raw not in phones:
+            phones.append(raw.strip())
+    phones.sort(key=lambda value: len(_smart_digits(value)), reverse=True)
+    phone = phones[0] if phones else None
+
+    cnpj_match = re.search(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", text_value)
+    ruc_match = re.search(r"(?:RUC\s*[:.-]?\s*)?(\d{5,10}-\d)\b", text_value, re.I)
+    registration_id = cnpj_match.group(0) if cnpj_match else (ruc_match.group(1) if ruc_match else None)
+
+    social_match = re.search(r"(?<![\w@])@([A-Z0-9._-]{3,})", text_value, re.I)
+    social = f"@{social_match.group(1)}" if social_match else None
+    if not social:
+        social_url = next((u for u in urls if any(h in u.lower() for h in ("instagram.com", "linkedin.com", "facebook.com", "tiktok.com"))), None)
+        social = social_url
+
+    role_words = re.compile(r"gerente|manager|diretor|director|comercial|ventas|sales|engenheir|ingenier|compras|procurement|ceo|owner|propriet|s[oó]cio|representante|coordenador|coordinador|presidente|founder|fundador", re.I)
+    noise = re.compile(r"(?:www\.|https?://|@|\b(?:tel|fone|phone|whatsapp|cel|mobile|email|e-mail|ruc|cnpj)\b)", re.I)
+    role_line = next((line for line in lines if role_words.search(line) and not noise.search(line)), None)
+
+    candidates = []
+    for line in lines:
+        if line == role_line or noise.search(line) or len(_smart_digits(line)) >= 6:
+            continue
+        if 2 <= len(line) <= 90:
+            candidates.append(line)
+
+    company_pattern = re.compile(r"\b(?:ltda|s\.?a\.?|sa\b|doors?|portas?|puertas?|ind[uú]str|group|grupo|technology|tecnolog|sistemas?|alum[ií]n|esquadr|company|co\.?\s*ltd|inc\.?|corp\.?|com[eé]rcio|comercial)\b", re.I)
+    company_line = next((line for line in candidates if company_pattern.search(line)), None)
+
+    name_line = None
+    for line in candidates:
+        if line == company_line:
+            continue
+        words = line.split()
+        letters = sum(ch.isalpha() for ch in line)
+        if 2 <= len(words) <= 6 and letters >= max(4, int(len(line) * .55)):
+            name_line = line
+            break
+
+    if not company_line:
+        company_line = next((line for line in candidates if line != name_line), None)
+
+    return {
+        "name": name_line,
+        "role": role_line,
+        "company": company_line,
+        "email": email,
+        "phone": phone,
+        "whatsapp": phone,
+        "website": website,
+        "social": social,
+        "registrationId": registration_id,
+    }
+
+
+@api_bp.post("/smart-capture/card-read")
+def smart_capture_card_read():
+    """Fast server-side OCR for business cards; browser OCR remains a fallback."""
+    upload = request.files.get("card")
+    if not upload or not upload.filename:
+        return jsonify(error="Envie uma foto do cartão de visita"), 400
+    extension = Path(secure_filename(upload.filename)).suffix.lower() or ".jpg"
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        return jsonify(error="Formato de imagem não permitido"), 400
+    raw = upload.read(12 * 1024 * 1024 + 1)
+    if len(raw) > 12 * 1024 * 1024:
+        return jsonify(error="A imagem é muito grande. Use uma foto de até 12 MB."), 413
+    if not raw:
+        return jsonify(error="A imagem recebida está vazia"), 400
+
+    try:
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+        import pytesseract
+        image = Image.open(io.BytesIO(raw))
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        max_side = 2200
+        if max(image.size) > max_side:
+            ratio = max_side / max(image.size)
+            image = image.resize((max(1, int(image.width * ratio)), max(1, int(image.height * ratio))))
+        gray = ImageOps.grayscale(image)
+        gray = ImageOps.autocontrast(gray, cutoff=1)
+        gray = ImageEnhance.Contrast(gray).enhance(1.35)
+        gray = gray.filter(ImageFilter.SHARPEN)
+
+        attempts = []
+        for lang, psm in (("por+spa+eng", 6), ("por+spa+eng", 11), ("eng", 6)):
+            try:
+                found = pytesseract.image_to_string(gray, lang=lang, config=f"--oem 1 --psm {psm}", timeout=10).strip()
+                if found:
+                    attempts.append(found)
+                if len(found) >= 24 and ("@" in found or len(re.findall(r"\d", found)) >= 8):
+                    break
+            except Exception:
+                continue
+        text_value = max(attempts, key=len) if attempts else ""
+        if not text_value:
+            return jsonify(error="Não consegui ler texto suficiente no cartão. Tente aproximar a câmera, evitar reflexo e manter o cartão reto.", retryable=True), 422
+        fields = _smart_parse_business_card_text(text_value)
+        detected = sum(1 for value in fields.values() if value)
+        return jsonify(ok=True, engine="SERVER_TESSERACT", detectedFields=detected, fields=fields, rawText=text_value[:5000])
+    except Exception as exc:
+        current_app.logger.warning("Business-card OCR failed: %s", exc)
+        return jsonify(error="A leitura automática do cartão falhou no servidor. O navegador tentará a leitura alternativa.", retryable=True), 503
 
 
 @api_bp.post("/smart-capture/qualify")
@@ -1127,6 +1473,7 @@ def smart_capture_qualify():
     whatsapp = (contact_data.get("whatsapp") or phone or "").strip() or None
     website = (contact_data.get("website") or "").strip() or None
     registration_id = (contact_data.get("registrationId") or "").strip() or None
+    social = (contact_data.get("social") or "").strip() or None
     if not company_name:
         domain = _smart_domain(website or email)
         company_name = domain.split(".")[0].replace("-", " ").title() if domain else f"Contato FESQUA · {person_name}"
@@ -1142,6 +1489,12 @@ def smart_capture_qualify():
         registration_id=registration_id, description=f"Contato capturado presencialmente em {event_name}",
     )
     db.session.flush()
+    if social:
+        presence = dict(company.digital_presence or {})
+        links = dict(presence.get("socialLinks") or {})
+        links.setdefault("captured", social)
+        presence["socialLinks"] = links
+        company.digital_presence = presence
     contact = existing_contacts[0] if existing_contacts else None
     if not contact:
         contact = Contact(

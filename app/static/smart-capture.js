@@ -23,7 +23,7 @@
   function field(name){ return dialog.querySelector(`[data-card-field="${name}"]`); }
   function getField(name){ return field(name)?.value?.trim() || ''; }
   function setField(name,val){ if(val && field(name) && !field(name).value) field(name).value=val; }
-  function collectContact(){ return Object.fromEntries(['name','role','company','email','phone','whatsapp','website','registrationId','sector','city','department','country'].map(k=>[k,getField(k)])); }
+  function collectContact(){ return Object.fromEntries(['name','role','company','email','phone','whatsapp','website','social','registrationId','sector','city','department','country'].map(k=>[k,getField(k)])); }
 
   function parseCardText(text){
     const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
@@ -32,12 +32,13 @@
     const phoneMatches=text.match(/(?:\+?\d[\d\s().-]{7,}\d)/g)||[];
     const phones=phoneMatches.map(x=>x.trim()).sort((a,b)=>onlyDigits(b).length-onlyDigits(a).length);
     const cnpj=(text.match(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/)||[])[0]||'';
+    const social=(text.match(/(?:instagram|linkedin|facebook|tiktok)\s*[:@]?\s*(@?[A-Z0-9._-]{3,})/i)||[])[1]||'';
     const roleWords=/gerente|diretor|director|comercial|ventas|sales|engenheir|ingenier|compras|procurement|ceo|owner|propriet|socio|sócio|representante|coordenador|coordinador/i;
     const roleLine=lines.find(x=>roleWords.test(x))||'';
     const candidates=lines.filter(x=>!x.includes('@')&&!/www\.|https?:|\d{4,}/i.test(x)&&x.length>2&&x.length<70);
     const nameLine=candidates.find(x=>x!==roleLine && x.split(/\s+/).length>=2 && x.split(/\s+/).length<=5)||candidates[0]||'';
     const companyLine=candidates.find(x=>x!==nameLine&&x!==roleLine&&/(ltda|s\.a\.?|sa\b|doors|portas|puertas|indust|group|grupo|technology|tecnologia|sistemas|alumin|esquadr|company|co\.?\s?ltd)/i.test(x)) || candidates.find(x=>x!==nameLine&&x!==roleLine)||'';
-    return {name:nameLine,role:roleLine,company:companyLine,email,phone:phones[0]||'',whatsapp:phones[0]||'',website:urls[0]||'',registrationId:cnpj};
+    return {name:nameLine,role:roleLine,company:companyLine,email,phone:phones[0]||'',whatsapp:phones[0]||'',website:urls[0]||'',social:social||'',registrationId:cnpj};
   }
 
   async function ensureTesseract(){
@@ -45,32 +46,81 @@
     await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});
     return window.Tesseract;
   }
+
+  async function browserOCR(file){
+    const T=await ensureTesseract();
+    const result=await T.recognize(file,'por+spa+eng',{logger:m=>{if(m.progress){const progress=$('ocrProgress');if(progress)progress.value=Math.round(m.progress*100);}}});
+    return result?.data?.text||'';
+  }
+
+  async function serverOCR(file){
+    const fd=new FormData(); fd.append('card',file,file.name||'cartao.jpg');
+    const res=await fetch('/api/smart-capture/card-read',{method:'POST',body:fd});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||'Falha na leitura do cartão');
+    return data;
+  }
+
+  function applyOCRFields(values){
+    Object.entries(values||{}).forEach(([k,v])=>setField(k,v));
+  }
+
   async function runOCR(file){
     const status=$('ocrStatus'), progress=$('ocrProgress');
     try{
-      status.textContent='Lendo o cartão…'; progress.hidden=false; progress.value=5;
-      const T=await ensureTesseract();
-      const result=await T.recognize(file,'por+eng+spa',{logger:m=>{if(m.progress){progress.value=Math.round(m.progress*100);status.textContent=m.status==='recognizing text'?`Lendo… ${progress.value}%`:'Preparando leitura…';}}});
-      state.ocrText=result.data.text||'';
-      const parsed=parseCardText(state.ocrText); Object.entries(parsed).forEach(([k,v])=>setField(k,v));
-      status.textContent='Leitura concluída. Confira os dados antes de continuar.'; progress.hidden=true;
-    }catch(err){ console.warn(err); status.textContent='Não foi possível fazer a leitura automática. Confira/preencha os dados manualmente.'; progress.hidden=true; }
+      status.innerHTML='<i class="bi bi-cloud-arrow-up"></i> Enviando cartão para leitura rápida…';
+      progress.hidden=false; progress.value=12;
+      const data=await serverOCR(file);
+      state.ocrText=data.rawText||'';
+      applyOCRFields(data.fields||{});
+      const count=Number(data.detectedFields||0);
+      status.innerHTML=`<i class="bi bi-check-circle-fill"></i> Leitura concluída${count?` · ${count} campo${count===1?'':'s'} identificado${count===1?'':'s'}`:''}. Confira antes de continuar.`;
+      progress.value=100; setTimeout(()=>{progress.hidden=true;},450);
+      return;
+    }catch(serverErr){
+      console.warn('OCR servidor:',serverErr);
+      status.innerHTML='<i class="bi bi-phone"></i> Leitura no servidor indisponível. Tentando no próprio aparelho…';
+      progress.value=20;
+    }
+    try{
+      const text=await browserOCR(file);
+      state.ocrText=text;
+      const parsed=parseCardText(text); applyOCRFields(parsed);
+      const count=Object.values(parsed).filter(Boolean).length;
+      status.innerHTML=count?`<i class="bi bi-check-circle-fill"></i> Leitura alternativa concluída · ${count} campo${count===1?'':'s'} identificado${count===1?'':'s'}. Confira os dados.`:'<i class="bi bi-exclamation-triangle"></i> Não consegui identificar os dados automaticamente. Você pode preencher abaixo e continuar.';
+    }catch(err){
+      console.warn('OCR navegador:',err);
+      status.innerHTML='<i class="bi bi-exclamation-triangle"></i> Não consegui ler automaticamente. Tente outra foto com o cartão reto, próximo e sem reflexo, ou preencha os dados abaixo.';
+    }finally{ progress.hidden=true; }
   }
-  async function handleImage(file){ if(!file)return; state.imageFile=file; const img=$('cardPreview'); img.src=URL.createObjectURL(file); img.classList.add('show'); await runOCR(file); }
+
+  async function handleImage(file){
+    if(!file)return;
+    state.imageFile=file;
+    const img=$('cardPreview'); img.src=URL.createObjectURL(file); img.classList.add('show');
+    const status=$('ocrStatus'); if(status)status.innerHTML='<i class="bi bi-hourglass-split"></i> Preparando leitura…';
+    await runOCR(file);
+  }
   $('cardCameraInput')?.addEventListener('change',e=>handleImage(e.target.files?.[0]));
   $('cardGalleryInput')?.addEventListener('change',e=>handleImage(e.target.files?.[0]));
 
   async function resolveCapture(){
-    const contact=collectContact(); const query=contact.email||contact.whatsapp||contact.website||contact.registrationId||contact.company||contact.name;
-    const banner=$('captureDuplicateBanner'); banner.textContent='Verificando duplicidade e enriquecendo dados…'; banner.className='capture-confirm-banner';
+    const contact=collectContact(); const query=contact.website||contact.registrationId||contact.email||contact.whatsapp||contact.company||contact.social||contact.name;
+    const banner=$('captureDuplicateBanner'); banner.textContent='Buscando e enriquecendo em fontes externas…'; banner.className='capture-confirm-banner';
     try{
       const res=await fetch('/api/smart-capture/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,fields:contact})});
       const data=await res.json(); if(!res.ok) throw new Error(data.error||'Falha na busca'); state.lookup=data;
-      const enr=data.enrichment||{}; setField('company',enr.company);setField('website',enr.website);setField('sector',enr.sector);setField('email',enr.email);setField('phone',enr.phone);setField('whatsapp',enr.whatsapp);setField('registrationId',enr.registrationId);setField('city',enr.city);setField('department',enr.department);setField('country',enr.country);
-      if(data.duplicate){ const c=data.companies?.[0],p=data.contacts?.[0]; banner.className='capture-confirm-banner warning';banner.innerHTML=`<b>Registro já encontrado.</b> ${esc(p?.name||'')} ${c?`· ${esc(c.name)}`:''}. O Radar irá completar o registro existente, sem duplicar.`; }
-      else banner.innerHTML='<b>Novo contato.</b> O Radar não encontrou duplicidade. Confira os dados e siga para a classificação.';
-      const review=$('captureReviewSummary'); const v=collectContact(); if(review) review.innerHTML=`<b>${esc(v.name||'Nome não identificado')}</b>${v.role?` · ${esc(v.role)}`:''}<br>${esc(v.company||'Empresa não identificada')}<br>${esc(v.whatsapp||v.phone||'Sem telefone')}${v.email?` · ${esc(v.email)}`:''}${v.website?`<br>${esc(v.website)}`:''}`;
-    }catch(err){ banner.className='capture-confirm-banner warning';banner.textContent=`Não foi possível enriquecer agora: ${err.message}. Você pode continuar e salvar o contato.`; }
+      const enr=data.enrichment||{};
+      setField('company',enr.company);setField('website',enr.website);setField('social',enr.social);setField('sector',enr.sector);setField('email',enr.email);setField('phone',enr.phone);setField('whatsapp',enr.whatsapp);setField('registrationId',enr.registrationId);setField('city',enr.city);setField('department',enr.department);setField('country',enr.country);
+      if(data.externalFound){
+        banner.innerHTML=`<b>Identificação externa concluída.</b> ${esc(enr.source||'Fontes públicas consultadas')}.${data.duplicate?' <span class="capture-dup-note">Depois da descoberta externa, o Radar encontrou possível duplicidade no CRM e evitará criar outro registro.</span>':' <span class="capture-new-note">Nenhuma duplicidade foi encontrada no CRM.</span>'}`;
+        if(data.duplicate) banner.classList.add('warning');
+      } else {
+        banner.className='capture-confirm-banner warning';
+        banner.innerHTML='<b>Empresa ainda não localizada externamente.</b> Confira os dados capturados. Você pode complementar manualmente e continuar; o CRM só será consultado para evitar duplicação ao salvar.';
+      }
+      const review=$('captureReviewSummary'); const v=collectContact(); if(review) review.innerHTML=`<b>${esc(v.name||'Nome não identificado')}</b>${v.role?` · ${esc(v.role)}`:''}<br>${esc(v.company||'Empresa não identificada')}<br>${esc(v.whatsapp||v.phone||'Sem telefone')}${v.email?` · ${esc(v.email)}`:''}${v.website?`<br>${esc(v.website)}`:''}${v.social?`<br>${esc(v.social)}`:''}`;
+    }catch(err){ banner.className='capture-confirm-banner warning';banner.textContent=`Não foi possível pesquisar fontes externas agora: ${err.message}. Você pode continuar e salvar o contato.`; }
   }
 
   dialog.querySelectorAll('[data-choice-group]').forEach(group=>group.addEventListener('click',e=>{
@@ -97,19 +147,35 @@
   });
 
   const searchForm=$('siteAnalysisForm'); const searchInput=$('companyWebsite');
+  function applyExternalResult(data,q){
+    const e=data.enrichment||{};
+    openCapture();
+    setField('company',e.company);setField('website',e.website);setField('social',e.social);
+    setField('email',data.kind==='EMAIL'?q:e.email);setField('whatsapp',data.kind==='PHONE'?q:e.whatsapp);
+    setField('phone',e.phone);setField('registrationId',(data.kind==='CNPJ'||data.kind==='RUC')?q:e.registrationId);
+    setField('sector',e.sector);setField('city',e.city);setField('department',e.department);setField('country',e.country);
+    if(data.kind==='SOCIAL') setField('social',q);
+  }
   if(searchForm&&searchInput){
-    searchInput.removeAttribute('required'); searchInput.type='text'; searchInput.inputMode='search'; searchInput.autocomplete='off'; searchInput.placeholder='Empresa, site, e-mail, WhatsApp, CNPJ/RUC…';
-    const label=searchForm.querySelector('label'); if(label)label.textContent='Busca inteligente de empresa ou contato';
+    searchInput.removeAttribute('required'); searchInput.type='text'; searchInput.inputMode='search'; searchInput.autocomplete='off'; searchInput.placeholder='Site, CNPJ/RUC, e-mail, WhatsApp, empresa ou @rede social…';
+    const label=searchForm.querySelector('label'); if(label)label.innerHTML='Buscar <b>nova empresa</b> fora da base <span>fontes externas primeiro</span>';
     searchForm.addEventListener('submit', async e=>{
-      const q=searchInput.value.trim(); if(!q)return;
-      if(/^https?:\/\//i.test(q)||(/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(q)&&!q.includes('@'))){ return; }
       e.preventDefault(); e.stopImmediatePropagation();
-      const result=$('smartLookupResult');result.className='smart-lookup-result show';result.innerHTML='<strong>Buscando…</strong><p>Verificando CRM, contato, domínio e identificadores.</p>';
-      try{ const res=await fetch('/api/smart-capture/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Falha');
-        if(data.duplicate){const c=data.companies?.[0],p=data.contacts?.[0];result.classList.add('smart-duplicate');result.innerHTML=`<strong><i class="bi bi-check-circle"></i> Encontrado no CRM</strong><p>${esc(p?.name||'')} ${c?`· ${esc(c.name)}`:''}. Abra a captura rápida para classificar/atualizar este contato.</p><button type="button" class="secondary-action" id="lookupOpenCapture">Abrir captura</button>`;}
-        else{const e=data.enrichment||{};result.innerHTML=`<strong><i class="bi bi-stars"></i> ${esc(e.company||'Novo contato/empresa')}</strong><p>${esc(e.sector||e.website||'Não encontrado no CRM. Você pode completar os dados e classificar em segundos.')}</p><button type="button" class="secondary-action" id="lookupOpenCapture">Capturar e classificar</button>`;}
-        $('lookupOpenCapture')?.addEventListener('click',()=>{openCapture(); const e=data.enrichment||{}; setField('company',e.company);setField('website',e.website);setField('email',data.kind==='EMAIL'?q:e.email);setField('whatsapp',data.kind==='PHONE'?q:e.whatsapp);setField('registrationId',data.kind==='CNPJ'?q:e.registrationId);setField('sector',e.sector);});
-      }catch(err){result.innerHTML=`<strong>Não foi possível concluir a busca.</strong><p>${esc(err.message)}</p>`;}
+      const q=searchInput.value.trim(); if(!q)return;
+      const result=$('smartLookupResult'); result.className='smart-lookup-result show external-first';
+      result.innerHTML='<strong><i class="bi bi-globe2"></i> Buscando novo cliente fora do CRM…</strong><p>Consultando fontes públicas e tentando identificar a empresa. O CRM será verificado somente depois, para evitar duplicidade.</p>';
+      try{
+        const res=await fetch('/api/smart-capture/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+        const data=await res.json(); if(!res.ok) throw new Error(data.error||'Falha'); const ext=data.enrichment||{};
+        if(data.externalFound){
+          const duplicateNote=data.duplicate?'<div class="smart-dedupe-note"><i class="bi bi-shield-check"></i> Após a descoberta externa, foi encontrada uma possível correspondência no CRM. Ela será usada apenas para impedir duplicação.</div>':'<div class="smart-new-note"><i class="bi bi-plus-circle"></i> Nenhuma correspondência no CRM após a descoberta externa.</div>';
+          const source=ext.source?`<span class="smart-source"><i class="bi bi-globe2"></i> ${esc(ext.source)}</span>`:'';
+          result.innerHTML=`<strong><i class="bi bi-stars"></i> ${esc(ext.company||'Empresa localizada')}</strong><p>${esc(ext.sector||ext.website||ext.searchResultTitle||'Dados externos encontrados.')}</p>${source}${duplicateNote}<button type="button" class="primary secondary-action" id="lookupOpenCapture"><i class="bi bi-lightning-charge"></i> Confirmar e classificar</button>`;
+        } else {
+          result.innerHTML='<strong><i class="bi bi-search"></i> Não localizei uma empresa nova automaticamente.</strong><p>A busca foi feita fora do CRM. Tente outro identificador — site, CNPJ/RUC, e-mail corporativo, WhatsApp, nome completo da empresa ou @rede social — ou use a câmera do cartão.</p><button type="button" class="secondary-action" id="lookupOpenCapture"><i class="bi bi-person-plus"></i> Preencher e classificar manualmente</button>';
+        }
+        $('lookupOpenCapture')?.addEventListener('click',()=>applyExternalResult(data,q));
+      }catch(err){ result.innerHTML=`<strong>Não foi possível concluir a busca externa.</strong><p>${esc(err.message)}</p><button type="button" class="secondary-action" id="lookupOpenCapture">Abrir captura manual</button>`;$('lookupOpenCapture')?.addEventListener('click',openCapture); }
     }, true);
   }
 })();
