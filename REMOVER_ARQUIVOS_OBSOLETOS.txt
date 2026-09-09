@@ -1,0 +1,25 @@
+ROLLBACK LIMPO + MOBILE V1
+==========================
+
+O deploy ativo usa somente app/ (wsgi.py -> app/create_app).
+Os arquivos abaixo são sobras das alterações recentes e NÃO são necessários.
+Neste pacote eles foram neutralizados para não fazer nada mesmo se algum cache antigo tentar carregá-los.
+Para limpeza definitiva do repositório, podem ser apagados:
+
+app/static/smart-capture.js
+app/static/smart-capture.css
+static/smart-capture.js
+static/smart-capture.css
+static/mobile-runtime.js
+static/mobile.css
+FEIRA_EXPRESS.md
+
+NÃO apagar:
+app/static/pwa.css
+app/static/pwa.js
+app/static/service-worker.js
+app/templates/*
+app/static/technical-sales.css
+app/static/technical-sales.js
+
+A versão mobile atual não muda o fluxo comercial. Ela só reorganiza a interface em telas <= 767 px.

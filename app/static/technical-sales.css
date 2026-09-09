@@ -14,3 +14,20 @@
 
 @media(max-width:1100px){.ts-workflow-card{grid-template-columns:1fr}.ts-workflow-crm{border-right:0;border-bottom:1px solid var(--ts-line);padding-right:0;padding-bottom:16px}.ts-history-layout{grid-template-columns:1fr}}
 @media(max-width:720px){.ts-sidebar nav{grid-template-columns:repeat(4,1fr)}.ts-server-state{display:none}.ts-status-badge{order:3}.ts-workflow-card{padding:14px}.ts-workflow-crm{grid-template-columns:1fr}.ts-status-track{grid-template-columns:1fr 1fr}.ts-workflow-actions .ts-btn{width:100%}.ts-history-head{display:block}.ts-history-reference{margin-top:12px}.ts-history-event>div>div{display:block}.ts-history-event time{display:block;margin-top:3px}.ts-signature-pad-wrap canvas{height:130px}}
+
+/* Mobile clean V1 · somente apresentação da Academia/Ficha 360 */
+@media(max-width:720px){
+  .ts-main{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px))!important}
+  .ts-sidebar{height:calc(66px + env(safe-area-inset-bottom,0px))!important;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))!important}
+  .ts-topbar{position:sticky;top:0;z-index:18;padding-top:calc(14px + env(safe-area-inset-top,0px))!important;background:rgba(255,255,255,.97);backdrop-filter:blur(14px)}
+  .ts-topbar>div:first-child{min-width:0}.ts-topbar h1{overflow-wrap:anywhere}
+  .ts-draft-actions{width:100%;display:grid!important;grid-template-columns:1fr 1fr;gap:7px!important}.ts-draft-select{grid-column:1/-1!important}.ts-draft-actions .ts-btn{width:100%!important}
+  .ts-view{padding:16px 12px 28px!important}.ts-hero{padding:18px!important}.ts-hero h2{font-size:25px!important}
+  .ts-workflow-card,.ts-card,.ts-lesson,.ts-survey-card,.ts-budget-card{border-radius:14px!important}
+  .ts-status-track{grid-template-columns:1fr 1fr!important}.ts-status-node{min-height:42px!important}
+  .ts-workflow-actions{display:grid!important;grid-template-columns:1fr!important}.ts-workflow-actions .ts-btn{min-height:44px!important}
+  .ts-form-grid,.ts-money-grid,.ts-option-grid,.ts-learn-grid{grid-template-columns:1fr!important}
+  .ts-shell input:not([type="checkbox"]):not([type="radio"]),.ts-shell select,.ts-shell textarea{font-size:16px!important}
+  .ts-signature-pad-wrap canvas{height:145px!important}
+  .ts-history-layout{grid-template-columns:1fr!important}.ts-history-reference{min-width:0!important;width:100%!important}
+}

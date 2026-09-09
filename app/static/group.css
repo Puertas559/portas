@@ -8,3 +8,12 @@
 .premium-wordmark-only .premium-name{align-items:center;text-align:center}
 .premium-wordmark-only .premium-name strong{font-size:34px}.premium-wordmark-only .premium-name span{font-size:12px}
 .card:hover .logo.logo-native img{animation:brandPulse .62s ease-in-out}
+
+/* Mobile clean V1 · HG Grupo */
+@media(max-width:720px){
+  .shell{padding:calc(18px + env(safe-area-inset-top,0px)) 14px calc(24px + env(safe-area-inset-bottom,0px))}
+  header{gap:12px;padding-bottom:18px;align-items:flex-start}header>img{width:92px;height:58px;border-radius:12px}header h1{font-size:21px}header p{font-size:12px;line-height:1.45}
+  .hero{padding:30px 0 20px}.hero h2{font-size:34px;line-height:1.05}.badge{padding:9px 12px}
+  .grid{grid-template-columns:1fr;gap:14px}.card{padding:18px;border-radius:20px}.card h3{font-size:23px}.card p{min-height:0}.logo,.premium-logo-live{height:112px}.stats{gap:18px;flex-wrap:wrap;margin:18px 0}.card a{min-height:48px}
+  .isolation{padding:18px;border-radius:18px}.isolation div{gap:7px}.isolation span{font-size:11px}
+}
