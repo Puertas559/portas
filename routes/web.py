@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, session, url_for, abort, current_app, make_response
+from flask import Blueprint, render_template, redirect, session, url_for, abort, current_app
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import CollectorRun, Opportunity, ProspectSignal, WebsiteAnalysis, Company, Tenant
 from ..tenant import current_tenant, current_user, ensure_group_operations, seed_products
@@ -91,9 +91,4 @@ def index():
     # Nunca injetar empresas DEMO em operações reais. Cada operação deve exibir apenas
     # os registros pertencentes ao seu próprio tenant_id.
     demo_mode = False
-    response = make_response(render_template("index.html", leads=leads, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {}, user=user))
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    response.headers["X-Radar-Build"] = "20260909-smart-capture-v1.2"
-    return response
+    return render_template("index.html", leads=leads, demo_mode=demo_mode, prospect_signals=prospect_signals, last_collector_run=last_collector_run, prospect_total=prospect_total, website_analyses=website_analyses, tenant=tenant, brand=tenant.settings or {}, user=user)

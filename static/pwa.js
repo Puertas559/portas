@@ -5,12 +5,6 @@
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   root.classList.toggle('pwa-standalone', isStandalone);
 
-  const RADAR_BUILD = '20260909-smart-capture-v1.2';
-  try { localStorage.setItem('radar_build', RADAR_BUILD); } catch (_) {}
-  if ('caches' in window) {
-    caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('hg-radar-') || k.startsWith('hg-radar-industrial-')).map(k => caches.delete(k)))).catch(()=>{});
-  }
-
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/service-worker.js', { scope: '/', updateViaCache: 'none' })

@@ -4,10 +4,7 @@ Flask-Migrate==4.1.0
 SQLAlchemy==2.0.51
 psycopg[binary]==3.2.9
 gunicorn==26.0.0
-python-dotenv==1.2.2
+python-dotenv==1.1.1
 reportlab==5.0.0
 
 openpyxl==3.1.5
-Pillow==12.3.0
-pytesseract==0.3.13
-pyzbar==0.1.9

@@ -2,14 +2,11 @@
 <html lang="{{ brand.get('language','es-PY') }}">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Radar Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260909-mobile-v1.5">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260909-mobile-v1.5">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260824-v16.3">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260824-v16.3">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,11 +19,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260824-v16.0">
-<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260909-mobile-v1.5">
-<link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}?v=20260909-mobile-v1.5">
-<link rel="stylesheet" href="{{ url_for('static', filename='smart-capture.css') }}?v=20260909-fesqua-v1.5-qr-fast">
+<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260824-v16.3">
 </head>
-<body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}" data-radar-build="20260909-smart-capture-v1.3-external-first">
+<body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}">
 <div class="app">
   <aside class="sidebar">
     <a class="brand brand-logo" href="/" aria-label="{{ brand.get('brand_name', tenant.name) }} — inicio">
@@ -35,7 +30,7 @@
     </a>
     <nav class="workflow-nav">
       <p>1 · CALIFICAR</p>
-      <a class="active" href="#triage" data-module-target="triage"><i class="bi bi-search-heart"></i><span>Busca inteligente</span></a>
+      <a class="active" href="#triage" data-module-target="triage"><i class="bi bi-window-stack"></i><span>Calificar por sitio</span></a>
       <a href="#research" data-module-target="research"><i class="bi bi-search"></i><span>Cola de investigación</span></a>
       <a href="#salesready" data-module-target="salesready"><i class="bi bi-rocket-takeoff"></i><span>Listo para ventas</span></a>
       <p>2 · EJECUTAR</p>
@@ -61,7 +56,7 @@
     <div class="compat-hidden" aria-hidden="true"><input id="search"><input id="searchCity"><select id="searchRegion"><option value=""></option></select><select id="searchIndustry"><option value=""></option></select><button id="findCompanies" type="button"></button></div>
 
     <header class="topbar workspace-topbar">
-      <div><small>{{ brand.get("brand_name", tenant.name)|upper }} · {{ "CENTRO DE TRABALHO COMERCIAL" if brand.get("language") == "pt-BR" else "CENTRO DE TRABAJO COMERCIAL" }}</small><strong id="workspaceModuleTitle">{{ "Busca inteligente" if brand.get("language") == "pt-BR" else "Búsqueda inteligente" }}</strong></div>
+      <div><small>{{ brand.get("brand_name", tenant.name)|upper }} · {{ "CENTRO DE TRABALHO COMERCIAL" if brand.get("language") == "pt-BR" else "CENTRO DE TRABAJO COMERCIAL" }}</small><strong id="workspaceModuleTitle">{{ "Qualificar por site" if brand.get("language") == "pt-BR" else "Calificar por sitio" }}</strong></div>
       <div class="workspace-top-actions">{% if tenant.slug == "puertas-brasil-py" %}<a class="hub-events-top" href="{{ url_for('hub.home') }}"><i class="bi bi-calendar2-event"></i><span>HUB Eventos</span></a>{% endif %}<div class="global-company-search"><i class="bi bi-search"></i><input id="globalCompanySearch" autocomplete="off" placeholder="Buscar empresa…" aria-label="Buscar empresa"><div id="globalCompanyResults" class="global-company-results" hidden></div></div><button class="ghost-action" id="globalRefresh"><i class="bi bi-arrow-clockwise"></i> Actualizar</button><button class="primary compact" id="newLead" title="Nueva oportunidad"><i class="bi bi-plus-lg"></i></button>{% if user %}<details class="user-menu"><summary><span class="user-avatar">{{ user.name[:2]|upper }}</span><span><b>{{ user.name }}</b><small>{{ 'Administrador HG' if user.role == 'GROUP_ADMIN' else 'Administrador' if user.role == 'ADMIN' else 'Gerente' if user.role == 'MANAGER' else 'Comercial' if user.role == 'SALES' else 'Consulta' }}</small></span><i class="bi bi-chevron-down"></i></summary><div><span>{{ user.email }}</span>{% if user.role == 'GROUP_ADMIN' %}<a href="{{ url_for('web.group_home') }}" style="display:block;padding:9px 12px"><i class="bi bi-arrow-left"></i> HG Grupo</a>{% endif %}{% if user.role == 'ADMIN' %}<button type="button" data-module-open="admin"><i class="bi bi-people"></i> Usuarios y acceso</button>{% endif %}<form method="post" action="{{ url_for('auth.logout_form') }}"><button type="submit"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</button></form></div></details>{% endif %}</div>
     </header>
 
@@ -129,12 +124,10 @@
     <section class="signals app-module" data-module="radar" id="alertas"><div class="section-head"><div><p class="eyebrow">MOVIMIENTO DEL MERCADO</p><h2>Señales monitoreadas</h2></div><span>Últimos 30 días</span></div><div class="signal-grid"><article><i class="bi bi-buildings"></i> <span><small>Nuevas fábricas</small><b>06</b></span></article><article><i class="bi bi-building-gear"></i> <span><small>Obras y naves</small><b>11</b></span></article><article><i class="bi bi-graph-up-arrow"></i> <span><small>Inversiones</small><b>08</b></span></article><article><i class="bi bi-box-arrow-in-right"></i> <span><small>Empresas entrantes</small><b>05</b></span></article><article><i class="bi bi-boxes"></i> <span><small>Activos industriales</small><b>14</b></span></article></div></section>
 
     <section class="site-triage app-module module-active" data-module="triage" id="triage">
-      {% if user %}<div class="welcome-radar"><div><small>CENTRO DE TRABAJO COMERCIAL</small><h1>Bienvenido, {{ user.name.split(' ')[0] }}.</h1><p>Capture o busque el próximo contato e avance diretamente até a classificação e o primeiro contato.</p></div><div class="welcome-flow"><span>01 <b>Capturar</b></span><i class="bi bi-arrow-right"></i><span>02 <b>Classificar</b></span><i class="bi bi-arrow-right"></i><span>03 <b>Contactar</b></span></div></div>{% endif %}
-      <div class="smart-event-banner"><div><strong>Modo FESQUA · Hengjie Doors</strong><small>Operador: {{ user.name if user else 'David Granja' }} · Porta-voz da Hengjie Doors para a América Latina</small></div><span class="smart-event-badge">CAPTURA RÁPIDA</span></div>
-      <div class="capture-head"><div><p class="eyebrow">PROSPECÇÃO · NOVOS LEADS</p><h2>Encontrar uma nova empresa</h2><p>A busca começa <strong>fora do CRM</strong>: informe site, CNPJ/RUC, e-mail, WhatsApp, nome da empresa ou @rede social — ou fotografe um cartão. Depois da identificação externa, o Radar consulta a base somente para evitar duplicidade e abre a classificação.</p></div></div>
-      <form id="siteAnalysisForm" class="site-form smart-search-shell"><label class="smart-search-label" for="companyWebsite">Buscar <b>nova empresa</b> fora da base <span>fontes externas primeiro</span></label><div class="smart-search-row"><input id="companyWebsite" name="url" type="text" inputmode="search" autocomplete="off" placeholder="Site, CNPJ/RUC, e-mail, WhatsApp, empresa ou @rede social…"><button class="smart-camera-btn" id="openSmartCapture" type="button" title="Fotografar cartão de visita"><i class="bi bi-camera-fill"></i></button><button class="primary scan-button" type="submit"><i class="bi bi-globe2"></i><span>Buscar novo lead</span></button></div><div class="smart-search-hints"><span>Site</span><span><i class="bi bi-camera"></i> Cartão</span><span>CNPJ/RUC</span><span>E-mail</span><span>WhatsApp</span><span>Empresa</span><span>@ Rede social</span></div><small class="smart-search-external-note"><i class="bi bi-shield-check"></i> O CRM não é usado como fonte da busca. Ele só é consultado depois que a empresa é descoberta, para impedir duplicações.</small></form>
-      <div id="smartLookupResult" class="smart-lookup-result"></div>
-      <div class="scan-status" id="scanStatus" aria-live="polite"><div class="scan-status-head"><span><i class="bi bi-speedometer2"></i> Motor de análisis</span><strong id="scanStage">Listo</strong></div><div class="scan-progress"><i id="scanProgressBar"></i></div><small id="siteAnalysisMessage">Informe um identificador para buscar um novo cliente em fontes externas.</small></div>
+      {% if user %}<div class="welcome-radar"><div><small>CENTRO DE TRABAJO COMERCIAL</small><h1>Bienvenido, {{ user.name.split(' ')[0] }}.</h1><p>Su radar está listo. Pegue el sitio de la próxima empresa y avance directamente hasta el contacto.</p></div><div class="welcome-flow"><span>01 <b>Analizar</b></span><i class="bi bi-arrow-right"></i><span>02 <b>Clasificar</b></span><i class="bi bi-arrow-right"></i><span>03 <b>Contactar</b></span></div></div>{% endif %}
+      <div class="capture-head"><div><p class="eyebrow">CALIFICACIÓN COMERCIAL MINUCIOSA</p><h2>Analizar el sitio de una empresa</h2><p>Obtiene datos públicos de contacto y estima el potencial según el portafolio configurado del centro comercial.</p></div></div>
+      <form id="siteAnalysisForm" class="site-form"><label for="companyWebsite">Sitio web de la empresa</label><div><input id="companyWebsite" name="url" type="text" inputmode="url" autocomplete="url" placeholder="empresa.com.py" required><button class="primary scan-button" type="submit"><i class="bi bi-search"></i><span>Analizar empresa</span></button></div><small><b>Análisis rápido</b> devuelve los datos esenciales primero. El análisis profundo continúa después sin bloquear su trabajo.</small></form>
+      <div class="scan-status" id="scanStatus" aria-live="polite"><div class="scan-status-head"><span><i class="bi bi-speedometer2"></i> Motor de análisis</span><strong id="scanStage">Listo</strong></div><div class="scan-progress"><i id="scanProgressBar"></i></div><small id="siteAnalysisMessage">Ingrese un sitio para iniciar la investigación comercial.</small></div>
       <details class="bulk-qualifier"><summary><i class="bi bi-layers"></i> Analizar varios sitios en lote</summary><div class="bulk-qualifier-body"><textarea id="bulkSiteUrls" placeholder="Pegue hasta 25 URLs, una por línea.
 https://empresa1.com
 https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis"><i class="bi bi-play-fill"></i> Analizar lote</button><small id="bulkSiteMessage">Ideal para empresas encontradas manualmente en Google Maps, listas o planillas.</small></div></details>
@@ -273,45 +266,12 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
   </div>
 </dialog>
 
-<dialog id="smartCaptureDialog" class="smart-capture-dialog">
-  <div class="smart-capture-shell">
-    <header class="smart-capture-head"><div><p>FESQUA 2026 · HENGJIE DOORS</p><h2>Captura rápida de contato</h2></div><button id="closeSmartCapture" class="smart-capture-close" type="button" aria-label="Fechar"><i class="bi bi-x-lg"></i></button></header>
-    <div class="smart-capture-body">
-      <section class="capture-step active" data-step="1"><div class="capture-step-title"><i class="bi bi-person-vcard"></i><div><h3>1. Capture, leia um QR ou informe o contato</h3><p>Use a câmera com autofocus, leia um QR em tempo real ou escolha uma foto. O Radar prioriza os dados confiáveis e deixa o enriquecimento externo rodar em segundo plano.</p></div></div>
-        <div class="card-capture-zone"><img id="cardPreview" class="card-preview" alt="Prévia do cartão"><div class="card-capture-actions"><button id="openCardCamera" class="primary-camera" type="button"><i class="bi bi-camera-fill"></i> Fotografar cartão</button><button id="openQrScanner" class="qr-camera" type="button"><i class="bi bi-qr-code-scan"></i> Ler QR</button><label><i class="bi bi-images"></i> Escolher foto<input id="cardGalleryInput" type="file" accept="image/*"></label><input id="cardCameraInput" class="capture-native-input" type="file" accept="image/*" capture="environment"></div><div class="capture-speed-note"><i class="bi bi-lightning-charge-fill"></i><span>Fluxo rápido: contato primeiro, enriquecimento depois.</span></div><div class="ocr-progress" id="ocrStatus">Use a câmera, leia um QR ou preencha os dados abaixo.</div><progress id="ocrProgress" max="100" value="0" hidden></progress></div>
-        <div class="capture-fields" style="margin-top:12px"><label>Nome<input data-card-field="name" autocomplete="name"></label><label>Cargo<input data-card-field="role"></label><label>Empresa<input data-card-field="company" autocomplete="organization"></label><label>E-mail<input data-card-field="email" type="email" autocomplete="email"></label><label>WhatsApp<input data-card-field="whatsapp" inputmode="tel" autocomplete="tel"></label><label>Telefone<input data-card-field="phone" inputmode="tel"></label><label>Site<input data-card-field="website" inputmode="url"></label><label>@ / Rede social<input data-card-field="social" placeholder="@empresa ou URL do perfil"></label><label>CNPJ / RUC<input data-card-field="registrationId"></label><label>Setor<input data-card-field="sector"></label><label>Cidade<input data-card-field="city"></label><label>Estado / Departamento<input data-card-field="department"></label><label>País<input data-card-field="country" value="Brasil"></label></div>
-      </section>
-      <section class="capture-step" data-step="2"><div class="capture-step-title"><i class="bi bi-shield-check"></i><div><h3>2. Confirme a identificação</h3><p>O Radar busca e enriquece em fontes externas primeiro. Só depois consulta o CRM para impedir que um registro já existente seja duplicado.</p></div></div><div id="captureDuplicateBanner" class="capture-confirm-banner">Verificando…</div><div id="captureReviewSummary" class="capture-message-preview"></div><button type="button" class="secondary-action" id="editCapturedData"><i class="bi bi-pencil"></i> Corrigir dados</button></section>
-      <section class="capture-step" data-step="3"><div class="capture-step-title"><i class="bi bi-lightning-charge-fill"></i><div><h3>3. Classificação rápida</h3><p>Somente o essencial para sair da conversa com o lead organizado e o primeiro contato pronto.</p></div></div><div class="capture-quick-options">
-        <div class="capture-option-group"><strong>Tipo de contato</strong><div class="capture-chips" data-choice-group="type"><button class="capture-chip active" data-value="Cliente potencial" type="button">Cliente</button><button class="capture-chip" data-value="Distribuidor" type="button">Distribuidor</button><button class="capture-chip" data-value="Parceiro comercial" type="button">Parceiro</button><button class="capture-chip" data-value="Importador" type="button">Importador</button><button class="capture-chip" data-value="Fabricante" type="button">Fabricante</button><button class="capture-chip" data-value="Engenharia" type="button">Engenharia</button><button class="capture-chip" data-value="Networking" type="button">Networking</button></div></div>
-        <div class="capture-option-group"><strong>Temperatura</strong><div class="capture-chips" data-choice-group="temperature"><button class="capture-chip hot" data-value="HOT" type="button">🔥 Quente</button><button class="capture-chip medium active" data-value="MEDIUM" type="button">● Médio</button><button class="capture-chip cold" data-value="COLD" type="button">○ Frio</button></div></div>
-        <div class="capture-option-group"><strong>Interesse (pode marcar vários)</strong><div class="capture-chips" data-choice-group="interests" data-multi="true"><button class="capture-chip" data-value="portas seccionadas" type="button">Seccionadas</button><button class="capture-chip" data-value="portas rápidas" type="button">Rápidas</button><button class="capture-chip" data-value="portas de enrolar" type="button">Enrolar</button><button class="capture-chip" data-value="motores e automação" type="button">Motores</button><button class="capture-chip" data-value="componentes" type="button">Componentes</button><button class="capture-chip" data-value="parceria comercial" type="button">Parceria</button></div></div>
-        <div class="capture-option-group"><strong>Mercado</strong><div class="capture-chips" data-choice-group="market"><button class="capture-chip active" data-value="Brasil" type="button">Brasil</button><button class="capture-chip" data-value="Paraguai" type="button">Paraguai</button><button class="capture-chip" data-value="Argentina" type="button">Argentina</button><button class="capture-chip" data-value="Chile" type="button">Chile</button><button class="capture-chip" data-value="América Latina" type="button">Outro LATAM</button></div></div>
-        <div class="capture-option-group"><strong>Próxima ação</strong><div class="capture-chips" data-choice-group="nextAction"><button class="capture-chip active" data-value="Enviar apresentação da Hengjie Doors" type="button">Enviar apresentação</button><button class="capture-chip" data-value="Preparar cotação" type="button">Cotação</button><button class="capture-chip" data-value="Agendar reunião" type="button">Reunião</button><button class="capture-chip" data-value="Fazer follow-up após a feira" type="button">Follow-up</button></div></div>
-        <div class="capture-fields"><label class="wide">Observação rápida<textarea id="captureNotes" placeholder="Ex.: quer distribuir no Sul; pediu catálogo; interesse em seccionadas; falar na próxima semana…"></textarea></label><label class="wide">Link da apresentação Hengjie (opcional)<input id="capturePresentationUrl" type="url" inputmode="url" placeholder="https://…"><small>Se informado, entra automaticamente na mensagem. O Radar lembra neste aparelho.</small></label></div>
-      </div></section>
-      <section class="capture-step" data-step="4"><div id="smartCaptureSuccess"></div></section>
-    </div>
-    <div id="smartCameraOverlay" class="smart-camera-overlay" hidden>
-      <header class="smart-camera-head"><div><small id="smartCameraTitle">Fotografar cartão</small><strong id="smartCameraHint">Centralize o cartão e aguarde o foco.</strong></div><button id="closeSmartCamera" type="button" aria-label="Fechar câmera"><i class="bi bi-x-lg"></i></button></header>
-      <div class="smart-camera-stage"><video id="smartCameraVideo" autoplay playsinline muted></video><div class="smart-camera-guide"><span></span><b>mantenha dentro da moldura</b></div></div>
-      <div id="smartCameraStatus" class="smart-camera-status">Abrindo câmera…</div>
-      <div class="smart-camera-controls"><button id="smartCameraTorch" type="button" hidden><i class="bi bi-lightbulb"></i><span>Lanterna</span></button><button id="smartCameraCapture" class="capture-shutter" type="button"><span></span><b>Capturar</b></button></div>
-    </div>
-    <footer class="capture-actions"><button id="smartCaptureBack" type="button" class="secondary"><i class="bi bi-arrow-left"></i> Voltar</button><button id="smartCaptureNext" type="button" class="primary">Continuar <i class="bi bi-arrow-right"></i></button><button id="smartCaptureSave" type="button" class="whatsapp" hidden><i class="bi bi-check2-circle"></i> Salvar e preparar WhatsApp</button></footer>
-  </div>
-</dialog>
-<button id="openSmartCaptureFloating" class="quick-capture-floating" type="button" aria-label="Capturar contato"><i class="bi bi-camera-fill"></i></button>
-
 <div class="toast" id="toast"></div>
 <script nonce="{{ csp_nonce }}">window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
-<script src="{{ url_for('static', filename='smart-capture.js') }}?v=20260909-fesqua-v1.5-qr-fast"></script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260909-fesqua-v1.5-qr-fast"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260824-v16.0"></script>
 <script src="{{ url_for('static', filename='workspace.js') }}?v=20260824-v16.0"></script>
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260824-v16.0"></script>
 {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260824-v16.0"></script>{% endif %}
 <script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260824-v16.0"></script>
-<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script>
-<script src="{{ url_for('static', filename='mobile-runtime.js') }}?v=20260909-mobile-v1.5"></script>
-<script src="{{ url_for('static', filename='pwa.js') }}?v=20260909-mobile-v1.5"></script></body>
+<script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script><script src="{{ url_for('static', filename='pwa.js') }}?v=20260824-v16.3"></script></body>
 </html>
