@@ -968,6 +968,275 @@ def website_analysis_disqualify(analysis_id):
     return jsonify(analysis.to_dict())
 
 
+# --- Smart Capture / Modo Feira -------------------------------------------------
+def _smart_digits(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _smart_domain(value):
+    value = (value or "").strip().lower()
+    if "@" in value:
+        value = value.rsplit("@", 1)[-1]
+    value = value.replace("https://", "").replace("http://", "").split("/", 1)[0]
+    return value[4:] if value.startswith("www.") else value
+
+
+def _smart_capture_kind(query):
+    raw = (query or "").strip()
+    digits = _smart_digits(raw)
+    if "@" in raw and "." in raw.rsplit("@", 1)[-1]:
+        return "EMAIL"
+    if len(digits) == 14:
+        return "CNPJ"
+    if (raw.startswith("http://") or raw.startswith("https://") or ("." in raw and " " not in raw and not raw.startswith("+"))):
+        return "WEBSITE"
+    if len(digits) >= 8 and sum(ch.isalpha() for ch in raw) == 0:
+        return "PHONE"
+    return "NAME"
+
+
+def _smart_company_payload(company):
+    if not company:
+        return None
+    return {
+        "id": company.id, "name": company.name, "legalName": company.legal_name,
+        "website": company.website, "domain": company.domain, "sector": company.sector,
+        "email": company.email or company.email_business, "phone": company.phone or company.phone_business,
+        "whatsapp": company.whatsapp, "registrationId": company.registration_id or company.ruc,
+        "city": company.city, "department": company.department, "country": company.country,
+    }
+
+
+def _smart_contact_payload(contact):
+    if not contact:
+        return None
+    return {"id": contact.id, "name": contact.name, "role": contact.role, "email": contact.email, "phone": contact.phone, "whatsapp": contact.whatsapp}
+
+
+def _smart_find_matches(tenant_id, *, email=None, phone=None, registration_id=None, domain=None, name=None):
+    companies = []
+    contacts = []
+    if email:
+        value = email.strip().lower()
+        contacts = Contact.query.filter(Contact.tenant_id == tenant_id, db.func.lower(Contact.email) == value).limit(8).all()
+        if not contacts:
+            companies = Company.query.filter(Company.tenant_id == tenant_id, or_(db.func.lower(Company.email) == value, db.func.lower(Company.email_business) == value)).limit(8).all()
+    if phone and not contacts and not companies:
+        digits = _smart_digits(phone)
+        for contact in Contact.query.filter_by(tenant_id=tenant_id).filter(or_(Contact.phone.isnot(None), Contact.whatsapp.isnot(None))).limit(1000).all():
+            if digits and digits in {_smart_digits(contact.phone), _smart_digits(contact.whatsapp)}:
+                contacts.append(contact)
+        if not contacts:
+            for company in Company.query.filter_by(tenant_id=tenant_id).filter(or_(Company.phone.isnot(None), Company.whatsapp.isnot(None))).limit(1000).all():
+                if digits and digits in {_smart_digits(company.phone), _smart_digits(company.phone_business), _smart_digits(company.whatsapp)}:
+                    companies.append(company)
+    if registration_id and not contacts and not companies:
+        digits = _smart_digits(registration_id)
+        rows = Company.query.filter_by(tenant_id=tenant_id).filter(or_(Company.registration_id.isnot(None), Company.ruc.isnot(None))).limit(1000).all()
+        companies = [row for row in rows if digits and digits in {_smart_digits(row.registration_id), _smart_digits(row.ruc)}][:8]
+    if domain and not contacts and not companies:
+        d = _smart_domain(domain)
+        companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.domain) == d).limit(8).all()
+        if not companies:
+            companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.website).contains(d)).limit(8).all()
+    if name and not contacts and not companies:
+        q = f"%{name.strip().lower()}%"
+        contacts = Contact.query.filter(Contact.tenant_id == tenant_id, db.func.lower(Contact.name).like(q)).limit(8).all()
+        companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.name).like(q)).limit(8).all()
+    for contact in contacts:
+        if contact.company and contact.company not in companies:
+            companies.append(contact.company)
+    return companies[:8], contacts[:8]
+
+
+def _smart_lookup_cnpj(cnpj):
+    digits = _smart_digits(cnpj)
+    if len(digits) != 14:
+        return None
+    try:
+        import json as _json
+        from urllib.request import Request as _UrlRequest, urlopen
+        req = _UrlRequest(f"https://brasilapi.com.br/api/cnpj/v1/{digits}", headers={"User-Agent": "RadarIndustrial/1.0", "Accept": "application/json"})
+        with urlopen(req, timeout=5) as response:
+            data = _json.loads(response.read().decode("utf-8"))
+        return {
+            "company": data.get("nome_fantasia") or data.get("razao_social"),
+            "legalName": data.get("razao_social"), "registrationId": digits,
+            "email": data.get("email"), "phone": data.get("ddd_telefone_1"),
+            "sector": data.get("cnae_fiscal_descricao"), "city": data.get("municipio"),
+            "department": data.get("uf"), "country": "Brasil",
+            "address": " ".join(str(x) for x in [data.get("logradouro"), data.get("numero"), data.get("bairro")] if x),
+            "source": "BrasilAPI",
+        }
+    except Exception:
+        return None
+
+
+@api_bp.post("/smart-capture/lookup")
+def smart_capture_lookup():
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    fields = data.get("fields") or {}
+    if not query and not any(fields.values()):
+        return jsonify(error="Ingrese un dato, capture una tarjeta o informe un contacto"), 400
+    tenant = current_tenant()
+    kind = _smart_capture_kind(query) if query else "CARD"
+    email = fields.get("email") or (query if kind == "EMAIL" else None)
+    phone = fields.get("whatsapp") or fields.get("phone") or (query if kind == "PHONE" else None)
+    registration_id = fields.get("registrationId") or (query if kind == "CNPJ" else None)
+    domain = fields.get("website") or (query if kind == "WEBSITE" else None) or (email.rsplit("@", 1)[-1] if email and "@" in email else None)
+    name = fields.get("company") or fields.get("name") or (query if kind == "NAME" else None)
+    companies, contacts = _smart_find_matches(tenant.id, email=email, phone=phone, registration_id=registration_id, domain=domain, name=name)
+    enrichment = _smart_lookup_cnpj(registration_id) if registration_id and not companies else None
+    if not enrichment and domain and not companies:
+        try:
+            from ..services.site_analyzer import analyze_website, normalize_website_url
+            normalized = normalize_website_url(domain)
+            analysis = analyze_website(normalized, max_pages=2, use_sitemap=False, request_timeout=6, status="QUICK")
+            enrichment = {
+                "company": analysis.company_name, "website": analysis.url, "sector": analysis.sector,
+                "email": analysis.emails[0] if analysis.emails else email,
+                "phone": analysis.phones[0] if analysis.phones else phone, "whatsapp": analysis.whatsapp,
+                "address": analysis.address, "products": analysis.products or [], "analysisId": analysis.id,
+                "potentialScore": analysis.potential_score,
+            }
+        except Exception:
+            enrichment = {"website": f"https://{_smart_domain(domain)}" if _smart_domain(domain) else None}
+    return jsonify(
+        kind=kind,
+        duplicate=bool(companies or contacts),
+        companies=[_smart_company_payload(row) for row in companies],
+        contacts=[_smart_contact_payload(row) for row in contacts],
+        enrichment=enrichment or {},
+    )
+
+
+@api_bp.post("/smart-capture/qualify")
+@require_permission("WRITE_CRM")
+def smart_capture_qualify():
+    data = request.get_json(silent=True) or {}
+    tenant = current_tenant()
+    user = current_user()
+    contact_data = data.get("contact") or {}
+    qualification = data.get("qualification") or {}
+    event_name = (data.get("event") or "FESQUA 2026").strip()[:160]
+    company_name = (contact_data.get("company") or data.get("company") or "").strip()
+    person_name = (contact_data.get("name") or "Contato da feira").strip()
+    email = (contact_data.get("email") or "").strip() or None
+    phone = (contact_data.get("phone") or "").strip() or None
+    whatsapp = (contact_data.get("whatsapp") or phone or "").strip() or None
+    website = (contact_data.get("website") or "").strip() or None
+    registration_id = (contact_data.get("registrationId") or "").strip() or None
+    if not company_name:
+        domain = _smart_domain(website or email)
+        company_name = domain.split(".")[0].replace("-", " ").title() if domain else f"Contato FESQUA · {person_name}"
+    existing_companies, existing_contacts = _smart_find_matches(
+        tenant.id, email=email, phone=whatsapp or phone, registration_id=registration_id,
+        domain=website or email, name=company_name,
+    )
+    company = existing_companies[0] if existing_companies else resolve_company(
+        tenant.id, company_name,
+        sector=contact_data.get("sector"), website=website, address=contact_data.get("address"),
+        city=contact_data.get("city"), department=contact_data.get("department"), country=contact_data.get("country") or "Brasil",
+        phone=phone, phone_business=phone, whatsapp=whatsapp, email=email, email_business=email,
+        registration_id=registration_id, description=f"Contato capturado presencialmente em {event_name}",
+    )
+    db.session.flush()
+    contact = existing_contacts[0] if existing_contacts else None
+    if not contact:
+        contact = Contact(
+            tenant_id=tenant.id, company_id=company.id, name=person_name,
+            role=(contact_data.get("role") or "").strip() or None, email=email, phone=phone, whatsapp=whatsapp,
+            buying_role="UNKNOWN", influence_score=70 if qualification.get("temperature") == "HOT" else 50,
+            confidence=85, verified_at=datetime.now(timezone.utc), source_url=f"event://{event_name.replace(' ', '-').lower()}",
+        )
+        db.session.add(contact)
+        db.session.flush()
+    else:
+        for attr, value in (("role", contact_data.get("role")), ("email", email), ("phone", phone), ("whatsapp", whatsapp)):
+            if value and not getattr(contact, attr, None):
+                setattr(contact, attr, value)
+    products = qualification.get("interests") or []
+    temp = (qualification.get("temperature") or "MEDIUM").upper()
+    score = {"HOT": 92, "MEDIUM": 72, "COLD": 50}.get(temp, 72)
+    lead_type = qualification.get("type") or "Cliente potencial"
+    notes = (qualification.get("notes") or "").strip()
+    evidence = f"Contato presencial capturado em {event_name}. Tipo: {lead_type}. Prioridade: {temp}."
+    if notes:
+        evidence += f" Observação: {notes}"
+    opportunity, _ = _create_intelligence_opportunity({
+        "company": company.name, "sector": company.sector or contact_data.get("sector"), "website": company.website or website,
+        "address": company.address, "phone": company.phone or phone, "whatsapp": company.whatsapp or whatsapp,
+        "email": company.email or email, "registrationId": company.registration_id or registration_id,
+        "project": f"{event_name} · {lead_type}", "city": company.city or contact_data.get("city") or "São Paulo",
+        "department": company.department or contact_data.get("department") or "SP", "country": company.country or "Brasil",
+        "stage": "Contato presencial / feira", "projectType": "EVENT_LEAD", "event": "BUYING_INTENT",
+        "score": score, "icpFit": score, "intent": score, "productFit": score,
+        "dataConfidence": 90, "signalRecency": 100, "products": products,
+        "evidence": evidence, "sourceName": event_name, "sourceUrl": f"https://evidence.local/events/{event_name.replace(' ', '-').lower()}",
+        "sourceType": "EVENT", "evidenceClassification": "FACT", "buyingStage": "SUPPLIER_DISCOVERY",
+        "probability": 55 if temp == "HOT" else 30 if temp == "MEDIUM" else 15,
+    }, status="QUALIFICADO")
+    db.session.flush()
+    next_action = qualification.get("nextAction") or "Enviar presentación de Hengjie Doors y realizar seguimiento"
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, opportunity_id=opportunity.id, contact_id=contact.id,
+        activity_type="MEETING", channel="EVENTO", direction="INBOUND", subject=f"Contacto capturado en {event_name}",
+        summary=evidence, outcome="INTERESTED" if temp == "HOT" else "CONNECTED", next_action=next_action,
+        created_by=user.name if user else "David Granja",
+        extra_data={"event": event_name, "leadType": lead_type, "temperature": temp, "interests": products,
+                    "market": qualification.get("market"), "captureMethod": data.get("captureMethod") or "SMART_CAPTURE",
+                    "representedBrand": "Hengjie Doors", "role": "Porta-voz para a América Latina"},
+    ))
+    first_name = person_name.split()[0] if person_name else ""
+    interest_text = ", ".join(products[:3]) if products else "as possibilidades que conversamos"
+    presentation_url = (qualification.get("presentationUrl") or "").strip()
+    material_line = f"\n\n*Apresentação Hengjie Doors:* {presentation_url}" if presentation_url else ""
+    whatsapp_message = (
+        f"Olá, *{first_name}*! Sou *David Granja*.\n"
+        "Foi um prazer conversar com você na *FESQUA*.\n\n"
+        "Represento um *Hub Industrial* e atuo como *porta-voz da Hengjie Doors para a América Latina*, "
+        "trabalhando no desenvolvimento comercial da marca e na aproximação com clientes e parceiros da região.\n\n"
+        f"Conforme conversamos sobre *{interest_text}*, vou lhe encaminhar o material da *Hengjie Doors* "
+        "para que possamos dar continuidade à nossa conversa."
+        f"{material_line}\n\nUm abraço e uma excelente feira!"
+    )
+    _audit("SMART_CAPTURE", "CONTACT", contact.id, {"company_id": company.id, "event": event_name, "opportunity_id": opportunity.id})
+    db.session.commit()
+    return jsonify(
+        company=_smart_company_payload(company), contact=_smart_contact_payload(contact), opportunity=opportunity.to_dict(),
+        whatsappMessage=whatsapp_message, whatsapp=whatsapp,
+    ), 201
+
+
+@api_bp.post("/smart-capture/card-upload")
+@require_permission("WRITE_CRM")
+def smart_capture_card_upload():
+    tenant = current_tenant()
+    user = current_user()
+    company_id = request.form.get("companyId", type=int)
+    contact_id = request.form.get("contactId", type=int)
+    upload = request.files.get("card")
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    if not upload or not upload.filename:
+        return jsonify(error="No se recibió la imagen de la tarjeta"), 400
+    extension = Path(secure_filename(upload.filename)).suffix.lower() or ".jpg"
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        return jsonify(error="Formato de imagen no permitido"), 400
+    upload_dir = Path(current_app.config["DATA_DIR"]) / "uploads" / "business-cards"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{tenant.id}-{company.id}-{uuid4().hex}{extension}"
+    upload.save(upload_dir / filename)
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, contact_id=contact_id,
+        activity_type="DATA_UPDATE", channel="EVENTO", subject="Tarjeta de visita capturada",
+        summary="Imagen original de la tarjeta de visita asociada al contacto.",
+        created_by=user.name if user else "Equipo comercial",
+        extra_data={"businessCard": filename, "event": request.form.get("event") or "FESQUA 2026"},
+    ))
+    db.session.commit()
+    return jsonify(ok=True, filename=filename), 201
+
 @api_bp.post("/tasks/ensure")
 @require_permission("WRITE_CRM")
 def tasks_ensure():

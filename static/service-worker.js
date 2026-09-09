@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'hg-radar-industrial-v18-fesqua-smart-capture-v1';
+const CACHE_VERSION = 'hg-radar-industrial-v19-fesqua-smart-capture-v1-2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const STATIC_ASSETS = [
   '/static/pwa.css',
