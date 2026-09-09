@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
@@ -11,6 +12,12 @@ from ..tenant import current_tenant, current_user, normalize_email, require_perm
 auth_bp = Blueprint("auth", __name__)
 
 
+def _initial_setup_allowed():
+    production = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production")
+    enabled = os.getenv("ALLOW_WEB_SETUP", os.getenv("ALLOW_INITIAL_SETUP", "false")).lower() in {"1", "true", "yes"}
+    return not production or enabled
+
+
 def _client_ip():
     if current_app.config.get("TRUST_PROXY"):
         forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
@@ -20,7 +27,8 @@ def _client_ip():
 
 
 def _failed_login_count(email):
-    since = datetime.now(timezone.utc) - timedelta(minutes=10)
+    window_seconds = max(60, int(os.getenv("LOGIN_RATE_WINDOW_SECONDS", "600")))
+    since = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
     ip = _client_ip()
     rows = AuditLog.query.filter(AuditLog.action == "LOGIN_FAILED", AuditLog.created_at >= since).order_by(AuditLog.created_at.desc()).limit(100).all()
     return sum(1 for row in rows if (row.details or {}).get("ip") == ip and (row.details or {}).get("email") == email)
@@ -32,8 +40,7 @@ def _has_any_user():
 
 @auth_bp.get("/setup")
 def setup_page():
-    import os
-    if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production") and os.getenv("ALLOW_INITIAL_SETUP", "false").lower() not in {"1","true","yes"}:
+    if not _initial_setup_allowed():
         return redirect(url_for("auth.login_page"))
     if _has_any_user():
         return redirect(url_for("auth.login_page"))
@@ -42,8 +49,7 @@ def setup_page():
 
 @auth_bp.post("/setup")
 def setup_submit():
-    import os
-    if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production") and os.getenv("ALLOW_INITIAL_SETUP", "false").lower() not in {"1","true","yes"}:
+    if not _initial_setup_allowed():
         return redirect(url_for("auth.login_page"))
     if _has_any_user():
         return redirect(url_for("auth.login_page"))
@@ -82,7 +88,8 @@ def _login():
     data = request.get_json(silent=True) if request.is_json else request.form
     email = normalize_email((data or {}).get("email"))
     password = (data or {}).get("password", "")
-    if _failed_login_count(email) >= 5:
+    login_limit = max(3, int(os.getenv("LOGIN_RATE_LIMIT", "5")))
+    if _failed_login_count(email) >= login_limit:
         return None
     candidates = User.query.join(Tenant).filter(
         User.normalized_email == email, User.status == "ACTIVE", Tenant.status == "ACTIVE",
@@ -189,7 +196,7 @@ def admin_users_update(user_id):
         if row.id == actor.id and status != "ACTIVE": return jsonify(error="No puede desactivar su propio usuario"), 400
         row.status = status
     if data.get("password"):
-        if len(str(data["password"])) < 10: return jsonify(error="La contraseña debe tener al menos 12 caracteres"), 400
+        if len(str(data["password"])) < 12: return jsonify(error="La contraseña debe tener al menos 12 caracteres"), 400
         row.password_hash = generate_password_hash(str(data["password"]))
     db.session.add(AuditLog(tenant_id=tenant.id, user_id=actor.id if actor else None, action="USER_UPDATED", entity_type="USER", entity_id=str(row.id), details={"role": row.role, "status": row.status}))
     db.session.commit()

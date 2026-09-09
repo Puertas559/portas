@@ -428,6 +428,7 @@ def company_search():
 @api_bp.post("/company-search/add")
 @require_permission("WRITE_CRM")
 def company_search_add():
+    tenant = current_tenant()
     data = request.get_json(silent=True) or {}
     if not data.get("company"):
         return jsonify(error="Falta el nombre de la empresa"), 400
@@ -1360,18 +1361,22 @@ def _smart_parse_business_card_text(text_value):
         website = f"https://{email_domain}"
         website_derived = True
 
-    phone_candidates = re.findall(r"(?:\+?\d[\d\s().\-]{6,}\d)", text_value)
-    phones = []
-    for raw in phone_candidates:
-        digits = _smart_digits(raw)
-        if 8 <= len(digits) <= 15 and raw not in phones:
-            phones.append(raw.strip())
-    phones.sort(key=lambda value: len(_smart_digits(value)), reverse=True)
-    phone = phones[0] if phones else None
-
     cnpj_match = re.search(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", text_value)
     ruc_match = re.search(r"(?:RUC\s*[:.-]?\s*)?(\d{5,10}-\d)\b", text_value, re.I)
     registration_id = cnpj_match.group(0) if cnpj_match else (ruc_match.group(1) if ruc_match else None)
+
+    # Prefer a number on a WhatsApp/mobile line and never confuse CNPJ/RUC with a phone.
+    registration_digits = _smart_digits(registration_id)
+    phone_label = re.compile(r"whats(?:app)?|cel(?:ular)?|m[oó]vel|m[oó]vil|mobile|tel(?:efone|éfono)?|fone|phone", re.I)
+    phones = []
+    for line_index, line in enumerate(lines):
+        priority = 0 if re.search(r"whats(?:app)?", line, re.I) else 1 if re.search(r"cel(?:ular)?|m[oó]vel|m[oó]vil|mobile", line, re.I) else 2 if phone_label.search(line) else 3
+        for raw in re.findall(r"(?:\+?\d[\d\s().\-]{6,}\d)", line):
+            digits = _smart_digits(raw)
+            if 8 <= len(digits) <= 15 and digits != registration_digits:
+                phones.append((priority, line_index, raw.strip(), digits))
+    phones.sort(key=lambda item: (item[0], item[1], -len(item[3])))
+    phone = phones[0][2] if phones else None
 
     social_text = text_without_email
     social_match = re.search(r"(?<![\w@])@([A-Z0-9._-]{3,})", social_text, re.I)
@@ -1476,6 +1481,8 @@ def smart_capture_card_read():
         from PIL import Image, ImageEnhance, ImageFilter, ImageOps
         import pytesseract
         image = Image.open(io.BytesIO(raw))
+        if image.width * image.height > 30_000_000:
+            return jsonify(error="A imagem tem resolução excessiva. Use uma foto de até 30 megapixels."), 413
         image = ImageOps.exif_transpose(image).convert("RGB")
         max_side = 1600
         if max(image.size) > max_side:
@@ -1491,7 +1498,8 @@ def smart_capture_card_read():
             text_value = pytesseract.image_to_string(gray, lang="por+spa+eng", config="--oem 1 --psm 6", timeout=5).strip()
         except Exception:
             text_value = ""
-        enough = len(text_value) >= 20 and ("@" in text_value or len(re.findall(r"\d", text_value)) >= 8)
+        first_fields, _ = _smart_parse_business_card_text(text_value)
+        enough = len(text_value) >= 15 and bool(first_fields.get("email") or first_fields.get("phone"))
         if not enough:
             try:
                 fallback = pytesseract.image_to_string(gray, lang="por+spa+eng", config="--oem 1 --psm 11", timeout=5).strip()
@@ -1560,6 +1568,8 @@ def smart_capture_qualify():
     website = (contact_data.get("website") or "").strip() or None
     registration_id = (contact_data.get("registrationId") or "").strip() or None
     social = (contact_data.get("social") or "").strip() or None
+    if whatsapp and not 8 <= len(_smart_digits(whatsapp)) <= 15:
+        return jsonify(error="Confirme um número de WhatsApp válido antes de continuar"), 400
     if not company_name:
         domain = _smart_domain(website or email)
         company_name = domain.split(".")[0].replace("-", " ").title() if domain else f"Contato FESQUA · {person_name}"
@@ -1678,6 +1688,16 @@ def smart_capture_card_upload():
     extension = Path(secure_filename(upload.filename)).suffix.lower() or ".jpg"
     if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
         return jsonify(error="Formato de imagen no permitido"), 400
+    raw = upload.read(10 * 1024 * 1024 + 1)
+    if not raw or len(raw) > 10 * 1024 * 1024:
+        return jsonify(error="A imagem deve ter no máximo 10 MB"), 413
+    try:
+        from PIL import Image
+        probe = Image.open(io.BytesIO(raw))
+        probe.verify()
+    except Exception:
+        return jsonify(error="O arquivo enviado não é uma imagem válida"), 415
+    upload.stream.seek(0)
     upload_dir = Path(current_app.config["DATA_DIR"]) / "uploads" / "business-cards"
     upload_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{tenant.id}-{company.id}-{uuid4().hex}{extension}"
