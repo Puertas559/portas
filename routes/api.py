@@ -6,11 +6,11 @@ from uuid import uuid4
 from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, jsonify, request, send_file, send_from_directory
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import (
-    AuditLog, CollectorRun, Company, CompanyActivity, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal,
+    AuditLog, CollectorRun, Company, CompanyActivity, Contact, Evidence, Opportunity, OpportunityEvidence, OpportunityScore, Project, Proposal, User,
     ProspectSignal, SalesTask, ScoreFactor, Signal, Source, SourceDocument, TimelineEvent, VisitRecord, Watchlist, WebsiteAnalysis,
 )
 from ..services.entity_resolution import resolve_company, resolve_project
@@ -18,7 +18,7 @@ from ..services.intelligence import as_datetime, company_completeness, lead_read
 from ..tenant import current_tenant, current_user, require_permission
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
-STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
+STATUSES = {"NOVO", "QUALIFICADO", "CONTATO_REALIZADO", "RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO", "MONITORAMENTO", "DESCARTADO"}
 BUYING_STAGES = {"AWARENESS", "RESEARCH", "PROJECT_PLANNING", "SUPPLIER_DISCOVERY", "RFQ", "PROCUREMENT", "NEGOTIATION", "PURCHASE", "POSTPONED", "UNKNOWN"}
 
 
@@ -29,6 +29,41 @@ def _audit(action, entity_type, entity_id, details=None):
         tenant_id=tenant.id, user_id=user.id if user else None, action=action,
         entity_type=entity_type, entity_id=str(entity_id), details=details or {},
     ))
+
+
+
+
+def _ensure_next_action(opportunity, status=None, base_time=None):
+    """Keep one clear next commercial action aligned with the current stage."""
+    now = base_time or datetime.now(timezone.utc)
+    status = status or opportunity.status
+    rules = {
+        "NOVO": ("Validar empresa y contacto responsable", 1, "RESEARCH"),
+        "QUALIFICADO": ("Realizar primer contacto", 1, "OUTREACH"),
+        "CONTATO_REALIZADO": ("Hacer seguimiento del primer contacto", 3, "FOLLOW_UP"),
+        "RESPONDEU": ("Responder y acordar diagnóstico / próximo paso", 1, "REPLY"),
+        "DIAGNOSTICO": ("Completar diagnóstico y acordar visita / solución", 2, "DIAGNOSIS"),
+        "VISITA": ("Preparar o registrar resultado de la visita", 1, "VISIT"),
+        "ORCAMENTO": ("Hacer seguimiento de la propuesta", 4, "PROPOSAL"),
+        "NEGOCIACAO": ("Actualizar negociación y siguiente decisión", 2, "NEGOTIATION"),
+        "MONITORAMENTO": ("Revisar cuenta en seguimiento", 14, "FOLLOW_UP"),
+    }
+    if status in {"GANHO", "PERDIDO", "DESCARTADO"}:
+        SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status": "CANCELLED"})
+        opportunity.next_action_at = None
+        return None
+    rule = rules.get(status)
+    if not rule:
+        return None
+    title, days, channel = rule
+    due = now + timedelta(days=days)
+    # Cancel stale automatic tasks from earlier stages, preserving manually created tasks (sequence_step=0).
+    SalesTask.query.filter(SalesTask.opportunity_id == opportunity.id, SalesTask.status == "PENDING", SalesTask.sequence_step < 0).update({"status": "CANCELLED"}, synchronize_session=False)
+    task = SalesTask(opportunity_id=opportunity.id, title=title, channel=channel, due_at=due, status="PENDING", sequence_step=-1)
+    db.session.add(task)
+    opportunity.next_action_at = due
+    opportunity.next_best_action = title
+    return task
 
 
 def _optional_number(value):
@@ -452,6 +487,7 @@ def opportunity_update(opportunity_id):
         # seguía mostrando 0 respuestas/visitas. Registramos el evento una sola vez
         # cuando realmente hay transición de etapa.
         if status != previous_status:
+            _ensure_next_action(opportunity, status=status)
             status_activity = {
                 "RESPONDEU": ("REPLY", "Respuesta registrada desde el CRM"),
                 "VISITA": ("VISIT_SCHEDULED", "Visita marcada desde el CRM"),
@@ -641,7 +677,10 @@ def company_activity_create(company_id):
         elif activity_type == "REPLY" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="RESPONDEU"
         elif activity_type in {"VISIT","VISIT_SCHEDULED","MEETING"} and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="VISITA"
         elif activity_type == "PROPOSAL_SENT" and op.status not in {"GANHO","PERDIDO","DESCARTADO"}: op.status="ORCAMENTO"
-        if next_at: op.next_action_at=next_at
+        if next_at:
+            op.next_action_at=next_at
+        else:
+            _ensure_next_action(op, status=op.status, base_time=occurred)
         db.session.add(TimelineEvent(opportunity=op,event_type=activity_type,description=data.get("summary") or data.get("subject") or "Interacción comercial registrada"))
     _audit("CREATE","COMPANY_ACTIVITY",company.id,{"type":activity_type})
     db.session.commit()
@@ -727,6 +766,7 @@ def signal_discard(signal_id):
 
 
 @api_bp.post("/website-analysis")
+@require_permission("WRITE_CRM")
 def website_analysis_create():
     data = request.get_json(silent=True) or {}
     if not data.get("url"):
@@ -928,7 +968,277 @@ def website_analysis_disqualify(analysis_id):
     return jsonify(analysis.to_dict())
 
 
+# --- Smart Capture / Modo Feira -------------------------------------------------
+def _smart_digits(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _smart_domain(value):
+    value = (value or "").strip().lower()
+    if "@" in value:
+        value = value.rsplit("@", 1)[-1]
+    value = value.replace("https://", "").replace("http://", "").split("/", 1)[0]
+    return value[4:] if value.startswith("www.") else value
+
+
+def _smart_capture_kind(query):
+    raw = (query or "").strip()
+    digits = _smart_digits(raw)
+    if "@" in raw and "." in raw.rsplit("@", 1)[-1]:
+        return "EMAIL"
+    if len(digits) == 14:
+        return "CNPJ"
+    if (raw.startswith("http://") or raw.startswith("https://") or ("." in raw and " " not in raw and not raw.startswith("+"))):
+        return "WEBSITE"
+    if len(digits) >= 8 and sum(ch.isalpha() for ch in raw) == 0:
+        return "PHONE"
+    return "NAME"
+
+
+def _smart_company_payload(company):
+    if not company:
+        return None
+    return {
+        "id": company.id, "name": company.name, "legalName": company.legal_name,
+        "website": company.website, "domain": company.domain, "sector": company.sector,
+        "email": company.email or company.email_business, "phone": company.phone or company.phone_business,
+        "whatsapp": company.whatsapp, "registrationId": company.registration_id or company.ruc,
+        "city": company.city, "department": company.department, "country": company.country,
+    }
+
+
+def _smart_contact_payload(contact):
+    if not contact:
+        return None
+    return {"id": contact.id, "name": contact.name, "role": contact.role, "email": contact.email, "phone": contact.phone, "whatsapp": contact.whatsapp}
+
+
+def _smart_find_matches(tenant_id, *, email=None, phone=None, registration_id=None, domain=None, name=None):
+    companies = []
+    contacts = []
+    if email:
+        value = email.strip().lower()
+        contacts = Contact.query.filter(Contact.tenant_id == tenant_id, db.func.lower(Contact.email) == value).limit(8).all()
+        if not contacts:
+            companies = Company.query.filter(Company.tenant_id == tenant_id, or_(db.func.lower(Company.email) == value, db.func.lower(Company.email_business) == value)).limit(8).all()
+    if phone and not contacts and not companies:
+        digits = _smart_digits(phone)
+        for contact in Contact.query.filter_by(tenant_id=tenant_id).filter(or_(Contact.phone.isnot(None), Contact.whatsapp.isnot(None))).limit(1000).all():
+            if digits and digits in {_smart_digits(contact.phone), _smart_digits(contact.whatsapp)}:
+                contacts.append(contact)
+        if not contacts:
+            for company in Company.query.filter_by(tenant_id=tenant_id).filter(or_(Company.phone.isnot(None), Company.whatsapp.isnot(None))).limit(1000).all():
+                if digits and digits in {_smart_digits(company.phone), _smart_digits(company.phone_business), _smart_digits(company.whatsapp)}:
+                    companies.append(company)
+    if registration_id and not contacts and not companies:
+        digits = _smart_digits(registration_id)
+        rows = Company.query.filter_by(tenant_id=tenant_id).filter(or_(Company.registration_id.isnot(None), Company.ruc.isnot(None))).limit(1000).all()
+        companies = [row for row in rows if digits and digits in {_smart_digits(row.registration_id), _smart_digits(row.ruc)}][:8]
+    if domain and not contacts and not companies:
+        d = _smart_domain(domain)
+        companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.domain) == d).limit(8).all()
+        if not companies:
+            companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.website).contains(d)).limit(8).all()
+    if name and not contacts and not companies:
+        q = f"%{name.strip().lower()}%"
+        contacts = Contact.query.filter(Contact.tenant_id == tenant_id, db.func.lower(Contact.name).like(q)).limit(8).all()
+        companies = Company.query.filter(Company.tenant_id == tenant_id, db.func.lower(Company.name).like(q)).limit(8).all()
+    for contact in contacts:
+        if contact.company and contact.company not in companies:
+            companies.append(contact.company)
+    return companies[:8], contacts[:8]
+
+
+def _smart_lookup_cnpj(cnpj):
+    digits = _smart_digits(cnpj)
+    if len(digits) != 14:
+        return None
+    try:
+        import json as _json
+        from urllib.request import Request as _UrlRequest, urlopen
+        req = _UrlRequest(f"https://brasilapi.com.br/api/cnpj/v1/{digits}", headers={"User-Agent": "RadarIndustrial/1.0", "Accept": "application/json"})
+        with urlopen(req, timeout=5) as response:
+            data = _json.loads(response.read().decode("utf-8"))
+        return {
+            "company": data.get("nome_fantasia") or data.get("razao_social"),
+            "legalName": data.get("razao_social"), "registrationId": digits,
+            "email": data.get("email"), "phone": data.get("ddd_telefone_1"),
+            "sector": data.get("cnae_fiscal_descricao"), "city": data.get("municipio"),
+            "department": data.get("uf"), "country": "Brasil",
+            "address": " ".join(str(x) for x in [data.get("logradouro"), data.get("numero"), data.get("bairro")] if x),
+            "source": "BrasilAPI",
+        }
+    except Exception:
+        return None
+
+
+@api_bp.post("/smart-capture/lookup")
+def smart_capture_lookup():
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    fields = data.get("fields") or {}
+    if not query and not any(fields.values()):
+        return jsonify(error="Ingrese un dato, capture una tarjeta o informe un contacto"), 400
+    tenant = current_tenant()
+    kind = _smart_capture_kind(query) if query else "CARD"
+    email = fields.get("email") or (query if kind == "EMAIL" else None)
+    phone = fields.get("whatsapp") or fields.get("phone") or (query if kind == "PHONE" else None)
+    registration_id = fields.get("registrationId") or (query if kind == "CNPJ" else None)
+    domain = fields.get("website") or (query if kind == "WEBSITE" else None) or (email.rsplit("@", 1)[-1] if email and "@" in email else None)
+    name = fields.get("company") or fields.get("name") or (query if kind == "NAME" else None)
+    companies, contacts = _smart_find_matches(tenant.id, email=email, phone=phone, registration_id=registration_id, domain=domain, name=name)
+    enrichment = _smart_lookup_cnpj(registration_id) if registration_id and not companies else None
+    if not enrichment and domain and not companies:
+        try:
+            from ..services.site_analyzer import analyze_website, normalize_website_url
+            normalized = normalize_website_url(domain)
+            analysis = analyze_website(normalized, max_pages=2, use_sitemap=False, request_timeout=6, status="QUICK")
+            enrichment = {
+                "company": analysis.company_name, "website": analysis.url, "sector": analysis.sector,
+                "email": analysis.emails[0] if analysis.emails else email,
+                "phone": analysis.phones[0] if analysis.phones else phone, "whatsapp": analysis.whatsapp,
+                "address": analysis.address, "products": analysis.products or [], "analysisId": analysis.id,
+                "potentialScore": analysis.potential_score,
+            }
+        except Exception:
+            enrichment = {"website": f"https://{_smart_domain(domain)}" if _smart_domain(domain) else None}
+    return jsonify(
+        kind=kind,
+        duplicate=bool(companies or contacts),
+        companies=[_smart_company_payload(row) for row in companies],
+        contacts=[_smart_contact_payload(row) for row in contacts],
+        enrichment=enrichment or {},
+    )
+
+
+@api_bp.post("/smart-capture/qualify")
+@require_permission("WRITE_CRM")
+def smart_capture_qualify():
+    data = request.get_json(silent=True) or {}
+    tenant = current_tenant()
+    user = current_user()
+    contact_data = data.get("contact") or {}
+    qualification = data.get("qualification") or {}
+    event_name = (data.get("event") or "FESQUA 2026").strip()[:160]
+    company_name = (contact_data.get("company") or data.get("company") or "").strip()
+    person_name = (contact_data.get("name") or "Contato da feira").strip()
+    email = (contact_data.get("email") or "").strip() or None
+    phone = (contact_data.get("phone") or "").strip() or None
+    whatsapp = (contact_data.get("whatsapp") or phone or "").strip() or None
+    website = (contact_data.get("website") or "").strip() or None
+    registration_id = (contact_data.get("registrationId") or "").strip() or None
+    if not company_name:
+        domain = _smart_domain(website or email)
+        company_name = domain.split(".")[0].replace("-", " ").title() if domain else f"Contato FESQUA · {person_name}"
+    existing_companies, existing_contacts = _smart_find_matches(
+        tenant.id, email=email, phone=whatsapp or phone, registration_id=registration_id,
+        domain=website or email, name=company_name,
+    )
+    company = existing_companies[0] if existing_companies else resolve_company(
+        tenant.id, company_name,
+        sector=contact_data.get("sector"), website=website, address=contact_data.get("address"),
+        city=contact_data.get("city"), department=contact_data.get("department"), country=contact_data.get("country") or "Brasil",
+        phone=phone, phone_business=phone, whatsapp=whatsapp, email=email, email_business=email,
+        registration_id=registration_id, description=f"Contato capturado presencialmente em {event_name}",
+    )
+    db.session.flush()
+    contact = existing_contacts[0] if existing_contacts else None
+    if not contact:
+        contact = Contact(
+            tenant_id=tenant.id, company_id=company.id, name=person_name,
+            role=(contact_data.get("role") or "").strip() or None, email=email, phone=phone, whatsapp=whatsapp,
+            buying_role="UNKNOWN", influence_score=70 if qualification.get("temperature") == "HOT" else 50,
+            confidence=85, verified_at=datetime.now(timezone.utc), source_url=f"event://{event_name.replace(' ', '-').lower()}",
+        )
+        db.session.add(contact)
+        db.session.flush()
+    else:
+        for attr, value in (("role", contact_data.get("role")), ("email", email), ("phone", phone), ("whatsapp", whatsapp)):
+            if value and not getattr(contact, attr, None):
+                setattr(contact, attr, value)
+    products = qualification.get("interests") or []
+    temp = (qualification.get("temperature") or "MEDIUM").upper()
+    score = {"HOT": 92, "MEDIUM": 72, "COLD": 50}.get(temp, 72)
+    lead_type = qualification.get("type") or "Cliente potencial"
+    notes = (qualification.get("notes") or "").strip()
+    evidence = f"Contato presencial capturado em {event_name}. Tipo: {lead_type}. Prioridade: {temp}."
+    if notes:
+        evidence += f" Observação: {notes}"
+    opportunity, _ = _create_intelligence_opportunity({
+        "company": company.name, "sector": company.sector or contact_data.get("sector"), "website": company.website or website,
+        "address": company.address, "phone": company.phone or phone, "whatsapp": company.whatsapp or whatsapp,
+        "email": company.email or email, "registrationId": company.registration_id or registration_id,
+        "project": f"{event_name} · {lead_type}", "city": company.city or contact_data.get("city") or "São Paulo",
+        "department": company.department or contact_data.get("department") or "SP", "country": company.country or "Brasil",
+        "stage": "Contato presencial / feira", "projectType": "EVENT_LEAD", "event": "BUYING_INTENT",
+        "score": score, "icpFit": score, "intent": score, "productFit": score,
+        "dataConfidence": 90, "signalRecency": 100, "products": products,
+        "evidence": evidence, "sourceName": event_name, "sourceUrl": f"https://evidence.local/events/{event_name.replace(' ', '-').lower()}",
+        "sourceType": "EVENT", "evidenceClassification": "FACT", "buyingStage": "SUPPLIER_DISCOVERY",
+        "probability": 55 if temp == "HOT" else 30 if temp == "MEDIUM" else 15,
+    }, status="QUALIFICADO")
+    db.session.flush()
+    next_action = qualification.get("nextAction") or "Enviar presentación de Hengjie Doors y realizar seguimiento"
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, opportunity_id=opportunity.id, contact_id=contact.id,
+        activity_type="MEETING", channel="EVENTO", direction="INBOUND", subject=f"Contacto capturado en {event_name}",
+        summary=evidence, outcome="INTERESTED" if temp == "HOT" else "CONNECTED", next_action=next_action,
+        created_by=user.name if user else "David Granja",
+        extra_data={"event": event_name, "leadType": lead_type, "temperature": temp, "interests": products,
+                    "market": qualification.get("market"), "captureMethod": data.get("captureMethod") or "SMART_CAPTURE",
+                    "representedBrand": "Hengjie Doors", "role": "Porta-voz para a América Latina"},
+    ))
+    first_name = person_name.split()[0] if person_name else ""
+    interest_text = ", ".join(products[:3]) if products else "as possibilidades que conversamos"
+    presentation_url = (qualification.get("presentationUrl") or "").strip()
+    material_line = f"\n\n*Apresentação Hengjie Doors:* {presentation_url}" if presentation_url else ""
+    whatsapp_message = (
+        f"Olá, *{first_name}*! Sou *David Granja*.\n"
+        "Foi um prazer conversar com você na *FESQUA*.\n\n"
+        "Represento um *Hub Industrial* e atuo como *porta-voz da Hengjie Doors para a América Latina*, "
+        "trabalhando no desenvolvimento comercial da marca e na aproximação com clientes e parceiros da região.\n\n"
+        f"Conforme conversamos sobre *{interest_text}*, vou lhe encaminhar o material da *Hengjie Doors* "
+        "para que possamos dar continuidade à nossa conversa."
+        f"{material_line}\n\nUm abraço e uma excelente feira!"
+    )
+    _audit("SMART_CAPTURE", "CONTACT", contact.id, {"company_id": company.id, "event": event_name, "opportunity_id": opportunity.id})
+    db.session.commit()
+    return jsonify(
+        company=_smart_company_payload(company), contact=_smart_contact_payload(contact), opportunity=opportunity.to_dict(),
+        whatsappMessage=whatsapp_message, whatsapp=whatsapp,
+    ), 201
+
+
+@api_bp.post("/smart-capture/card-upload")
+@require_permission("WRITE_CRM")
+def smart_capture_card_upload():
+    tenant = current_tenant()
+    user = current_user()
+    company_id = request.form.get("companyId", type=int)
+    contact_id = request.form.get("contactId", type=int)
+    upload = request.files.get("card")
+    company = Company.query.filter_by(id=company_id, tenant_id=tenant.id).first_or_404()
+    if not upload or not upload.filename:
+        return jsonify(error="No se recibió la imagen de la tarjeta"), 400
+    extension = Path(secure_filename(upload.filename)).suffix.lower() or ".jpg"
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        return jsonify(error="Formato de imagen no permitido"), 400
+    upload_dir = Path(current_app.config["DATA_DIR"]) / "uploads" / "business-cards"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{tenant.id}-{company.id}-{uuid4().hex}{extension}"
+    upload.save(upload_dir / filename)
+    db.session.add(CompanyActivity(
+        tenant_id=tenant.id, company_id=company.id, contact_id=contact_id,
+        activity_type="DATA_UPDATE", channel="EVENTO", subject="Tarjeta de visita capturada",
+        summary="Imagen original de la tarjeta de visita asociada al contacto.",
+        created_by=user.name if user else "Equipo comercial",
+        extra_data={"businessCard": filename, "event": request.form.get("event") or "FESQUA 2026"},
+    ))
+    db.session.commit()
+    return jsonify(ok=True, filename=filename), 201
+
 @api_bp.post("/tasks/ensure")
+@require_permission("WRITE_CRM")
 def tasks_ensure():
     created = 0
     tenant = current_tenant()
@@ -971,6 +1281,19 @@ def task_update(task_id):
     return jsonify(task.to_dict())
 
 
+def _valid_image_upload(upload, extension):
+    head = upload.stream.read(16)
+    upload.stream.seek(0)
+    signatures = {
+        ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
+        ".png": (b"\x89PNG\r\n\x1a\n",),
+        ".webp": (b"RIFF",),
+    }
+    if extension == ".webp":
+        return head.startswith(b"RIFF") and head[8:12] == b"WEBP"
+    return any(head.startswith(sig) for sig in signatures.get(extension, ()))
+
+
 @api_bp.post("/visits")
 @require_permission("WRITE_CRM")
 def visit_create():
@@ -982,7 +1305,7 @@ def visit_create():
     upload_dir.mkdir(parents=True, exist_ok=True)
     for uploaded in request.files.getlist("photos"):
         extension = Path(secure_filename(uploaded.filename or "")).suffix.lower()
-        if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        if extension not in {".jpg", ".jpeg", ".png", ".webp"} or not _valid_image_upload(uploaded, extension):
             continue
         filename = f"{uuid4().hex}{extension}"
         uploaded.save(upload_dir / filename)
@@ -1002,7 +1325,14 @@ def visit_create():
 
 @api_bp.get("/uploads/<path:filename>")
 def uploaded_file(filename):
-    return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", filename)
+    tenant = current_tenant()
+    safe_name = secure_filename(filename)
+    if safe_name != filename or not safe_name:
+        return jsonify(error="Archivo inválido"), 404
+    visits = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id).all()
+    if not any(safe_name in (visit.photos or []) for visit in visits):
+        return jsonify(error="Archivo no encontrado"), 404
+    return send_from_directory(Path(current_app.config["DATA_DIR"]) / "uploads", safe_name)
 
 
 @api_bp.post("/proposals/<int:opportunity_id>")
@@ -1122,6 +1452,18 @@ def _apply_period(query, column, start, end):
     return query
 
 
+def _analysis_identity(analysis):
+    """Stable company identity for report counts, even before CRM classification."""
+    if analysis.opportunity and analysis.opportunity.project and analysis.opportunity.project.company:
+        return f"company:{analysis.opportunity.project.company.id}"
+    domain = _website_domain(analysis.url)
+    if domain:
+        return f"domain:{domain}"
+    from ..services.entity_resolution import normalize_name
+    name = normalize_name(analysis.company_name or "")
+    return f"name:{name}" if name else f"analysis:{analysis.id}"
+
+
 def _build_activity_report():
     tenant = current_tenant()
     user_filter = (request.args.get("user") or "").strip()
@@ -1145,83 +1487,163 @@ def _build_activity_report():
     proposals_q = _apply_period(proposals_q, Proposal.created_at, start, end)
     proposals = proposals_q.all()
 
+    # Tareas son trabajo pendiente, no empresas. Se calculan aparte y nunca
+    # alimentan KPIs de cantidad de empresas.
     tasks_q = SalesTask.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
     if user_filter:
         tasks_q = tasks_q.filter(Opportunity.owner_name == user_filter)
     pending_tasks = tasks_q.filter(SalesTask.status == "PENDING").count()
     overdue_tasks = tasks_q.filter(SalesTask.status == "PENDING", SalesTask.due_at < datetime.now(timezone.utc)).count()
 
-    type_counts = {}
-    channel_counts = {}
-    for a in activities:
-        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
-        if a.channel:
-            channel_counts[a.channel] = channel_counts.get(a.channel, 0) + 1
+    # Empresas únicas analizadas / clasificadas. Reanalizar un sitio no aumenta
+    # la cantidad de empresas del informe.
+    latest_analysis = {}
+    for analysis in sorted(analyses, key=lambda row: row.created_at or datetime.min.replace(tzinfo=timezone.utc)):
+        latest_analysis[_analysis_identity(analysis)] = analysis
+    analysed_keys = set(latest_analysis)
+    classified_keys = {key for key, analysis in latest_analysis.items() if analysis.decision == "QUALIFIED"}
+    disqualified_keys = {key for key, analysis in latest_analysis.items() if analysis.decision == "DISQUALIFIED"}
 
-    classified = sum(1 for a in analyses if a.decision == "QUALIFIED")
-    disqualified = sum(1 for a in analyses if a.decision == "DISQUALIFIED")
+    commercial_types = {"EMAIL_SENT", "WHATSAPP_SENT", "CALL", "REPLY", "MEETING", "VISIT_SCHEDULED", "VISIT", "PROPOSAL_SENT"}
+    commercial_activities = [a for a in activities if a.activity_type in commercial_types]
+    type_counts = {}
+    for a in commercial_activities:
+        type_counts[a.activity_type] = type_counts.get(a.activity_type, 0) + 1
+
     email_count = type_counts.get("EMAIL_SENT", 0)
     whatsapp_count = type_counts.get("WHATSAPP_SENT", 0)
     calls = type_counts.get("CALL", 0)
     meetings = type_counts.get("MEETING", 0)
-    proposal_events = type_counts.get("PROPOSAL_SENT", 0)
-    wins = sum(1 for o in opportunities if o.status == "GANHO")
-    losses = sum(1 for o in opportunities if o.status == "PERDIDO")
 
-    # KPI por EMPRESA, no por cantidad de eventos. Esto evita que una empresa
-    # con varias respuestas o varias actualizaciones infle el informe.
-    reply_company_ids = {a.company_id for a in activities if a.activity_type == "REPLY"}
-    visit_company_ids = {a.company_id for a in activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
-    completed_visit_company_ids = {a.company_id for a in activities if a.activity_type == "VISIT"}
+    contacted_company_ids = {a.company_id for a in commercial_activities if a.activity_type in {"EMAIL_SENT", "WHATSAPP_SENT", "CALL"}}
+    reply_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "REPLY"}
+    visit_company_ids = {a.company_id for a in commercial_activities if a.activity_type in {"VISIT", "VISIT_SCHEDULED"}}
+    completed_visit_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "VISIT"}
+    proposal_company_ids = {a.company_id for a in commercial_activities if a.activity_type == "PROPOSAL_SENT"}
 
-    # Compatibilidad con el historial anterior a esta corrección: si el vendedor
-    # ya avanzó la empresa en el CRM pero no se creó CompanyActivity, el estado
-    # actual también alimenta el informe. Las etapas posteriores a RESPONDEU
-    # implican que hubo respuesta; VISITA identifica visita marcada.
+    latest_opportunity_by_company = {}
+    all_tenant_opps = Opportunity.query.filter_by(tenant_id=tenant.id).order_by(Opportunity.updated_at.desc()).all()
+    for o in all_tenant_opps:
+        cid = o.project.company_id
+        latest_opportunity_by_company.setdefault(cid, o)
+
+    # Backward compatibility with stages saved before event tracking existed.
     for o in opportunities:
-        company_id = o.project.company.id
-        if o.status in {"RESPONDEU", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
-            reply_company_ids.add(company_id)
+        cid = o.project.company_id
+        if o.status in {"CONTATO_REALIZADO", "RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO", "PERDIDO"}:
+            contacted_company_ids.add(cid)
+        if o.status in {"RESPONDEU", "DIAGNOSTICO", "VISITA", "ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+            reply_company_ids.add(cid)
         if o.status == "VISITA":
-            visit_company_ids.add(company_id)
+            visit_company_ids.add(cid)
+        if o.status in {"ORCAMENTO", "NEGOCIACAO", "GANHO"}:
+            proposal_company_ids.add(cid)
 
-    # Visitas efectivamente registradas con formulario/fotos también cuentan,
-    # incluso si la oportunidad ya avanzó después a presupuesto/negociación.
     visits_q = VisitRecord.query.join(Opportunity).filter(Opportunity.tenant_id == tenant.id)
     visits_q = _apply_period(visits_q, VisitRecord.visited_at, start, end)
     if user_filter:
         visits_q = visits_q.filter(Opportunity.owner_name == user_filter)
     for visit in visits_q.all():
-        company_id = visit.opportunity.project.company.id
-        visit_company_ids.add(company_id)
-        completed_visit_company_ids.add(company_id)
+        cid = visit.opportunity.project.company_id
+        visit_company_ids.add(cid)
+        completed_visit_company_ids.add(cid)
 
-    replies = len(reply_company_ids)
-    visits = len(visit_company_ids)
-    visits_completed = len(completed_visit_company_ids)
+    for proposal in proposals:
+        proposal_company_ids.add(proposal.opportunity.project.company_id)
 
-    touched_company_ids = sorted({a.company_id for a in activities})
+    wins = {o.project.company_id for o in opportunities if o.status == "GANHO"}
+    losses = {o.project.company_id for o in opportunities if o.status == "PERDIDO"}
+
+    touched_company_ids = set(contacted_company_ids) | set(reply_company_ids) | set(visit_company_ids) | set(proposal_company_ids)
+    touched_company_ids |= {a.company_id for a in commercial_activities}
+    touched_company_ids |= {o.project.company_id for o in opportunities}
     contacts_identified = Contact.query.filter(Contact.tenant_id == tenant.id, Contact.company_id.in_(touched_company_ids)).count() if touched_company_ids else 0
 
     metrics = {
-        "analysed": len(analyses), "classified": classified, "disqualified": disqualified,
-        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls, "replies": replies,
-        "meetings": meetings, "visits": visits, "visitsScheduled": visits, "visitsCompleted": visits_completed, "proposals": max(len(proposals), proposal_events),
-        "opportunities": len(opportunities), "wins": wins, "losses": losses,
-        "contacts": contacts_identified, "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
+        "analysed": len(analysed_keys),
+        "analysesPerformed": len(analyses),
+        "classified": len(classified_keys),
+        "disqualified": len(disqualified_keys),
+        "crmCompanies": Company.query.filter_by(tenant_id=tenant.id, status="ACTIVE").count(),
+        "contactedCompanies": len(contacted_company_ids),
+        "emails": email_count, "whatsapps": whatsapp_count, "calls": calls,
+        "replies": len(reply_company_ids), "meetings": meetings,
+        "visits": len(visit_company_ids), "visitsScheduled": len(visit_company_ids), "visitsCompleted": len(completed_visit_company_ids),
+        "proposals": len(proposal_company_ids), "opportunities": len({o.project.company_id for o in opportunities}),
+        "wins": len(wins), "losses": len(losses), "contacts": contacts_identified,
+        "pendingFollowups": pending_tasks, "overdueFollowups": overdue_tasks,
     }
 
     summary = (
-        f"Durante el período fueron analizadas {metrics['analysed']} empresas; {metrics['classified']} fueron clasificadas y "
-        f"{metrics['disqualified']} descartadas. Se registraron {metrics['emails']} correos, {metrics['whatsapps']} WhatsApps "
-        f"y {metrics['calls']} llamadas. {metrics['replies']} empresas respondieron, se marcaron "
-        f"{metrics['visitsScheduled']} visitas ({metrics['visitsCompleted']} realizadas) y se registraron "
-        f"{metrics['proposals']} propuestas. Actualmente existen "
-        f"{metrics['pendingFollowups']} seguimientos pendientes, de los cuales {metrics['overdueFollowups']} están vencidos."
+        f"Durante el período se trabajaron {metrics['analysed']} empresas únicas ({metrics['analysesPerformed']} análisis realizados); "
+        f"{metrics['classified']} fueron clasificadas y {metrics['disqualified']} descartadas. "
+        f"Se contactaron {metrics['contactedCompanies']} empresas mediante {metrics['emails']} correos, "
+        f"{metrics['whatsapps']} WhatsApps y {metrics['calls']} llamadas. "
+        f"{metrics['replies']} empresas respondieron, se marcaron {metrics['visitsScheduled']} visitas "
+        f"({metrics['visitsCompleted']} realizadas) y {metrics['proposals']} empresas llegaron a propuesta. "
+        f"Las tareas se muestran aparte: {metrics['pendingFollowups']} pendientes y {metrics['overdueFollowups']} vencidas."
     )
 
+    # One consolidated row per company: the executive report should show the
+    # commercial state, not every internal click or website enrichment step.
+    activities_by_company = {}
+    for a in commercial_activities:
+        activities_by_company.setdefault(a.company_id, []).append(a)
+    for cid in touched_company_ids:
+        activities_by_company.setdefault(cid, [])
+
+    pending_tasks_rows = SalesTask.query.join(Opportunity).filter(
+        Opportunity.tenant_id == tenant.id, SalesTask.status == "PENDING"
+    ).order_by(SalesTask.due_at.asc()).all()
+    next_task_by_company = {}
+    for task in pending_tasks_rows:
+        cid = task.opportunity.project.company_id
+        next_task_by_company.setdefault(cid, task)
+
+    companies_rows = []
+    for cid, company_activities in activities_by_company.items():
+        company = db.session.get(Company, cid)
+        if not company or company.status != "ACTIVE":
+            continue
+        latest = company_activities[0] if company_activities else None
+        opp = latest_opportunity_by_company.get(cid)
+        channels = []
+        for a in company_activities:
+            label = a.channel or a.activity_type
+            if label and label not in channels:
+                channels.append(label)
+        next_task = next_task_by_company.get(cid)
+        next_action = ""
+        next_action_at = None
+        for a in company_activities:
+            if a.next_action:
+                next_action = a.next_action
+                next_action_at = a.next_action_at.isoformat() if a.next_action_at else None
+                break
+        if not next_action and next_task:
+            next_action = next_task.title
+            next_action_at = next_task.due_at.isoformat() if next_task.due_at else None
+        companies_rows.append({
+            "companyId": cid,
+            "company": company.name,
+            "sector": company.sector or "—",
+            "city": company.city or company.department or "—",
+            "status": opp.status if opp else "CRM",
+            "lastActivity": latest.activity_type if latest else "—",
+            "lastContactAt": latest.occurred_at.isoformat() if latest and latest.occurred_at else None,
+            "channels": channels,
+            "replied": cid in reply_company_ids,
+            "visitScheduled": cid in visit_company_ids,
+            "visitCompleted": cid in completed_visit_company_ids,
+            "proposal": cid in proposal_company_ids,
+            "nextAction": next_action,
+            "nextActionAt": next_action_at,
+            "owner": opp.owner_name if opp else (latest.created_by if latest else "Equipo comercial"),
+        })
+    companies_rows.sort(key=lambda row: row.get("lastContactAt") or "", reverse=True)
+
     rows=[]
-    for a in activities[:300]:
+    for a in commercial_activities[:300]:
         rows.append({
             "date": a.occurred_at.isoformat() if a.occurred_at else None,
             "company": a.company.name if a.company else "Empresa",
@@ -1237,6 +1659,7 @@ def _build_activity_report():
         "user": user_filter,
         "metrics": metrics,
         "summary": summary,
+        "companies": companies_rows,
         "activities": rows,
         "users": users,
     }
@@ -1254,12 +1677,17 @@ def report_activity_csv():
     data = _build_activity_report()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Fecha", "Empresa", "Tipo", "Canal", "Asunto", "Resumen", "Resultado", "Próxima acción", "Responsable"])
-    for row in data["activities"]:
-        writer.writerow([row["date"], row["company"], row["type"], row["channel"], row["subject"], row["summary"], row["outcome"], row["nextAction"], row["createdBy"]])
+    writer.writerow(["Empresa", "Sector", "Ciudad", "Estado CRM", "Último contacto", "Canales", "Respondió", "Visita marcada", "Visita realizada", "Propuesta", "Próxima acción", "Responsable"])
+    for row in data["companies"]:
+        writer.writerow([
+            row["company"], row["sector"], row["city"], row["status"], row["lastContactAt"] or "",
+            " / ".join(row["channels"]), "Sí" if row["replied"] else "No",
+            "Sí" if row["visitScheduled"] else "No", "Sí" if row["visitCompleted"] else "No",
+            "Sí" if row["proposal"] else "No", row["nextAction"], row["owner"],
+        ])
     stream = io.BytesIO(output.getvalue().encode("utf-8-sig"))
     stream.seek(0)
-    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-actividad-comercial.csv")
+    return send_file(stream, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="Informe-empresas-comercial.csv")
 
 
 @api_bp.get("/reports/activity.pdf")
@@ -1311,8 +1739,8 @@ def report_activity_pdf():
 
     m=data["metrics"]
     cards=[
-        ("Empresas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Correos",m["emails"]),("WhatsApps",m["whatsapps"]),
-        ("Empresas que respondieron",m["replies"]),("Visitas marcadas",m["visitsScheduled"]),("Propuestas",m["proposals"]),("Seguimientos",m["pendingFollowups"]),
+        ("Empresas únicas analizadas",m["analysed"]),("Clasificadas",m["classified"]),("Empresas contactadas",m["contactedCompanies"]),("Empresas que respondieron",m["replies"]),
+        ("Visitas marcadas",m["visitsScheduled"]),("Visitas realizadas",m["visitsCompleted"]),("Empresas con propuesta",m["proposals"]),("Ganadas",m["wins"]),
     ]
     card_rows=[]
     for i in range(0,len(cards),4):
@@ -1322,15 +1750,27 @@ def report_activity_pdf():
         card_rows.append(row)
     table=Table(card_rows, colWidths=[43.5*mm]*4, rowHeights=[21*mm]*len(card_rows), hAlign='LEFT')
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),light),("BOX",(0,0),(-1,-1),0.5,line),("INNERGRID",(0,0),(-1,-1),0.5,colors.white),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),7)]))
-    story += [table, Spacer(1, 6*mm), Paragraph("Actividad registrada", styles["PBH2"])]
+    task_note=Paragraph(
+        f"<b>Actividad:</b> {m['emails']} correos · {m['whatsapps']} WhatsApps · {m['calls']} llamadas &nbsp;&nbsp; "
+        f"<b>Tareas:</b> {m['pendingFollowups']} pendientes · {m['overdueFollowups']} vencidas. "
+        f"Las tareas no se contabilizan como empresas.", styles["PBSub"]
+    )
+    story += [table, Spacer(1, 3*mm), task_note, Spacer(1, 4*mm), Paragraph("Empresas trabajadas", styles["PBH2"])]
 
-    rows=[["Fecha","Empresa","Actividad","Canal","Responsable"]]
-    type_names={"EMAIL_SENT":"Correo enviado","WHATSAPP_SENT":"WhatsApp","CALL":"Llamada","MEETING":"Reunión","VISIT_SCHEDULED":"Visita marcada","VISIT":"Visita realizada","PROPOSAL_SENT":"Propuesta","REPLY":"Respuesta","FOLLOW_UP":"Seguimiento","NOTE":"Nota","DATA_UPDATE":"Actualización"}
-    for row in data["activities"][:120]:
-        date=(row["date"] or "")[:10]
-        rows.append([Paragraph(date,styles["PBSmall"]),Paragraph(row["company"],styles["PBSmall"]),Paragraph(type_names.get(row["type"],row["type"]),styles["PBSmall"]),Paragraph(row["channel"] or "—",styles["PBSmall"]),Paragraph(row["createdBy"],styles["PBSmall"])])
-    act=Table(rows, repeatRows=1, colWidths=[22*mm,57*mm,39*mm,27*mm,30*mm], hAlign='LEFT')
-    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    rows=[["Empresa","Estado","Último contacto","Respuesta","Visita","Propuesta","Próxima acción"]]
+    for row in data["companies"][:160]:
+        last=(row["lastContactAt"] or "")[:10] or "—"
+        visit="Realizada" if row["visitCompleted"] else ("Marcada" if row["visitScheduled"] else "—")
+        next_action=row["nextAction"] or "—"
+        if len(next_action)>55: next_action=next_action[:52]+"..."
+        rows.append([
+            Paragraph(row["company"],styles["PBSmall"]), Paragraph(row["status"],styles["PBSmall"]),
+            Paragraph(last,styles["PBSmall"]), Paragraph("Sí" if row["replied"] else "—",styles["PBSmall"]),
+            Paragraph(visit,styles["PBSmall"]), Paragraph("Sí" if row["proposal"] else "—",styles["PBSmall"]),
+            Paragraph(next_action,styles["PBSmall"]),
+        ])
+    act=Table(rows, repeatRows=1, colWidths=[43*mm,22*mm,24*mm,17*mm,20*mm,17*mm,32*mm], hAlign='LEFT')
+    act.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),6.7),("GRID",(0,0),(-1,-1),0.35,line),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,light]),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
     story.append(act)
     story.append(Spacer(1, 6*mm))
     story.append(Paragraph((f"Este relatório foi gerado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Os dados refletem as atividades registradas no período selecionado." if brand.get("language") == "pt-BR" else f"Este informe fue generado por {brand.get('brand_name', tenant.name)} - Radar Comercial. Los datos reflejan las actividades registradas en el sistema durante el período seleccionado."), styles["PBSub"]))
@@ -1577,8 +2017,35 @@ def company_contact_create(company_id):
     data = request.get_json(silent=True) or {}
     if not data.get("name"):
         return jsonify(error="Falta el nombre del contacto"), 400
+    # Evita duplicar personas ya registradas en la misma empresa. Email y WhatsApp
+    # son claves fuertes; nombre+cargo sirve como última coincidencia segura.
+    clean_email = str(data.get("email") or "").strip().casefold()
+    clean_phone = "".join(ch for ch in str(data.get("whatsapp") or data.get("phone") or "") if ch.isdigit())
+    clean_name = str(data.get("name") or "").strip()
+    clean_role = str(data.get("role") or "").strip()
+    existing_contacts = Contact.query.filter_by(tenant_id=tenant.id, company_id=company.id, status="ACTIVE").all()
+    existing = None
+    for row in existing_contacts:
+        row_email = str(row.email or "").strip().casefold()
+        row_phone = "".join(ch for ch in str(row.whatsapp or row.phone or "") if ch.isdigit())
+        same_name = row.name.strip().casefold() == clean_name.casefold() if row.name and clean_name else False
+        same_role = str(row.role or "").strip().casefold() == clean_role.casefold() if clean_role else True
+        if (clean_email and row_email == clean_email) or (clean_phone and row_phone == clean_phone) or (same_name and same_role):
+            existing = row
+            break
+    if existing:
+        changed=[]
+        for attr,key in (("role","role"),("email","email"),("phone","phone"),("whatsapp","whatsapp"),("linkedin_url","linkedin")):
+            value=str(data.get(key) or "").strip()
+            if value and not getattr(existing,attr):
+                setattr(existing,attr,value); changed.append(key)
+        if changed:
+            existing.verified_at=datetime.now(timezone.utc)
+            db.session.add(CompanyActivity(tenant_id=tenant.id, company_id=company.id, contact_id=existing.id, activity_type="DATA_UPDATE", channel="CRM", subject="Contacto existente completado", summary=f"Se completaron datos de {existing.name}: {', '.join(changed)}", created_by=(current_user().name if current_user() else "Equipo comercial")))
+            db.session.commit()
+        return jsonify(id=existing.id, companyId=company.id, name=existing.name, role=existing.role, buyingRole=existing.buying_role, email=existing.email, phone=existing.phone, whatsapp=existing.whatsapp, confidence=existing.confidence, duplicatePrevented=True, changed=changed), 200
     contact = Contact(
-        tenant_id=tenant.id, company_id=company.id, name=str(data["name"]).strip(), role=data.get("role"),
+        tenant_id=tenant.id, company_id=company.id, name=clean_name, role=data.get("role"),
         buying_role=(data.get("buyingRole") or "UNKNOWN").upper(), influence_score=max(0, min(100, int(data.get("influence", 50)))),
         email=data.get("email"), phone=data.get("phone"), whatsapp=data.get("whatsapp"),
         linkedin_url=data.get("linkedin"), source_url=data.get("sourceUrl"), confidence=max(0, min(100, int(data.get("confidence", 60)))),
@@ -1647,6 +2114,52 @@ def company_contact_update(company_id, contact_id):
         buyingRole=contact.buying_role, email=contact.email, phone=contact.phone,
         whatsapp=contact.whatsapp, confidence=contact.confidence, changed=changed
     )
+
+
+
+@api_bp.post("/imports/history/preview")
+@require_permission("WRITE_CRM")
+def import_history_preview():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    if Path(secure_filename(upload.filename)).suffix.lower() not in {".xlsx", ".csv"}:
+        return jsonify(error="Formato de archivo no permitido"), 400
+    try:
+        from ..services.import_history import preview
+        return jsonify(preview(upload))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        current_app.logger.exception("history import preview failed")
+        return jsonify(error=f"No se pudo leer la planilla: {exc}"), 400
+
+
+@api_bp.post("/imports/history")
+@require_permission("WRITE_CRM")
+def import_history_execute():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(error="Seleccione una planilla .xlsx o .csv"), 400
+    if Path(secure_filename(upload.filename)).suffix.lower() not in {".xlsx", ".csv"}:
+        return jsonify(error="Formato de archivo no permitido"), 400
+    try:
+        import json
+        from ..services.import_history import import_rows
+        mapping = json.loads(request.form.get("mapping") or "{}")
+        tenant = current_tenant()
+        user = current_user()
+        result = import_rows(upload, mapping, tenant, user)
+        _audit("IMPORT", "COMMERCIAL_HISTORY", tenant.id, result)
+        db.session.commit()
+        return jsonify(ok=True, **result)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("history import failed")
+        return jsonify(error=f"No se pudo importar la planilla: {exc}"), 400
 
 
 @api_bp.post("/companies/<int:company_id>/watch")
@@ -1800,7 +2313,7 @@ def opportunity_outcome(opportunity_id):
     if outcome in {"RESPONDED", "QUOTE_SENT", "WON", "LOST", "NO_FIT"}: opportunity.last_contact_at = datetime.now(timezone.utc)
     status_map = {"RESPONDED":"RESPONDEU", "QUOTE_SENT":"ORCAMENTO", "WON":"GANHO", "LOST":"PERDIDO", "NO_FIT":"DESCARTADO", "POSTPONED":"MONITORAMENTO", "FUTURE_PROJECT":"MONITORAMENTO"}
     if outcome in status_map: opportunity.status = status_map[outcome]
-    if opportunity.status in {"GANHO", "PERDIDO", "DESCARTADO"}: SalesTask.query.filter_by(opportunity_id=opportunity.id, status="PENDING").update({"status":"CANCELLED"})
+    _ensure_next_action(opportunity, status=opportunity.status)
     lead_readiness(opportunity)
     db.session.add(TimelineEvent(opportunity=opportunity, event_type="COMMERCIAL_RESULT", description=f"Resultado: {outcome}" + (f" · Motivo: {lost_reason}" if lost_reason else "")))
     db.session.commit(); return jsonify(opportunity.to_dict())
@@ -1822,6 +2335,78 @@ def bulk_actions():
         else: return jsonify(error="Acción masiva inválida"), 400
         lead_readiness(opportunity)
     db.session.commit(); return jsonify(updated=len(rows), action=action)
+
+
+@api_bp.get("/companies/global-search")
+def companies_global_search():
+    tenant = current_tenant()
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify(items=[])
+    like = f"%{q}%"
+    rows = Company.query.filter(
+        Company.tenant_id == tenant.id, Company.status == "ACTIVE",
+        or_(
+            Company.name.ilike(like), Company.legal_name.ilike(like), Company.ruc.ilike(like),
+            Company.registration_id.ilike(like), Company.domain.ilike(like), Company.website.ilike(like),
+            Company.email_business.ilike(like), Company.email.ilike(like),
+        )
+    ).order_by(Company.name.asc()).limit(20).all()
+    items=[]
+    for c in rows:
+        opp = Opportunity.query.join(Project).filter(Project.company_id == c.id, Opportunity.tenant_id == tenant.id).order_by(Opportunity.updated_at.desc()).first()
+        items.append({
+            "id": c.id, "name": c.name, "legalName": c.legal_name, "ruc": c.ruc or c.registration_id,
+            "domain": c.domain or c.website, "city": c.city, "sector": c.sector,
+            "status": opp.status if opp else None, "opportunityId": opp.id if opp else None,
+        })
+    return jsonify(items=items)
+
+
+@api_bp.get("/data-quality")
+def data_quality_dashboard():
+    tenant=current_tenant()
+    companies=Company.query.filter_by(tenant_id=tenant.id,status="ACTIVE").order_by(Company.name.asc()).all()
+    incomplete=[]; no_contact=[]; no_next=[]; duplicate_candidates=[]
+    seen={}
+    from ..services.entity_resolution import normalize_domain, normalize_name
+    for c in companies:
+        completeness, missing=company_completeness(c)
+        if completeness < 80:
+            incomplete.append({"id":c.id,"name":c.name,"completeness":completeness,"missing":missing})
+        active_contacts=Contact.query.filter_by(tenant_id=tenant.id,company_id=c.id,status="ACTIVE").count()
+        if not active_contacts and not (c.email_business or c.email or c.whatsapp or c.phone_business or c.phone):
+            no_contact.append({"id":c.id,"name":c.name})
+        ops=Opportunity.query.join(Project).filter(Project.company_id==c.id,Opportunity.tenant_id==tenant.id,~Opportunity.status.in_({"GANHO","PERDIDO","DESCARTADO"})).all()
+        if ops and not any(op.next_action_at for op in ops):
+            no_next.append({"id":c.id,"name":c.name,"opportunityIds":[op.id for op in ops]})
+        keys=[]
+        if c.ruc or c.registration_id: keys.append(("RUC", ''.join(ch for ch in (c.ruc or c.registration_id) if ch.isdigit())))
+        dom=normalize_domain(c.domain or c.website)
+        if dom: keys.append(("DOMINIO",dom))
+        nm=normalize_name(c.canonical_name or c.name)
+        if nm and len(nm)>=6: keys.append(("NOMBRE",nm))
+        for key in keys:
+            if not key[1]: continue
+            if key in seen and seen[key]["id"] != c.id:
+                duplicate_candidates.append({"keyType":key[0],"key":key[1],"companies":[seen[key],{"id":c.id,"name":c.name}]})
+            else: seen[key]={"id":c.id,"name":c.name}
+    return jsonify(summary={
+        "companies":len(companies),"incomplete":len(incomplete),"withoutContact":len(no_contact),
+        "withoutNextAction":len(no_next),"duplicateCandidates":len(duplicate_candidates),
+    }, incomplete=incomplete[:100], withoutContact=no_contact[:100], withoutNextAction=no_next[:100], duplicates=duplicate_candidates[:100])
+
+
+@api_bp.get("/audit-log")
+def audit_log_list():
+    tenant=current_tenant()
+    limit=min(max(int(request.args.get("limit",100)),1),300)
+    rows=AuditLog.query.filter_by(tenant_id=tenant.id).order_by(AuditLog.created_at.desc()).limit(limit).all()
+    users={u.id:u.name for u in User.query.filter_by(tenant_id=tenant.id).all()}
+    return jsonify(items=[{
+        "id":r.id,"action":r.action,"entityType":r.entity_type,"entityId":r.entity_id,"details":r.details or {},
+        "user":users.get(r.user_id,"Sistema"),"createdAt":r.created_at.isoformat() if r.created_at else None,
+    } for r in rows])
 
 
 @api_bp.get("/health")
