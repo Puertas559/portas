@@ -1,10 +1,14 @@
-const CACHE_VERSION = 'hg-radar-industrial-v16-6-technical-sales-v2-1';
+const CACHE_VERSION = 'hg-radar-industrial-v17-mobile-v1';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const STATIC_ASSETS = [
   '/static/pwa.css',
+  '/static/mobile.css',
+  '/static/mobile-runtime.js',
   '/static/pwa.js',
   '/static/technical-sales.css',
   '/static/technical-sales.js',
+  '/static/hub-events.css',
+  '/static/hub-events.js',
   '/static/hg-group-logo.png',
   '/static/pwa-icon-192.png',
   '/static/pwa-icon-512.png',
@@ -28,7 +32,6 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) { event.respondWith(fetch(request)); return; }
   if (url.pathname.startsWith('/static/')) {
-    // Network-first evita CSS/JS antigo após deploy; cache apenas como fallback offline.
     event.respondWith(fetch(request).then((response) => {
       if (response.ok) caches.open(STATIC_CACHE).then((cache) => cache.put(request, response.clone()));
       return response;
