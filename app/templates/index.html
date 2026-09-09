@@ -8,8 +8,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="description" content="Inteligencia comercial B2B de {{ brand.get('brand_name', tenant.name) }}">
   <title>Radar Industrial · {{ brand.get('brand_name', tenant.name) }}</title>
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260909-mobile-v1.3">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260909-mobile-v1.3">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v=20260909-mobile-v1.5">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=20260909-mobile-v1.5">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,9 +22,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v7.css') }}?v=20260824-v16.0">
 <link rel="stylesheet" href="{{ url_for('static', filename='v13.css') }}?v=20260824-v16.0">
-<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260909-mobile-v1.3">
-<link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}?v=20260909-mobile-v1.3">
-<link rel="stylesheet" href="{{ url_for('static', filename='smart-capture.css') }}?v=20260909-fesqua-v1.4-ocr">
+<link rel="stylesheet" href="{{ url_for('static', filename='pwa.css') }}?v=20260909-mobile-v1.5">
+<link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}?v=20260909-mobile-v1.5">
+<link rel="stylesheet" href="{{ url_for('static', filename='smart-capture.css') }}?v=20260909-fesqua-v1.5-qr-fast">
 </head>
 <body class="operation-{{ brand.get('theme','puertas') }}" data-language="{{ brand.get('language','es-PY') }}" data-radar-build="20260909-smart-capture-v1.3-external-first">
 <div class="app">
@@ -277,8 +277,8 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
   <div class="smart-capture-shell">
     <header class="smart-capture-head"><div><p>FESQUA 2026 · HENGJIE DOORS</p><h2>Captura rápida de contato</h2></div><button id="closeSmartCapture" class="smart-capture-close" type="button" aria-label="Fechar"><i class="bi bi-x-lg"></i></button></header>
     <div class="smart-capture-body">
-      <section class="capture-step active" data-step="1"><div class="capture-step-title"><i class="bi bi-person-vcard"></i><div><h3>1. Capture ou informe o contato</h3><p>Fotografe o cartão. A leitura automática preenche os dados; você só confere antes de avançar.</p></div></div>
-        <div class="card-capture-zone"><img id="cardPreview" class="card-preview" alt="Prévia do cartão"><div class="card-capture-actions"><label class="primary-camera"><i class="bi bi-camera-fill"></i> Tirar foto<input id="cardCameraInput" type="file" accept="image/*" capture="environment"></label><label><i class="bi bi-images"></i> Escolher foto<input id="cardGalleryInput" type="file" accept="image/*"></label></div><div class="ocr-progress" id="ocrStatus">Ou preencha os dados abaixo.</div><progress id="ocrProgress" max="100" value="0" hidden></progress></div>
+      <section class="capture-step active" data-step="1"><div class="capture-step-title"><i class="bi bi-person-vcard"></i><div><h3>1. Capture, leia um QR ou informe o contato</h3><p>Use a câmera com autofocus, leia um QR em tempo real ou escolha uma foto. O Radar prioriza os dados confiáveis e deixa o enriquecimento externo rodar em segundo plano.</p></div></div>
+        <div class="card-capture-zone"><img id="cardPreview" class="card-preview" alt="Prévia do cartão"><div class="card-capture-actions"><button id="openCardCamera" class="primary-camera" type="button"><i class="bi bi-camera-fill"></i> Fotografar cartão</button><button id="openQrScanner" class="qr-camera" type="button"><i class="bi bi-qr-code-scan"></i> Ler QR</button><label><i class="bi bi-images"></i> Escolher foto<input id="cardGalleryInput" type="file" accept="image/*"></label><input id="cardCameraInput" class="capture-native-input" type="file" accept="image/*" capture="environment"></div><div class="capture-speed-note"><i class="bi bi-lightning-charge-fill"></i><span>Fluxo rápido: contato primeiro, enriquecimento depois.</span></div><div class="ocr-progress" id="ocrStatus">Use a câmera, leia um QR ou preencha os dados abaixo.</div><progress id="ocrProgress" max="100" value="0" hidden></progress></div>
         <div class="capture-fields" style="margin-top:12px"><label>Nome<input data-card-field="name" autocomplete="name"></label><label>Cargo<input data-card-field="role"></label><label>Empresa<input data-card-field="company" autocomplete="organization"></label><label>E-mail<input data-card-field="email" type="email" autocomplete="email"></label><label>WhatsApp<input data-card-field="whatsapp" inputmode="tel" autocomplete="tel"></label><label>Telefone<input data-card-field="phone" inputmode="tel"></label><label>Site<input data-card-field="website" inputmode="url"></label><label>@ / Rede social<input data-card-field="social" placeholder="@empresa ou URL do perfil"></label><label>CNPJ / RUC<input data-card-field="registrationId"></label><label>Setor<input data-card-field="sector"></label><label>Cidade<input data-card-field="city"></label><label>Estado / Departamento<input data-card-field="department"></label><label>País<input data-card-field="country" value="Brasil"></label></div>
       </section>
       <section class="capture-step" data-step="2"><div class="capture-step-title"><i class="bi bi-shield-check"></i><div><h3>2. Confirme a identificação</h3><p>O Radar busca e enriquece em fontes externas primeiro. Só depois consulta o CRM para impedir que um registro já existente seja duplicado.</p></div></div><div id="captureDuplicateBanner" class="capture-confirm-banner">Verificando…</div><div id="captureReviewSummary" class="capture-message-preview"></div><button type="button" class="secondary-action" id="editCapturedData"><i class="bi bi-pencil"></i> Corrigir dados</button></section>
@@ -292,6 +292,12 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
       </div></section>
       <section class="capture-step" data-step="4"><div id="smartCaptureSuccess"></div></section>
     </div>
+    <div id="smartCameraOverlay" class="smart-camera-overlay" hidden>
+      <header class="smart-camera-head"><div><small id="smartCameraTitle">Fotografar cartão</small><strong id="smartCameraHint">Centralize o cartão e aguarde o foco.</strong></div><button id="closeSmartCamera" type="button" aria-label="Fechar câmera"><i class="bi bi-x-lg"></i></button></header>
+      <div class="smart-camera-stage"><video id="smartCameraVideo" autoplay playsinline muted></video><div class="smart-camera-guide"><span></span><b>mantenha dentro da moldura</b></div></div>
+      <div id="smartCameraStatus" class="smart-camera-status">Abrindo câmera…</div>
+      <div class="smart-camera-controls"><button id="smartCameraTorch" type="button" hidden><i class="bi bi-lightbulb"></i><span>Lanterna</span></button><button id="smartCameraCapture" class="capture-shutter" type="button"><span></span><b>Capturar</b></button></div>
+    </div>
     <footer class="capture-actions"><button id="smartCaptureBack" type="button" class="secondary"><i class="bi bi-arrow-left"></i> Voltar</button><button id="smartCaptureNext" type="button" class="primary">Continuar <i class="bi bi-arrow-right"></i></button><button id="smartCaptureSave" type="button" class="whatsapp" hidden><i class="bi bi-check2-circle"></i> Salvar e preparar WhatsApp</button></footer>
   </div>
 </dialog>
@@ -299,13 +305,13 @@ https://empresa2.com"></textarea><button class="primary" id="runBulkSiteAnalysis
 
 <div class="toast" id="toast"></div>
 <script nonce="{{ csp_nonce }}">window.RADAR_LEADS = {{ leads|tojson }}; window.DEMO_MODE = {{ demo_mode|tojson }}; window.RADAR_BRAND = {{ brand|tojson }}; window.RADAR_USER = {{ ({"id": user.id, "name": user.name, "email": user.email, "role": user.role} if user else None)|tojson }};</script>
-<script src="{{ url_for('static', filename='smart-capture.js') }}?v=20260909-fesqua-v1.4-ocr"></script>
-<script src="{{ url_for('static', filename='app.js') }}?v=20260909-fesqua-v1.4-ocr"></script>
+<script src="{{ url_for('static', filename='smart-capture.js') }}?v=20260909-fesqua-v1.5-qr-fast"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=20260909-fesqua-v1.5-qr-fast"></script>
 <script src="{{ url_for('static', filename='workspace.js') }}?v=20260824-v16.0"></script>
 <script src="{{ url_for('static', filename='dossier.js') }}?v=20260824-v16.0"></script>
 {% if user and user.role in ['ADMIN','GROUP_ADMIN'] %}<script src="{{ url_for('static', filename='admin.js') }}?v=20260824-v16.0"></script>{% endif %}
 <script src="{{ url_for('static', filename='ui-customizer.js') }}?v=20260824-v16.0"></script>
 <script src="{{ url_for('static', filename='operation-i18n.js') }}?v=20260824-v16.0"></script>
-<script src="{{ url_for('static', filename='mobile-runtime.js') }}?v=20260909-mobile-v1.3"></script>
-<script src="{{ url_for('static', filename='pwa.js') }}?v=20260909-mobile-v1.3"></script></body>
+<script src="{{ url_for('static', filename='mobile-runtime.js') }}?v=20260909-mobile-v1.5"></script>
+<script src="{{ url_for('static', filename='pwa.js') }}?v=20260909-mobile-v1.5"></script></body>
 </html>

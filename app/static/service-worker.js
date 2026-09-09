@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'hg-radar-industrial-v21-smart-capture-external-ocr-v1-4';
+const CACHE_VERSION = 'hg-radar-industrial-v22-smart-capture-qr-fast-v1-5';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const STATIC_ASSETS = [
   '/static/pwa.css',

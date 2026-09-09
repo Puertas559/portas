@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import csv
 import io
 import re
+import time
 from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlparse
@@ -1332,21 +1333,32 @@ def smart_capture_lookup():
 
 
 def _smart_parse_business_card_text(text_value):
-    """Extract common business-card fields from OCR text without trusting layout alone."""
+    """Extract business-card fields conservatively; prefer omission over a wrong value."""
     text_value = (text_value or "").replace("\r", "\n")
     lines = [re.sub(r"\s+", " ", line).strip(" |•·") for line in text_value.split("\n")]
     lines = [line for line in lines if line]
 
     email_match = re.search(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", text_value, re.I)
     email = email_match.group(0).strip(".,;:") if email_match else None
+    text_without_email = text_value
+    if email:
+        text_without_email = re.sub(re.escape(email), " ", text_without_email, flags=re.I)
 
-    url_matches = re.findall(r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.\-]+\.[a-z]{2,}(?:/[^\s]*)?", text_value, re.I)
+    url_matches = re.findall(r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.\-]+\.[a-z]{2,}(?:/[^\s]*)?", text_without_email, re.I)
     urls = []
     for raw in url_matches:
         value = raw.strip(".,;:()[]{}<>")
-        if "@" not in value and value.lower() != (email or "").lower() and value not in urls:
+        host = _smart_domain(value)
+        if host and "." in host and value not in urls:
             urls.append(value)
+
+    public_mail = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com", "uol.com.br", "terra.com.br"}
+    email_domain = _smart_domain(email) if email else None
     website = urls[0] if urls else None
+    website_derived = False
+    if not website and email_domain and email_domain not in public_mail:
+        website = f"https://{email_domain}"
+        website_derived = True
 
     phone_candidates = re.findall(r"(?:\+?\d[\d\s().\-]{6,}\d)", text_value)
     phones = []
@@ -1361,7 +1373,8 @@ def _smart_parse_business_card_text(text_value):
     ruc_match = re.search(r"(?:RUC\s*[:.-]?\s*)?(\d{5,10}-\d)\b", text_value, re.I)
     registration_id = cnpj_match.group(0) if cnpj_match else (ruc_match.group(1) if ruc_match else None)
 
-    social_match = re.search(r"(?<![\w@])@([A-Z0-9._-]{3,})", text_value, re.I)
+    social_text = text_without_email
+    social_match = re.search(r"(?<![\w@])@([A-Z0-9._-]{3,})", social_text, re.I)
     social = f"@{social_match.group(1)}" if social_match else None
     if not social:
         social_url = next((u for u in urls if any(h in u.lower() for h in ("instagram.com", "linkedin.com", "facebook.com", "tiktok.com"))), None)
@@ -1371,30 +1384,54 @@ def _smart_parse_business_card_text(text_value):
     noise = re.compile(r"(?:www\.|https?://|@|\b(?:tel|fone|phone|whatsapp|cel|mobile|email|e-mail|ruc|cnpj)\b)", re.I)
     role_line = next((line for line in lines if role_words.search(line) and not noise.search(line)), None)
 
+    def line_quality(line):
+        if not line:
+            return 0.0
+        allowed = sum(ch.isalpha() or ch.isspace() or ch in "-'&.," for ch in line)
+        letters = sum(ch.isalpha() for ch in line)
+        weird_ratio = 1 - (allowed / max(1, len(line)))
+        if weird_ratio > .22 or letters < 3:
+            return .1
+        words = [w for w in re.split(r"\s+", line) if w]
+        score = min(1.0, .45 + letters / max(8, len(line)) * .4)
+        if len(words) < 2:
+            score -= .18
+        if len(words) > 7:
+            score -= .15
+        if any(len(re.sub(r"[^A-Za-zÀ-ÿ]", "", w)) == 1 for w in words):
+            score -= .12
+        if len(words) == 2 and len(words[0]) <= 2 and words[1].isupper() and len(words[1]) <= 4:
+            score -= .25
+        return max(.05, min(.98, score))
+
     candidates = []
     for line in lines:
         if line == role_line or noise.search(line) or len(_smart_digits(line)) >= 6:
             continue
-        if 2 <= len(line) <= 90:
+        if 2 <= len(line) <= 90 and line_quality(line) >= .35:
             candidates.append(line)
 
     company_pattern = re.compile(r"\b(?:ltda|s\.?a\.?|sa\b|doors?|portas?|puertas?|ind[uú]str|group|grupo|technology|tecnolog|sistemas?|alum[ií]n|esquadr|company|co\.?\s*ltd|inc\.?|corp\.?|com[eé]rcio|comercial)\b", re.I)
     company_line = next((line for line in candidates if company_pattern.search(line)), None)
 
     name_line = None
+    name_conf = 0.0
     for line in candidates:
         if line == company_line:
             continue
         words = line.split()
-        letters = sum(ch.isalpha() for ch in line)
-        if 2 <= len(words) <= 6 and letters >= max(4, int(len(line) * .55)):
-            name_line = line
+        q = line_quality(line)
+        if 2 <= len(words) <= 6 and q >= .55:
+            name_line, name_conf = line, q
             break
 
     if not company_line:
-        company_line = next((line for line in candidates if line != name_line), None)
+        company_line = next((line for line in candidates if line != name_line and line_quality(line) >= .55), None)
+    company_conf = line_quality(company_line) if company_line else 0.0
+    if company_line and company_pattern.search(company_line):
+        company_conf = min(.96, company_conf + .18)
 
-    return {
+    fields = {
         "name": name_line,
         "role": role_line,
         "company": company_line,
@@ -1405,20 +1442,33 @@ def _smart_parse_business_card_text(text_value):
         "social": social,
         "registrationId": registration_id,
     }
+    confidence = {
+        "name": round(name_conf, 2),
+        "role": .78 if role_line else 0.0,
+        "company": round(company_conf, 2),
+        "email": .99 if email else 0.0,
+        "phone": .96 if phone else 0.0,
+        "whatsapp": .92 if phone else 0.0,
+        "website": .86 if website_derived else (.96 if website else 0.0),
+        "social": .88 if social else 0.0,
+        "registrationId": .98 if registration_id else 0.0,
+    }
+    return fields, confidence
 
 
 @api_bp.post("/smart-capture/card-read")
 def smart_capture_card_read():
-    """Fast server-side OCR for business cards; browser OCR remains a fallback."""
+    """Fast first-pass OCR. A second pass runs only when the first pass is insufficient."""
+    started = time.perf_counter()
     upload = request.files.get("card")
     if not upload or not upload.filename:
         return jsonify(error="Envie uma foto do cartão de visita"), 400
     extension = Path(secure_filename(upload.filename)).suffix.lower() or ".jpg"
     if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
         return jsonify(error="Formato de imagem não permitido"), 400
-    raw = upload.read(12 * 1024 * 1024 + 1)
-    if len(raw) > 12 * 1024 * 1024:
-        return jsonify(error="A imagem é muito grande. Use uma foto de até 12 MB."), 413
+    raw = upload.read(10 * 1024 * 1024 + 1)
+    if len(raw) > 10 * 1024 * 1024:
+        return jsonify(error="A imagem é muito grande. Use uma foto de até 10 MB."), 413
     if not raw:
         return jsonify(error="A imagem recebida está vazia"), 400
 
@@ -1427,34 +1477,70 @@ def smart_capture_card_read():
         import pytesseract
         image = Image.open(io.BytesIO(raw))
         image = ImageOps.exif_transpose(image).convert("RGB")
-        max_side = 2200
+        max_side = 1600
         if max(image.size) > max_side:
             ratio = max_side / max(image.size)
             image = image.resize((max(1, int(image.width * ratio)), max(1, int(image.height * ratio))))
         gray = ImageOps.grayscale(image)
         gray = ImageOps.autocontrast(gray, cutoff=1)
-        gray = ImageEnhance.Contrast(gray).enhance(1.35)
+        gray = ImageEnhance.Contrast(gray).enhance(1.25)
         gray = gray.filter(ImageFilter.SHARPEN)
 
-        attempts = []
-        for lang, psm in (("por+spa+eng", 6), ("por+spa+eng", 11), ("eng", 6)):
+        text_value = ""
+        try:
+            text_value = pytesseract.image_to_string(gray, lang="por+spa+eng", config="--oem 1 --psm 6", timeout=5).strip()
+        except Exception:
+            text_value = ""
+        enough = len(text_value) >= 20 and ("@" in text_value or len(re.findall(r"\d", text_value)) >= 8)
+        if not enough:
             try:
-                found = pytesseract.image_to_string(gray, lang=lang, config=f"--oem 1 --psm {psm}", timeout=10).strip()
-                if found:
-                    attempts.append(found)
-                if len(found) >= 24 and ("@" in found or len(re.findall(r"\d", found)) >= 8):
-                    break
+                fallback = pytesseract.image_to_string(gray, lang="por+spa+eng", config="--oem 1 --psm 11", timeout=5).strip()
+                if len(fallback) > len(text_value):
+                    text_value = fallback
             except Exception:
-                continue
-        text_value = max(attempts, key=len) if attempts else ""
+                pass
         if not text_value:
-            return jsonify(error="Não consegui ler texto suficiente no cartão. Tente aproximar a câmera, evitar reflexo e manter o cartão reto.", retryable=True), 422
-        fields = _smart_parse_business_card_text(text_value)
+            return jsonify(error="Não consegui ler texto suficiente. Aproxime o cartão, evite reflexo e mantenha-o dentro da moldura.", retryable=True), 422
+        fields, confidence = _smart_parse_business_card_text(text_value)
         detected = sum(1 for value in fields.values() if value)
-        return jsonify(ok=True, engine="SERVER_TESSERACT", detectedFields=detected, fields=fields, rawText=text_value[:5000])
+        low = [key for key, value in confidence.items() if fields.get(key) and value < .58]
+        return jsonify(
+            ok=True, engine="SERVER_TESSERACT_FAST", detectedFields=detected, fields=fields,
+            confidence=confidence, lowConfidence=low, rawText=text_value[:5000],
+            durationMs=round((time.perf_counter() - started) * 1000),
+        )
     except Exception as exc:
         current_app.logger.warning("Business-card OCR failed: %s", exc)
         return jsonify(error="A leitura automática do cartão falhou no servidor. O navegador tentará a leitura alternativa.", retryable=True), 503
+
+
+@api_bp.post("/smart-capture/qr-read")
+def smart_capture_qr_read():
+    """Decode a QR frame server-side as fallback for browsers without BarcodeDetector."""
+    started = time.perf_counter()
+    upload = request.files.get("frame")
+    if not upload:
+        return jsonify(error="Frame não recebido"), 400
+    raw = upload.read(3 * 1024 * 1024 + 1)
+    if not raw or len(raw) > 3 * 1024 * 1024:
+        return jsonify(error="Frame inválido"), 400
+    try:
+        from PIL import Image, ImageOps
+        from pyzbar.pyzbar import decode as zbar_decode
+        image = Image.open(io.BytesIO(raw))
+        image = ImageOps.exif_transpose(image).convert("L")
+        max_side = 900
+        if max(image.size) > max_side:
+            ratio = max_side / max(image.size)
+            image = image.resize((max(1, int(image.width * ratio)), max(1, int(image.height * ratio))))
+        codes = zbar_decode(image)
+        if not codes:
+            return jsonify(found=False, durationMs=round((time.perf_counter() - started) * 1000))
+        value = codes[0].data.decode("utf-8", errors="replace").strip()
+        return jsonify(found=True, value=value, format=(codes[0].type or "QRCODE"), durationMs=round((time.perf_counter() - started) * 1000))
+    except Exception as exc:
+        current_app.logger.debug("QR fallback failed: %s", exc)
+        return jsonify(found=False, error="Leitor QR indisponível"), 200
 
 
 @api_bp.post("/smart-capture/qualify")
@@ -1541,18 +1627,34 @@ def smart_capture_qualify():
                     "market": qualification.get("market"), "captureMethod": data.get("captureMethod") or "SMART_CAPTURE",
                     "representedBrand": "Hengjie Doors", "role": "Porta-voz para a América Latina"},
     ))
-    first_name = person_name.split()[0] if person_name else ""
-    interest_text = ", ".join(products[:3]) if products else "as possibilidades que conversamos"
+    # Never place an uncertain OCR name in a customer-facing message.
+    supplied_name = (contact_data.get("name") or "").strip()
+    clean_name = re.sub(r"[^A-Za-zÀ-ÿ' -]", "", supplied_name).strip()
+    name_words = [w for w in clean_name.split() if len(w) >= 2]
+    name_reliable = len(name_words) >= 2 and not (len(name_words) == 2 and len(name_words[0]) <= 2 and name_words[1].isupper())
+    first_name = name_words[0] if name_reliable else ""
+    greeting = f"Olá, *{first_name}*! Sou *David Granja*.\n" if first_name else "Olá! Sou *David Granja*.\n"
     presentation_url = (qualification.get("presentationUrl") or "").strip()
     material_line = f"\n\n*Apresentação Hengjie Doors:* {presentation_url}" if presentation_url else ""
+    if products:
+        interest_text = ", ".join(products[:3])
+        continuation = (
+            f"Conforme conversamos sobre *{interest_text}*, vou lhe encaminhar o material da *Hengjie Doors* "
+            "para que possamos dar continuidade à nossa conversa."
+        )
+    else:
+        continuation = (
+            "Conforme nossa conversa, vou lhe encaminhar o material da *Hengjie Doors* "
+            "para que possamos dar continuidade."
+        )
     whatsapp_message = (
-        f"Olá, *{first_name}*! Sou *David Granja*.\n"
-        "Foi um prazer conversar com você na *FESQUA*.\n\n"
-        "Represento um *Hub Industrial* e atuo como *porta-voz da Hengjie Doors para a América Latina*, "
-        "trabalhando no desenvolvimento comercial da marca e na aproximação com clientes e parceiros da região.\n\n"
-        f"Conforme conversamos sobre *{interest_text}*, vou lhe encaminhar o material da *Hengjie Doors* "
-        "para que possamos dar continuidade à nossa conversa."
-        f"{material_line}\n\nUm abraço e uma excelente feira!"
+        greeting
+        + "Foi um prazer conversar com você na *FESQUA*.\n\n"
+        + "Represento um *Hub Industrial* e atuo como *porta-voz da Hengjie Doors para a América Latina*, "
+          "trabalhando no desenvolvimento comercial da marca e na aproximação com clientes e parceiros da região.\n\n"
+        + continuation
+        + material_line
+        + "\n\nUm abraço e uma excelente feira!"
     )
     _audit("SMART_CAPTURE", "CONTACT", contact.id, {"company_id": company.id, "event": event_name, "opportunity_id": opportunity.id})
     db.session.commit()
